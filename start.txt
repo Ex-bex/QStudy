@@ -1,0 +1,8 @@
+Frontend:
+C:\Users\PC\Desktop\studyhub>npx create-next-app@latest frontend --typescript --app --tailwind
+C:\Users\PC\Desktop\studyhub\frontend>npm install lucide-react react-markdown
+C:\Users\PC\Desktop\studyhub\frontend>npm run dev
+Backend:
+C:\Users\PC\Desktop\studyhub>cd backend
+C:\Users\PC\Desktop\studyhub\backend>pip install -r requirements.txt
+C:\Users\PC\Desktop\studyhub\backend>uvicorn app.main:app --reload

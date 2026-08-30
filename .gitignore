@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Данные
+backend/*.db
+backend/uploads/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Мусор
+.DS_Store
+*.log
