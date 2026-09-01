@@ -38,12 +38,14 @@ MEDIA_MIME = {
               "avi": ["video/avi"], "mkv": ["video/x-matroska"], "webm": ["video/webm"]},
 }
 
+
 def _ext(path: str) -> str:
     return path.rsplit(".", 1)[-1].lower()
 
 def detect_type(filename: str) -> str:
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     return ALLOWED.get(ext, "other")
+
 
 @router.post("/upload")
 async def upload_file(
@@ -74,12 +76,16 @@ async def upload_file(
     db.refresh(material)
     return material
 
+
 @router.get("")
 def list_files(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    return db.query(Material).filter(Material.user_id == user.id) \ .order_by(Material.created_at.desc()).all()
+    return db.query(Material).filter(Material.user_id == user.id) \
+             .order_by(Material.created_at.desc()).all()
+
 
 @router.delete("/{material_id}")
-def delete_file(material_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def delete_file(material_id: int, db: Session = Depends(get_db),
+                user=Depends(get_current_user)):
     material = db.query(Material).filter(
         Material.id == material_id, Material.user_id == user.id).first()
     if not material:
@@ -91,7 +97,8 @@ def delete_file(material_id: int, db: Session = Depends(get_db), user=Depends(ge
     return {"ok": True}
 
 @router.get("/{material_id}/download")
-def download_file(material_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def download_file(material_id: int, db: Session = Depends(get_db),
+                  user=Depends(get_current_user)):
     material = db.query(Material).filter(
         Material.id == material_id, Material.user_id == user.id).first()
     if not material:
@@ -99,7 +106,8 @@ def download_file(material_id: int, db: Session = Depends(get_db), user=Depends(
     return FileResponse(material.filepath, filename=material.filename)
 
 @router.post("/{material_id}/process")
-async def process_material(material_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+async def process_material(material_id: int, db: Session = Depends(get_db),
+                           user=Depends(get_current_user)):
     material = db.query(Material).filter(
         Material.id == material_id, Material.user_id == user.id).first()
     if not material:
@@ -112,7 +120,8 @@ async def process_material(material_id: int, db: Session = Depends(get_db), user
             mimes = MEDIA_MIME.get(material.file_type, {}).get(_ext(material.filepath), [])
             if not mimes:
                 raise HTTPException(400, "Неизвестный медиаформат")
-            text = await analyze_media(MEDIA_PROMPTS[material.file_type], material.filepath, mimes)
+            text = await analyze_media(MEDIA_PROMPTS[material.file_type],
+                                       material.filepath, mimes)
         else:
             text = extract_document(material.filepath, material.file_type)
     except AIError as e:
@@ -128,7 +137,8 @@ async def process_material(material_id: int, db: Session = Depends(get_db), user
     return {"ok": True, "chars": len(text)}
 
 @router.get("/{material_id}/text")
-def get_extracted_text(material_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def get_extracted_text(material_id: int, db: Session = Depends(get_db),
+                       user=Depends(get_current_user)):
     material = db.query(Material).filter(
         Material.id == material_id, Material.user_id == user.id).first()
     if not material:

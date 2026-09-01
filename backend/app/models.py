@@ -3,12 +3,14 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
 
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False) # type: ignore
     created_at = Column(DateTime, default=datetime.utcnow) # type: ignore
+
 
 class Subject(Base):
     __tablename__ = "subjects"
@@ -20,6 +22,7 @@ class Subject(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     topics = relationship("Topic", back_populates="subject", cascade="all, delete-orphan")
 
+
 class Topic(Base):
     __tablename__ = "topics"
     id = Column(Integer, primary_key=True, index=True)
@@ -29,8 +32,10 @@ class Topic(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     subject = relationship("Subject", back_populates="topics")
 
+
 class Material(Base):
     __tablename__ = "materials"
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True)
@@ -43,8 +48,10 @@ class Material(Base):
     processed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 class Note(Base):
     __tablename__ = "notes"
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True)
@@ -54,8 +61,10 @@ class Note(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
 class Task(Base):
     __tablename__ = "tasks"
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True)
@@ -68,25 +77,34 @@ class Task(Base):
     user_answer = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     title = Column(String, default="Новый чат")
     created_at = Column(DateTime, default=datetime.utcnow)
-    messages = relationship("ChatMessage", back_populates="session",cascade="all, delete-orphan")
+
+    messages = relationship("ChatMessage", back_populates="session",
+                            cascade="all, delete-orphan")
+
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
+
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("chat_sessions.id"))
     role = Column(String)
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
     session = relationship("ChatSession", back_populates="messages")
+
 
 class ExamSession(Base):
     __tablename__ = "exam_sessions"
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True)
@@ -96,10 +114,15 @@ class ExamSession(Base):
     summary = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     finished_at = Column(DateTime, nullable=True)
-    questions = relationship("ExamQuestion", back_populates="session", cascade="all, delete-orphan", order_by="ExamQuestion.order")
+
+    questions = relationship("ExamQuestion", back_populates="session",
+                             cascade="all, delete-orphan",
+                             order_by="ExamQuestion.order")
+
 
 class ExamQuestion(Base):
     __tablename__ = "exam_questions"
+
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("exam_sessions.id"))
     order = Column(Integer, default=0)
@@ -110,10 +133,13 @@ class ExamQuestion(Base):
     score = Column(Integer, default=0)
     feedback = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+
     session = relationship("ExamSession", back_populates="questions")
+
 
 class Flashcard(Base):
     __tablename__ = "flashcards"
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True)

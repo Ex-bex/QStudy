@@ -14,6 +14,7 @@ const DIFFS = [
   { value: "hard", label: "Сложно" },
 ];
 
+
 const STATUS: Record<string, { text: string; cls: string }> = {
   new: { text: "Новая", cls: "bg-gray-700/60 text-gray-300" },
   solved: { text: "Верно", cls: "bg-green-500/20 text-green-300" },
@@ -306,7 +307,7 @@ if (res.tasks[0]) selectTask(res.tasks[0]);      if (created[0]) selectTask(crea
     <MessageSquare className="h-4 w-4" /> Спросить ИИ
   </button>
   {/* дальше твой существующий блок {feedback && (...)} */}
-
+                
                 {feedback && (
                   <>
                     <button

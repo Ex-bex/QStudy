@@ -13,20 +13,24 @@ from app.services.ai import generate_content, AIError
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
+
 class GenerateRequest(BaseModel):
     subject_id: int
     topic_id: Optional[int] = None
     difficulty: str = "medium"   # easy / medium / hard
     count: int = 5
 
+
 class AnswerRequest(BaseModel):
     answer: str
+
 
 def parse_json(raw: str):
     raw = raw.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.S)
     return json.loads(raw)
+
 
 def task_public(t: Task) -> dict:
     # Эталонный answer НЕ отдаём клиенту — чтобы решать честно
@@ -36,6 +40,7 @@ def task_public(t: Task) -> dict:
         "user_answer": t.user_answer, "subject_id": t.subject_id,
         "topic_id": t.topic_id, "created_at": str(t.created_at),
     }
+
 
 @router.post("/generate")
 async def generate_tasks(data: GenerateRequest, db: Session = Depends(get_db),
@@ -89,24 +94,24 @@ async def generate_tasks(data: GenerateRequest, db: Session = Depends(get_db),
 
     if context:
         prompt += f"""
-    Составь {count} задач или вопросов уровня «{data.difficulty}» СТРОГО по материалам студента ниже.
-    Не задавай вопросов по темам, которых нет в материалах. Формы разнообразь: определения,
-    «почему», «сравни», расчёты, мини-кейсы — но каждый вопрос должен быть ответим ИЗ этих материалов.
+Составь {count} задач или вопросов уровня «{data.difficulty}» СТРОГО по материалам студента ниже.
+Не задавай вопросов по темам, которых нет в материалах. Формы разнообразь: определения,
+«почему», «сравни», расчёты, мини-кейсы — но каждый вопрос должен быть ответим ИЗ этих материалов.
 
-    МАТЕРИАЛЫ СТУДЕНТА:
-    {context}
-    """
-        else:
+МАТЕРИАЛЫ СТУДЕНТА:
+{context}
+"""
+    else:
         prompt += f"""
-    Составь {count} задач или вопросов уровня «{data.difficulty}» для проверки знаний студента.
-    Материалов у студента нет — используй свои знания по предмету.
-    Формы разнообразь: определения, «почему», расчёты, мини-кейсы — где уместно.
-    """
+Составь {count} задач или вопросов уровня «{data.difficulty}» для проверки знаний студента.
+Материалов у студента нет — используй свои знания по предмету.
+Формы разнообразь: определения, «почему», расчёты, мини-кейсы — где уместно.
+"""
 
-        prompt += """
-    Верни СТРОГО JSON-массив, без текста вокруг:
-    [{"question": "текст вопроса", "answer": "эталонный ответ с объяснением", "hint": "подсказка, не раскрывающая ответ"}]
-    """
+    prompt += """
+Верни СТРОГО JSON-массив, без текста вокруг:
+[{"question": "текст вопроса", "answer": "эталонный ответ с объяснением", "hint": "подсказка, не раскрывающая ответ"}]
+"""
 
     try:
         raw = await generate_content(prompt, json_mode=True)
@@ -168,7 +173,13 @@ async def answer_task(task_id: int, data: AnswerRequest, db: Session = Depends(g
     task.status = {"correct": "solved", "partial": "partial", "wrong": "failed"}[verdict]
     db.commit()
     db.refresh(task)
-    return {"task": task_public(task),"verdict": verdict,"score": int(result.get("score", 0)), "feedback": result.get("feedback", ""),}
+    return {
+        "task": task_public(task),
+        "verdict": verdict,
+        "score": int(result.get("score", 0)),
+        "feedback": result.get("feedback", ""),
+    }
+
 
 @router.get("")
 def list_tasks(subject_id: Optional[int] = None, db: Session = Depends(get_db),
@@ -177,6 +188,7 @@ def list_tasks(subject_id: Optional[int] = None, db: Session = Depends(get_db),
     if subject_id:
         q = q.filter(Task.subject_id == subject_id)
     return [task_public(t) for t in q.order_by(Task.id.desc()).all()]
+
 
 @router.delete("/{task_id}")
 def delete_task(task_id: int, db: Session = Depends(get_db),

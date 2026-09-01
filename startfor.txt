@@ -1,0 +1,13 @@
+Терминал 1: cd backend → uvicorn app.main:app --reload
+Терминал 2: cd frontend → npm run dev
+Терминал 3: .\cloudflared.exe tunnel --url http://localhost:3000   → адрес для друзей
+Терминал 4: .\cloudflared.exe tunnel --url http://localhost:8000   → адрес для API
+Терминал 5 (или перезапуск терминала 2): set NEXT_PUBLIC_API_URL=... → npm run dev
++ вписать адрес фронта в CORS_ORIGINS в .env → перезапуск uvicorn
+
+
+
+
+
+DRUGOE:
+cloudflared.exe service install eyJhIjoiNjFkNGJlZGVlZDA2YTkxZjg1NWZjZWMzMTVjZTUwYzUiLCJ0IjoiMzliOTA5ZDctNTNhYS00NmFlLWFjZGMtMWMxMTA1YTZmYmZlIiwicyI6Ik5XTmtOakF3TlRjdE9HRTJaaTAwTTJNNUxXRTNNakF0TlRJeE5tUXlaalJqTVRFeSJ9

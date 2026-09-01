@@ -7,6 +7,7 @@ from app.auth import get_current_user
 
 router = APIRouter(prefix="/search", tags=["search"])
 
+
 def _snippet(text: str, q: str, width: int = 120) -> str:
     idx = text.lower().find(q.lower())
     if idx == -1:
@@ -14,6 +15,7 @@ def _snippet(text: str, q: str, width: int = 120) -> str:
     start = max(0, idx - width // 2)
     end = min(len(text), idx + len(q) + width // 2)
     return ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
+
 
 @router.get("")
 def search(q: str = Query(..., min_length=2), db: Session = Depends(get_db),

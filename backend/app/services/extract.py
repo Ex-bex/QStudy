@@ -1,7 +1,9 @@
 MAX_CHARS = 150_000  # предохранитель от гигантских файлов
 
+
 def _clip(text: str) -> str:
     return text[:MAX_CHARS]
+
 
 def extract_pdf(path: str) -> str:
     import fitz  # pymupdf
@@ -10,6 +12,7 @@ def extract_pdf(path: str) -> str:
         for page in doc:
             parts.append(page.get_text("text"))
     return _clip("\n\n".join(parts))
+
 
 def extract_docx(path: str) -> str:
     from docx import Document
@@ -20,6 +23,7 @@ def extract_docx(path: str) -> str:
             cells = [c.text.strip() for c in row.cells]
             parts.append(" | ".join(cells))
     return _clip("\n".join(parts))
+
 
 def extract_xlsx(path: str) -> str:
     from openpyxl import load_workbook
@@ -37,6 +41,7 @@ def extract_xlsx(path: str) -> str:
     wb.close()
     return _clip("\n".join(parts))
 
+
 def extract_pptx(path: str) -> str:
     from pptx import Presentation
     prs = Presentation(path)
@@ -50,6 +55,7 @@ def extract_pptx(path: str) -> str:
                     parts.append(txt)
     return _clip("\n".join(parts))
 
+
 def extract_txt(path: str) -> str:
     raw = open(path, "rb").read()
     for enc in ("utf-8", "cp1251"):  # вторая — на случай старых файлов с винды
@@ -58,6 +64,7 @@ def extract_txt(path: str) -> str:
         except UnicodeDecodeError:
             continue
     return _clip(raw.decode("utf-8", errors="replace"))
+
 
 def extract_document(path: str, file_type: str) -> str:
     if file_type == "pdf":

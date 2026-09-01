@@ -73,14 +73,16 @@ def session_public(s: ExamSession, reveal: bool = False) -> dict:
 
 
 def _owned(db: Session, session_id: int, user) -> ExamSession:
-    s = db.query(ExamSession).filter(ExamSession.id == session_id, ExamSession.user_id == user.id).first()
+    s = db.query(ExamSession).filter(
+        ExamSession.id == session_id, ExamSession.user_id == user.id).first()
     if not s:
         raise HTTPException(404, "Экзамен не найден")
     return s
 
 
 @router.post("/start")
-async def start_exam(data: StartRequest, db: Session = Depends(get_db), user=Depends(get_current_user)):
+async def start_exam(data: StartRequest, db: Session = Depends(get_db),
+                     user=Depends(get_current_user)):
     subject = db.query(Subject).filter(
         Subject.id == data.subject_id, Subject.user_id == user.id).first()
     if not subject:

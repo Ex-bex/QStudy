@@ -40,9 +40,11 @@ _STOPWORDS = {
     "что", "чем", "так", "там", "тут",
 }
 
+
 def _tokenize(text: str) -> set:
     words = re.findall(r"[a-zа-яё0-9]{3,}", text.lower())
     return {w for w in words if w not in _STOPWORDS}
+
 
 def _chunkify(text: str) -> list:
     if not text:
@@ -54,7 +56,9 @@ def _chunkify(text: str) -> list:
         start += CHUNK_SIZE - CHUNK_OVERLAP
     return chunks
 
+
 _cache: dict = {}  # (kind, id) -> (len_text, [(chunk, tokens), ...])
+
 
 def _cached_chunks(kind: str, obj_id: int, text: str):
     key = (kind, obj_id)
@@ -64,6 +68,7 @@ def _cached_chunks(kind: str, obj_id: int, text: str):
     items = [(ch, _tokenize(ch)) for ch in _chunkify(text)]
     _cache[key] = (len(text), items)
     return items
+
 
 def search_context(db: Session, user_id: int, query: str) -> str:
     """Простой RAG: ищем куски файлов и заметок с пересечением ключевых слов."""
@@ -77,6 +82,7 @@ FILE_INTENT_WORDS = (
     "лекци", "конспект", "прочитай", "изучи", "загрузил", "загрузила",
     "посмотри", "что это", "о чём",
 )
+
 
 def materials_overview(db: Session, user_id: int) -> str:
     """Краткий обзор всех материалов — когда вопрос про файлы, но поиск не сработал."""
@@ -119,6 +125,7 @@ def materials_overview(db: Session, user_id: int) -> str:
     parts = [f"[Источник: {src}]\n{chunk}" for _, src, chunk in scored[:TOP_K]]
     return "\n\n---\n\n".join(parts)
 
+
 def _session_owned(db: Session, session_id: int, user) -> ChatSession:
     s = db.query(ChatSession).filter(
         ChatSession.id == session_id, ChatSession.user_id == user.id).first()
@@ -126,10 +133,12 @@ def _session_owned(db: Session, session_id: int, user) -> ChatSession:
         raise HTTPException(404, "Чат не найден")
     return s
 
+
 @router.get("/sessions")
 def list_sessions(db: Session = Depends(get_db), user=Depends(get_current_user)):
     return db.query(ChatSession).filter(
         ChatSession.user_id == user.id).order_by(ChatSession.id.desc()).all()
+
 
 @router.delete("/sessions/{session_id}")
 def delete_session(session_id: int, db: Session = Depends(get_db),
@@ -138,7 +147,7 @@ def delete_session(session_id: int, db: Session = Depends(get_db),
     db.delete(s)
     db.commit()
     return {"ok": True}
-``
+
 
 @router.get("/sessions/{session_id}/messages")
 def get_messages(session_id: int, db: Session = Depends(get_db),
@@ -147,11 +156,12 @@ def get_messages(session_id: int, db: Session = Depends(get_db),
     return db.query(ChatMessage).filter(
         ChatMessage.session_id == session_id).order_by(ChatMessage.id).all()
 
+
 class SendRequest(BaseModel):
     session_id: Optional[int] = None
     message: str
     context: Optional[dict] = None
-
+    
 @router.post("/send")
 async def send_message(data: SendRequest, db: Session = Depends(get_db), user=Depends(get_current_user)):
     text = data.message.strip()
@@ -253,6 +263,7 @@ async def send_message(data: SendRequest, db: Session = Depends(get_db), user=De
         "user_message": user_msg,
         "assistant_message": ai_msg,
     }
+
 
 @router.post("/transcribe")
 async def transcribe_voice(file: UploadFile = File(...),

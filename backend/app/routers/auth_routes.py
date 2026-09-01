@@ -8,9 +8,11 @@ from app.auth import hash_password, verify_password, create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+
 class RegisterData(BaseModel):
     email: EmailStr
     password: str
+
 
 @router.post("/register")
 def register(data: RegisterData, db: Session = Depends(get_db)):
@@ -21,6 +23,7 @@ def register(data: RegisterData, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return {"id": user.id, "email": user.email, "token": create_access_token(user.id)}
+
 
 @router.post("/login")
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):

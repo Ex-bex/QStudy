@@ -8,11 +8,13 @@ from app.auth import get_current_user
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
+
 class NoteCreate(BaseModel):
     title: str = "Без названия"
     content: str = ""
     subject_id: Optional[int] = None
     topic_id: Optional[int] = None
+
 
 class NoteUpdate(BaseModel):
     title: Optional[str] = None
@@ -20,10 +22,12 @@ class NoteUpdate(BaseModel):
     subject_id: Optional[int] = None
     topic_id: Optional[int] = None
 
+
 @router.get("")
 def list_notes(db: Session = Depends(get_db), user=Depends(get_current_user)):
     return db.query(Note).filter(Note.user_id == user.id) \
              .order_by(Note.updated_at.desc()).all()
+
 
 @router.post("")
 def create_note(data: NoteCreate, db: Session = Depends(get_db),
@@ -33,6 +37,7 @@ def create_note(data: NoteCreate, db: Session = Depends(get_db),
     db.commit()
     db.refresh(note)
     return note
+
 
 @router.patch("/{note_id}")
 def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db),
@@ -45,6 +50,7 @@ def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db),
     db.commit()
     db.refresh(note)
     return note
+
 
 @router.delete("/{note_id}")
 def delete_note(note_id: int, db: Session = Depends(get_db),

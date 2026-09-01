@@ -6,16 +6,20 @@ from app.config import settings
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com"
 GEMINI_URL = GEMINI_BASE + "/v1beta/models/{model}:generateContent"
+
 RETRYABLE = {429, 500, 502, 503}
+
 
 class AIError(Exception):
     pass
+
 
 def _extract_text(data: dict) -> str:
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError):
         raise AIError("Gemini вернул пустой ответ")
+
 
 async def _post_gemini(payload: dict, timeout: int = 120) -> dict:
     """POST к Gemini с авто-повторами при перегрузке (429/5xx)."""
@@ -26,7 +30,11 @@ async def _post_gemini(payload: dict, timeout: int = 120) -> dict:
     for attempt in range(3):
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(GEMINI_URL.format(model=settings.GEMINI_MODEL), headers={"x-goog-api-key": settings.GEMINI_API_KEY}, json=payload,)
+                resp = await client.post(
+                    GEMINI_URL.format(model=settings.GEMINI_MODEL),
+                    headers={"x-goog-api-key": settings.GEMINI_API_KEY},
+                    json=payload,
+                )
             if resp.status_code == 200:
                 return resp.json()
             if resp.status_code in RETRYABLE:
@@ -60,7 +68,8 @@ async def chat_completion(system: str, contents: list) -> str:
     return _extract_text(await _post_gemini(payload))
 
 
-AUDIO_MIME = {"webm": "audio/webm", "ogg": "audio/ogg", "mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4"}
+AUDIO_MIME = {"webm": "audio/webm", "ogg": "audio/ogg", "mp3": "audio/mpeg",
+              "wav": "audio/wav", "m4a": "audio/mp4"}
 
 
 async def transcribe_audio(filepath: str) -> str:

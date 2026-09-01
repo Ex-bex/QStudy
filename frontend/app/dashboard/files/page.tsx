@@ -206,7 +206,7 @@ function copyText() {
     <Sparkles className="h-3.5 w-3.5" /> Обработать ИИ
   </button>
 )}
-
+              
               <button onClick={() => deleteFile(f.id)} className="text-gray-500 hover:text-red-400">
                 <Trash2 className="h-4 w-4" />
               </button>

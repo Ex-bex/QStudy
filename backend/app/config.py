@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
-CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001"
+
+
 class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
@@ -11,5 +12,6 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
 
 settings = Settings()

@@ -14,19 +14,23 @@ from app.services.ai import generate_content, AIError
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
+
 class GenerateRequest(BaseModel):
     subject_id: int
     topic_id: Optional[int] = None
     count: int = 10
 
+
 class ReviewRequest(BaseModel):
     quality: int  # 0-2: 0 = забыл, 1 = с трудом, 2 = помню
+
 
 def parse_json(raw: str):
     raw = raw.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.S)
     return json.loads(raw)
+
 
 def card_public(c: Flashcard) -> dict:
     return {
@@ -35,6 +39,7 @@ def card_public(c: Flashcard) -> dict:
         "interval": c.interval, "repetitions": c.repetitions,
         "next_review": str(c.next_review), "created_at": str(c.created_at),
     }
+
 
 def sm2(card: Flashcard, quality: int):
     """Алгоритм SM-2 (упрощённый Anki).
@@ -59,6 +64,7 @@ def sm2(card: Flashcard, quality: int):
     card.ease_factor = max(1.3, card.ease_factor + (0.1 if quality == 2 else -0.2 if quality == 0 else 0))
     card.next_review = datetime.utcnow() + timedelta(days=card.interval)
     return card
+
 
 @router.post("/generate")
 async def generate_cards(data: GenerateRequest, db: Session = Depends(get_db),
@@ -129,6 +135,7 @@ async def generate_cards(data: GenerateRequest, db: Session = Depends(get_db),
     db.commit()
     return [card_public(c) for c in created]
 
+
 @router.get("/due")
 def due_cards(subject_id: Optional[int] = None, db: Session = Depends(get_db),
               user=Depends(get_current_user)):
@@ -142,6 +149,7 @@ def due_cards(subject_id: Optional[int] = None, db: Session = Depends(get_db),
     cards = q.order_by(Flashcard.next_review).limit(50).all()
     return [card_public(c) for c in cards]
 
+
 @router.get("/stats")
 def stats(db: Session = Depends(get_db), user=Depends(get_current_user)):
     total = db.query(Flashcard).filter(Flashcard.user_id == user.id).count()
@@ -150,6 +158,7 @@ def stats(db: Session = Depends(get_db), user=Depends(get_current_user)):
         Flashcard.next_review <= datetime.utcnow(),
     ).count()
     return {"total": total, "due": due}
+
 
 @router.post("/{card_id}/review")
 def review_card(card_id: int, data: ReviewRequest, db: Session = Depends(get_db),
@@ -168,6 +177,7 @@ def review_card(card_id: int, data: ReviewRequest, db: Session = Depends(get_db)
         "card": card_public(card),
         "next_in_days": card.interval,
     }
+
 
 @router.delete("/{card_id}")
 def delete_card(card_id: int, db: Session = Depends(get_db),
