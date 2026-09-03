@@ -1,11 +1,13 @@
 "use client";
-import { setActivity } from "@/lib/context";
+
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { setActivity } from "@/lib/context";
 import type { ExamSession, Subject, Topic } from "@/types";
 import {
   GraduationCap, Loader2, Mic, Square, Send, Volume2, VolumeX,
-  ChevronRight, CheckCircle2, XCircle, AlertCircle, RotateCcw,
+  ChevronRight, CheckCircle2, XCircle, AlertCircle, RotateCcw, MessageSquare,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
@@ -18,11 +20,13 @@ const VERDICT_UI: Record<string, { text: string; cls: string; icon: any }> = {
 const MAX_RECORD_SEC = 120;
 
 export default function ExamPage() {
-  // Настройка
+  const router = useRouter();
+
+  // Выбор предметов/тем
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [subjectId, setSubjectId] = useState("");
-  const [topicId, setTopicId] = useState("");
+  const [allTopics, setAllTopics] = useState<Topic[]>([]);
+  const [selSubjects, setSelSubjects] = useState<number[]>([]);
+  const [selTopics, setSelTopics] = useState<number[]>([]);
   const [difficulty, setDifficulty] = useState("medium");
   const [count, setCount] = useState(5);
   const [history, setHistory] = useState<ExamSession[]>([]);
@@ -50,8 +54,18 @@ export default function ExamPage() {
   const current = unanswered[0] ?? null;
   const answeredCount = (exam?.questions.length ?? 0) - unanswered.length;
 
+  // Загрузка: все предметы + все их темы разом
   useEffect(() => {
-    api<Subject[]>("/subjects").then(setSubjects).catch(() => {});
+    (async () => {
+      const subs = await api<Subject[]>("/subjects");
+      setSubjects(subs);
+      const maps: Topic[] = [];
+      for (const s of subs) {
+        const ts = await api<Topic[]>(`/subjects/${s.id}/topics`);
+        maps.push(...ts);
+      }
+      setAllTopics(maps);
+    })().catch(() => {});
     loadHistory();
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -59,13 +73,7 @@ export default function ExamPage() {
     };
   }, []);
 
-  useEffect(() => {
-    setTopicId("");
-    if (!subjectId) { setTopics([]); return; }
-    api<Topic[]>(`/subjects/${subjectId}/topics`).then(setTopics).catch(() => {});
-  }, [subjectId]);
-
-  // Проговариваем текущий вопрос вслух
+  // Озвучка текущего вопроса
   useEffect(() => {
     if (!exam || exam.status !== "active") {
       window.speechSynthesis?.cancel();
@@ -80,16 +88,23 @@ export default function ExamPage() {
     }
   }, [current?.id, soundOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Контекст для чата
+  useEffect(() => {
+    const names = subjects
+      .filter((s) => selSubjects.includes(s.id))
+      .map((s) => s.name)
+      .join(", ");
+    setActivity({
+      page: "exam",
+      subject: names || undefined,
+      exam_question: exam?.status === "active" ? current?.question ?? null : null,
+    });
+  }, [exam?.id, current?.id, selSubjects, subjects]);
+
   async function loadHistory() {
     api<ExamSession[]>("/exam").then(setHistory).catch(() => {});
   }
-useEffect(() => {
-  setActivity({
-    page: "exam",
-    subject: subjects.find((s) => s.id === Number(subjectId))?.name,
-    exam_question: exam?.status === "active" ? current?.question ?? null : null,
-  });
-}, [exam?.id, current?.id, subjectId, subjects]);
+
   function speakQuestion(text: string) {
     if (!soundOn) return;
     window.speechSynthesis.cancel();
@@ -99,16 +114,36 @@ useEffect(() => {
     window.speechSynthesis.speak(u);
   }
 
+  function toggleSubject(id: number) {
+    setSelSubjects((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      // При снятии предмета — убрать и его темы
+      const removed = prev.filter((x) => !next.includes(x));
+      if (removed.length) {
+        const goneTopics = allTopics
+          .filter((t) => removed.includes(t.subject_id))
+          .map((t) => t.id);
+        setSelTopics((tp) => tp.filter((x) => !goneTopics.includes(x)));
+      }
+      return next;
+    });
+  }
+
+  function toggleTopic(id: number) {
+    setSelTopics((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+
   async function start() {
-    if (!subjectId) { setError("Выбери предмет"); return; }
+    if (selSubjects.length === 0) { setError("Выбери хотя бы один предмет"); return; }
     setError("");
     setStarting(true);
     try {
       const s = await api<ExamSession>("/exam/start", {
         method: "POST",
         body: JSON.stringify({
-          subject_id: Number(subjectId),
-          topic_id: topicId ? Number(topicId) : null,
+          subject_ids: selSubjects,
+          topic_ids: selTopics.length ? selTopics : null,
           difficulty,
           count,
         }),
@@ -248,7 +283,7 @@ useEffect(() => {
                 <GraduationCap className="h-6 w-6 text-indigo-400" /> Экзамен
               </h1>
               <p className="text-sm text-gray-400">
-                Вопрос {Math.min(answeredCount + 1, exam.questions.length)} из {exam.questions.length}
+                {exam.subject_names?.join(", ")} · Вопрос {Math.min(answeredCount + 1, exam.questions.length)} из {exam.questions.length}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -265,7 +300,6 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Прогресс */}
           <div className="mb-6 h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
             <div
               className="h-full bg-indigo-500 transition-all"
@@ -276,7 +310,16 @@ useEffect(() => {
           {/* Текущий вопрос */}
           {current && (
             <div className="mb-6 rounded-2xl border border-gray-800 bg-gray-900 p-6">
-              <p className="mb-1 text-xs uppercase text-gray-500">{exam.difficulty}</p>
+              <div className="mb-1 flex items-start justify-between gap-3">
+                <p className="text-xs uppercase text-gray-500">{exam.difficulty}</p>
+                <button
+                  onClick={() => router.push("/dashboard/chat")}
+                  title="Спросить ИИ об этом вопросе"
+                  className="flex shrink-0 items-center gap-1 rounded-lg bg-gray-800 px-3 py-1.5 text-xs hover:bg-gray-700"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" /> Спросить ИИ
+                </button>
+              </div>
               <p className="text-lg leading-relaxed">{current.question}</p>
               <button
                 onClick={() => speakQuestion(current.question)}
@@ -471,55 +514,75 @@ useEffect(() => {
         <div>
           <h1 className="mb-1 text-2xl font-bold">Экзаменатор</h1>
           <p className="mb-8 text-gray-400">
-            ИИ спрашивает — ты отвечаешь голосом. Как настоящий экзамен, только без стресса
+            ИИ спрашивает — ты отвечаешь голосом. Выбирай несколько предметов и тем сразу
           </p>
 
-          <div className="mb-8 flex flex-wrap items-center gap-2 rounded-2xl border border-gray-800 bg-gray-900 p-4">
-            <select
-              value={subjectId}
-              onChange={(e) => setSubjectId(e.target.value)}
-              className="rounded-lg border border-gray-800 bg-gray-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
-            >
-              <option value="">Предмет...</option>
-              {subjects.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <select
-              value={topicId}
-              onChange={(e) => setTopicId(e.target.value)}
-              disabled={!subjectId}
-              className="rounded-lg border border-gray-800 bg-gray-800 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-40"
-            >
-              <option value="">Вся программа</option>
-              {topics.map((t) => (
-                <option key={t.id} value={t.id}>{t.title}</option>
-              ))}
-            </select>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value)}
-              className="rounded-lg border border-gray-800 bg-gray-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
-            >
-              <option value="easy">Легко</option>
-              <option value="medium">Средне</option>
-              <option value="hard">Сложно</option>
-            </select>
-            <input
-              type="number" min={1} max={10} value={count}
-              onChange={(e) => setCount(Number(e.target.value))}
-              className="w-16 rounded-lg border border-gray-800 bg-gray-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
-              title="Количество вопросов"
-            />
-            <button
-              onClick={start}
-              disabled={starting}
-              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />}
-              {starting ? "Готовим вопросы..." : "Начать экзамен"}
-            </button>
-            {error && <span className="text-sm text-red-400">{error}</span>}
+          <div className="mb-8 rounded-2xl border border-gray-800 bg-gray-900 p-5">
+            <p className="mb-2 text-xs uppercase text-gray-500">Предметы (можно несколько)</p>
+            <div className="flex flex-wrap gap-2">
+              {subjects.map((s) => {
+                const on = selSubjects.includes(s.id);
+                return (
+                  <button key={s.id} onClick={() => toggleSubject(s.id)}
+                    className={`rounded-full border px-3 py-1.5 text-sm transition
+                      ${on ? "border-indigo-500 bg-indigo-600/20 text-indigo-300"
+                           : "border-gray-700 text-gray-400 hover:border-gray-500"}`}>
+                    {on && "✓ "}{s.name}
+                  </button>
+                );
+              })}
+              {subjects.length === 0 && <p className="text-sm text-gray-500">Сначала создай предметы</p>}
+            </div>
+
+            {selSubjects.length > 0 && (
+              <>
+                <p className="mb-2 mt-4 text-xs uppercase text-gray-500">
+                  Темы (опционально — пусто = вся программа)
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {allTopics
+                    .filter((t) => selSubjects.includes(t.subject_id))
+                    .map((t) => {
+                      const on = selTopics.includes(t.id);
+                      return (
+                        <button key={t.id} onClick={() => toggleTopic(t.id)}
+                          className={`rounded-full border px-3 py-1 text-xs transition
+                            ${on ? "border-indigo-500 bg-indigo-600/20 text-indigo-300"
+                                 : "border-gray-700 text-gray-400 hover:border-gray-500"}`}>
+                          {on && "✓ "}{t.title}
+                        </button>
+                      );
+                    })}
+                </div>
+              </>
+            )}
+
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <select
+                value={difficulty}
+                onChange={(e) => setDifficulty(e.target.value)}
+                className="rounded-lg border border-gray-800 bg-gray-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+              >
+                <option value="easy">Легко</option>
+                <option value="medium">Средне</option>
+                <option value="hard">Сложно</option>
+              </select>
+              <input
+                type="number" min={1} max={10} value={count}
+                onChange={(e) => setCount(Number(e.target.value))}
+                className="w-16 rounded-lg border border-gray-800 bg-gray-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+                title="Количество вопросов"
+              />
+              <button
+                onClick={start}
+                disabled={starting}
+                className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />}
+                {starting ? "Готовим вопросы..." : "Начать экзамен"}
+              </button>
+              {error && <span className="text-sm text-red-400">{error}</span>}
+            </div>
           </div>
 
           <h2 className="mb-3 font-semibold">Прошлые попытки</h2>
@@ -533,8 +596,8 @@ useEffect(() => {
                 <div key={s.id} className="flex items-center gap-3 rounded-xl border border-gray-800 bg-gray-900 p-3">
                   <GraduationCap className="h-5 w-5 shrink-0 text-indigo-400" />
                   <button onClick={() => openFromHistory(s)} className="min-w-0 flex-1 text-left">
-                    <div className="text-sm font-medium">
-                      {subjects.find((x) => x.id === s.subject_id)?.name ?? "Экзамен"} · {s.difficulty}
+                    <div className="truncate text-sm font-medium">
+                      {s.subject_names?.join(", ") || "Экзамен"} · {s.difficulty}
                     </div>
                     <div className="text-xs text-gray-500">
                       {new Date(s.created_at).toLocaleString("ru", {

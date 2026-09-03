@@ -4,7 +4,7 @@ import os
 import uuid
 import shutil
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
@@ -20,8 +20,8 @@ router = APIRouter(prefix="/exam", tags=["exam"])
 
 
 class StartRequest(BaseModel):
-    subject_id: int
-    topic_id: Optional[int] = None
+    subject_ids: List[int]
+    topic_ids: Optional[List[int]] = None
     difficulty: str = "medium"
     count: int = 5
 
@@ -33,22 +33,43 @@ def parse_json(raw: str):
     return json.loads(raw)
 
 
-def _context(db: Session, user_id: int, subject_id: int, topic_id: Optional[int]) -> str:
-    parts = []
-    q = db.query(Note).filter(Note.user_id == user_id, Note.subject_id == subject_id)
-    if topic_id:
-        q = q.filter(Note.topic_id == topic_id)
-    for n in q.limit(5):
-        parts.append(f"Заметка «{n.title}»:\n{(n.content or '')[:2000]}")
+def _names(db: Session, model, ids: list) -> list:
+    if not ids:
+        return []
+    rows = db.query(model).filter(model.id.in_(ids)).all()
+    by_id = {r.id: r for r in rows}
+    return [by_id[i].name if hasattr(by_id[i], "name") else by_id[i].title
+            for i in ids if i in by_id]
 
-    qm = db.query(Material).filter(
-        Material.user_id == user_id, Material.subject_id == subject_id,
-        Material.processed == True)  # noqa: E712
-    if topic_id:
-        qm = qm.filter(Material.topic_id == topic_id)
-    for m in qm.limit(5):
-        if m.extracted_text:
-            parts.append(f"Материал «{m.filename}»:\n{m.extracted_text[:2000]}")
+
+def _context(db: Session, user_id: int, subject_ids: list,
+             topic_ids: Optional[list]) -> str:
+    parts = []
+    for sid in subject_ids:
+        subject = db.query(Subject).filter(
+            Subject.id == sid, Subject.user_id == user_id).first()
+        if not subject:
+            continue
+        subj_topics = [t.title for t in db.query(Topic).filter(
+            Topic.subject_id == sid).all() if not topic_ids or t.id in topic_ids]
+        parts.append(f"===== ПРЕДМЕТ «{subject.name}»"
+                     + (f" (темы: {', '.join(subj_topics)})" if subj_topics else "")
+                     + " =====")
+
+        qn = db.query(Note).filter(Note.user_id == user_id, Note.subject_id == sid)
+        if topic_ids:
+            qn = qn.filter(Note.topic_id.in_(topic_ids))
+        for n in qn.limit(4):
+            parts.append(f"Заметка «{n.title}»:\n{(n.content or '')[:1800]}")
+
+        qm = db.query(Material).filter(
+            Material.user_id == user_id, Material.subject_id == sid,
+            Material.processed == True)  # noqa: E712
+        if topic_ids:
+            qm = qm.filter(Material.topic_id.in_(topic_ids))
+        for m in qm.limit(4):
+            if m.extracted_text:
+                parts.append(f"Материал «{m.filename}»:\n{m.extracted_text[:3000]}")
     return "\n\n".join(parts)
 
 
@@ -58,7 +79,7 @@ def question_public(q: ExamQuestion, reveal: bool) -> dict:
         "user_answer": q.user_answer, "verdict": q.verdict,
         "score": q.score, "feedback": q.feedback,
     }
-    if reveal or q.verdict:   # эталон открываем после ответа или в конце
+    if reveal or q.verdict:
         d["reference"] = q.reference
     return d
 
@@ -72,6 +93,23 @@ def session_public(s: ExamSession, reveal: bool = False) -> dict:
     }
 
 
+def _full_public(db: Session, s: ExamSession) -> dict:
+    d = session_public(s, reveal=(s.status == "finished"))
+    try:
+        sids = json.loads(s.subject_ids_json) if s.subject_ids_json else []
+    except Exception:
+        sids = [s.subject_id] if s.subject_id else []
+    try:
+        tids = json.loads(s.topic_ids_json) if s.topic_ids_json else []
+    except Exception:
+        tids = []
+    d["subject_ids"] = sids
+    d["topic_ids"] = tids
+    d["subject_names"] = _names(db, Subject, sids)
+    d["topic_names"] = _names(db, Topic, tids)
+    return d
+
+
 def _owned(db: Session, session_id: int, user) -> ExamSession:
     s = db.query(ExamSession).filter(
         ExamSession.id == session_id, ExamSession.user_id == user.id).first()
@@ -83,28 +121,32 @@ def _owned(db: Session, session_id: int, user) -> ExamSession:
 @router.post("/start")
 async def start_exam(data: StartRequest, db: Session = Depends(get_db),
                      user=Depends(get_current_user)):
-    subject = db.query(Subject).filter(
-        Subject.id == data.subject_id, Subject.user_id == user.id).first()
-    if not subject:
-        raise HTTPException(404, "Предмет не найден")
-    topic = None
-    if data.topic_id:
-        topic = db.query(Topic).filter(Topic.id == data.topic_id).first()
-        if not topic:
-            raise HTTPException(404, "Тема не найдена")
+    if not data.subject_ids:
+        raise HTTPException(400, "Выбери хотя бы один предмет")
+
+    subjects = db.query(Subject).filter(
+        Subject.id.in_(data.subject_ids), Subject.user_id == user.id).all()
+    if not subjects:
+        raise HTTPException(404, "Предметы не найдены")
+
+    topic_titles = []
+    if data.topic_ids:
+        topics = db.query(Topic).filter(Topic.id.in_(data.topic_ids)).all()
+        topic_titles = [t.title for t in topics]
 
     count = max(1, min(data.count, 10))
-    context = _context(db, user.id, data.subject_id, topic.id if topic else None)
+    context = _context(db, user.id, data.subject_ids, data.topic_ids)
 
-    prompt = f"Ты — преподаватель предмета «{subject.name}»."
-    if topic:
-        prompt += f" Тема: «{topic.title}»."
+    subj_line = ", ".join(s.name for s in subjects)
+    prompt = f"Ты — преподаватель по предметам: {subj_line}."
+    if topic_titles:
+        prompt += f" Темы экзамена: {', '.join(topic_titles)}."
     prompt += f"""
 Проведи устный экзамен. Составь {count} открытых вопросов уровня «{data.difficulty}» —
 требующих развёрнутого ответа (НЕ варианты «а/б/в»). Разнообразь: определения,
 «почему», «сравни», «приведи пример», мини-расчёты где уместно.
 
-{("Составь вопросы СТРОГО по материалам студента ниже — не выходи за их пределы." if context else "Материалов нет — используй свои знания по предмету.")}
+{("Составь вопросы СТРОГО по материалам студента ниже — не выходи за их пределы." if context else "Материалов нет — используй свои знания по предметам.")}
 
 {f"МАТЕРИАЛЫ СТУДЕНТА:{chr(10)}{context}" if context else ""}
 
@@ -122,9 +164,9 @@ async def start_exam(data: StartRequest, db: Session = Depends(get_db),
     if isinstance(items, dict):
         items = items.get("questions", [])
 
-    session = ExamSession(user_id=user.id, subject_id=data.subject_id,
-                          topic_id=topic.id if topic else None,
-                          difficulty=data.difficulty)
+    session = ExamSession(user_id=user.id, difficulty=data.difficulty,
+                          subject_ids_json=json.dumps(data.subject_ids),
+                          topic_ids_json=json.dumps(data.topic_ids or []))
     db.add(session)
     db.flush()
 
@@ -141,7 +183,7 @@ async def start_exam(data: StartRequest, db: Session = Depends(get_db),
         raise HTTPException(502, "ИИ не составил вопросов — попробуй ещё раз")
     db.commit()
     db.refresh(session)
-    return session_public(session)
+    return _full_public(db, session)
 
 
 @router.post("/{session_id}/answer/{question_id}")
@@ -161,10 +203,10 @@ async def answer_question(session_id: int, question_id: int,
     if q.verdict:
         raise HTTPException(400, "На этот вопрос уже ответили")
 
-    # Ответ: из аудио (расшифровка) или текстом
     if file is not None:
         os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-        tmp = os.path.join(settings.UPLOAD_DIR, f"exam_{uuid.uuid4().hex}_{file.filename}")
+        tmp = os.path.join(settings.UPLOAD_DIR,
+                           f"exam_{uuid.uuid4().hex}_{file.filename}")
         with open(tmp, "wb") as f:
             shutil.copyfileobj(file.file, f)
         try:
@@ -180,10 +222,14 @@ async def answer_question(session_id: int, question_id: int,
     if not answer_text:
         raise HTTPException(400, "Пустой ответ")
 
-    subject = db.query(Subject).filter(Subject.id == s.subject_id).first()
-    subj_name = subject.name if subject else "предмет"
+    try:
+        sids = json.loads(s.subject_ids_json) if s.subject_ids_json else []
+    except Exception:
+        sids = [s.subject_id] if s.subject_id else []
+    subj_rows = db.query(Subject).filter(Subject.id.in_(sids)).all() if sids else []
+    subj_name = ", ".join(x.name for x in subj_rows) if subj_rows else "предмет"
 
-    prompt = f"""Ты — преподаватель на устном экзамене по предмету «{subj_name}».
+    prompt = f"""Ты — преподаватель на устном экзамене по предметам «{subj_name}».
 
 Вопрос: {q.question}
 Эталонный ответ: {q.reference or "(эталона нет, оцени по сути вопроса)"}
@@ -218,7 +264,7 @@ async def finish_exam(session_id: int, db: Session = Depends(get_db),
                       user=Depends(get_current_user)):
     s = _owned(db, session_id, user)
     if s.status == "finished":
-        return session_public(s, reveal=True)
+        return _full_public(db, s)
 
     answered = [q for q in s.questions if q.verdict]
     if not answered:
@@ -232,10 +278,14 @@ async def finish_exam(session_id: int, db: Session = Depends(get_db),
             f"Оценка: {q.score}/100 ({q.verdict})")
     protocol = "\n\n".join(lines)
 
-    subject = db.query(Subject).filter(Subject.id == s.subject_id).first()
-    subj_name = subject.name if subject else "предмет"
+    try:
+        sids = json.loads(s.subject_ids_json) if s.subject_ids_json else []
+    except Exception:
+        sids = [s.subject_id] if s.subject_id else []
+    subj_rows = db.query(Subject).filter(Subject.id.in_(sids)).all() if sids else []
+    subj_name = ", ".join(x.name for x in subj_rows) if subj_rows else "предмет"
 
-    prompt = f"""Ты — преподаватель, экзамен по предмету «{subj_name}» завершён.
+    prompt = f"""Ты — преподаватель, экзамен по предметам «{subj_name}» завершён.
 Протокол экзамена:
 
 {protocol}
@@ -256,21 +306,21 @@ async def finish_exam(session_id: int, db: Session = Depends(get_db),
     s.summary = summary
     s.finished_at = datetime.utcnow()
     db.commit()
-    return session_public(s, reveal=True)
+    return _full_public(db, s)
 
 
 @router.get("")
 def list_exams(db: Session = Depends(get_db), user=Depends(get_current_user)):
     sessions = db.query(ExamSession).filter(
         ExamSession.user_id == user.id).order_by(ExamSession.id.desc()).limit(20).all()
-    return [session_public(s, reveal=(s.status == "finished")) for s in sessions]
+    return [_full_public(db, s) for s in sessions]
 
 
 @router.get("/{session_id}")
 def get_exam(session_id: int, db: Session = Depends(get_db),
              user=Depends(get_current_user)):
     s = _owned(db, session_id, user)
-    return session_public(s, reveal=(s.status == "finished"))
+    return _full_public(db, s)
 
 
 @router.delete("/{session_id}")

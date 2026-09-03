@@ -1,5 +1,5 @@
 "use client";
-
+import { BookOpenCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
@@ -9,14 +9,17 @@ import {
   MessageSquare, LogOut, Sparkles, Mic, ListChecks,
   GraduationCap, Layers
 } from "lucide-react";
+import NotificationsBell from "@/lib/notifications";
 
 const NAV = [
   { href: "/dashboard", label: "Обзор", icon: LayoutDashboard },
+  { href: "/dashboard/lectures", label: "Лекции", icon: BookOpenCheck },
   { href: "/dashboard/subjects", label: "Предметы", icon: BookOpen },
   { href: "/dashboard/notes", label: "Заметки", icon: StickyNote },
   { href: "/dashboard/files", label: "Файлы", icon: FolderOpen },
   { href: "/dashboard/voice", label: "Диктофон", icon: Mic },
-  { href: "/dashboard/tasks", label: "Тренажёр", icon: ListChecks },
+  // { href: "/dashboard/tasks", label: "Тренажёр", icon: ListChecks },
+    { href: "/dashboard/tests", label: "Тестирование", icon: ListChecks },
   { href: "/dashboard/exam", label: "Экзаменатор", icon: GraduationCap },
   { href: "/dashboard/review", label: "Повторение", icon: Layers },
   { href: "/dashboard/chat", label: "Чат с ИИ", icon: MessageSquare },
@@ -51,6 +54,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <aside className="flex w-60 flex-col border-r border-gray-800 bg-gray-900 p-4">
         <div className="mb-8 flex items-center gap-2 px-2">
           <Sparkles className="h-6 w-6 text-indigo-400" />
+<div className="mb-8 flex items-center justify-between px-2">
+  <div className="flex items-center gap-2">
+    <Sparkles className="h-6 w-6 text-indigo-400" />
+    <span className="text-xl font-bold">StudyHub</span>
+  </div>
+  <NotificationsBell />
+</div>
           <span className="text-xl font-bold">StudyHub</span>
         </div>
 

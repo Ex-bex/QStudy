@@ -197,7 +197,7 @@ async def send_message(data: SendRequest, db: Session = Depends(get_db), user=De
         c = data.context
         page_names = {
             "dashboard": "главная", "subjects": "Предметы", "notes": "Заметки",
-            "files": "Файлы", "voice": "Диктофон", "tasks": "Тренажёр",
+            "files": "Файлы", "voice": "Диктофон", "tasks": "Тренажёр", "tests": "Тестирование",   
             "exam": "Экзаменатор", "review": "Повторение (карточки)",
             "chat": "Чат",
         }

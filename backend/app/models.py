@@ -109,6 +109,8 @@ class ExamSession(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True)
     topic_id = Column(Integer, ForeignKey("topics.id"), nullable=True)
+    subject_ids_json = Column(Text, default="")   # JSON: [1, 3] — несколько предметов
+    topic_ids_json = Column(Text, default="")
     difficulty = Column(String, default="medium")
     status = Column(String, default="active")
     summary = Column(Text, default="")
@@ -135,6 +137,53 @@ class ExamQuestion(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("ExamSession", back_populates="questions")
+
+class TestSession(Base):
+    __tablename__ = "test_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    subject_ids_json = Column(Text, default="")
+    topic_ids_json = Column(Text, default="")
+    difficulty = Column(String, default="medium")
+    status = Column(String, default="active")
+    score = Column(Integer, default=0)
+    summary = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+    questions = relationship("TestQuestion", back_populates="session",
+                             cascade="all, delete-orphan",
+                             order_by="TestQuestion.order")
+
+
+class TestQuestion(Base):
+    __tablename__ = "test_questions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("test_sessions.id"))
+    order = Column(Integer, default=0)
+    question = Column(Text, nullable=False)
+    options = Column(Text, default="")
+    correct_index = Column(Integer, default=0)
+    user_index = Column(Integer, nullable=True)
+    explanation = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    session = relationship("TestSession", back_populates="questions")
+
+
+class Lecture(Base):
+    __tablename__ = "lectures"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    topic_id = Column(Integer, ForeignKey("topics.id"), unique=True)
+    content = Column(Text, default="")
+    status = Column(String, default="empty")
+    materials_hash = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Flashcard(Base):

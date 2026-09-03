@@ -125,7 +125,9 @@ useEffect(() => {
   useEffect(() => {
     const act = getActivity();
     if (act?.task) {
-      setInput(`Не понимаю задачу: «${act.task.question}». Объясни, с чего начать`);
+      setInput(`Не понимаю вопрос: «${act.task.question}». Объясни, с чего начать`);
+    } else if (act?.exam_question) {
+      setInput(`Не понимаю экзаменационный вопрос: «${act.exam_question}». Объясни, с чего начать`);
     }
   }, []);
   async function toggleMic() {
