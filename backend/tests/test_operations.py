@@ -28,7 +28,9 @@ from app.services.backups import BackupService, BackupError, verify_backup, rest
 class BackupTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        # Windows runners can expose TEMP through an 8.3 alias. Match the
+        # canonical paths used by BackupService so rename fault injection fires.
+        self.root = Path(self.temp.name).resolve()
         self.database = self.root / "backend" / "studyhub.db"
         self.uploads = self.root / "backend" / "uploads"
         self.directory = self.root / ".backups"

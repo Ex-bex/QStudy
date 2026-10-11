@@ -61,9 +61,14 @@ class PasswordRecoveryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         files = list(self.outbox.glob('*.json'))
         with self.factory() as db:
-            latest = db.query(PasswordResetToken).order_by(PasswordResetToken.id.desc()).first().token_hash
+            record = db.query(PasswordResetToken).order_by(PasswordResetToken.id.desc()).first()
+            self.assertIsNotNone(record, 'Password recovery did not issue a token')
+            self.assertEqual(record.delivery_status, 'delivered', 'Local recovery message was not delivered')
+            latest = record.token_hash
         messages = [json.loads(path.read_text(encoding='utf-8')) for path in files]
-        data = next(message for message in messages if hashlib.sha256(message['link'].split('#token=')[1].encode()).hexdigest() == latest)
+        matching = [message for message in messages if hashlib.sha256(message['link'].split('#token=')[1].encode()).hexdigest() == latest]
+        self.assertEqual(len(matching), 1, 'Expected one local message for the issued reset token')
+        data = matching[0]
         self.assertTrue(data['link'].startswith('http://127.0.0.1:3099/reset-password#token='))
         token = data['link'].split('#token=')[1]
         self.assertNotIn(token, response.text)
@@ -160,6 +165,41 @@ class PasswordRecoveryTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/auth/reset-password', json={'token': second, 'new_password': 'ReplacementPassword44'}).status_code, 200)
         with self.factory() as db:
             self.assertIsNone(recovery.find_local_reset_link(db, 'person@example.com', 'http://127.0.0.1:3101'))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows 8.3 path regression')
+    def test_local_delivery_and_opener_accept_windows_short_path_alias(self):
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(32768)
+        get_short_path = ctypes.windll.kernel32.GetShortPathNameW
+        get_short_path.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32)
+        get_short_path.restype = ctypes.c_uint32
+        result = get_short_path(str(self.outbox.parent), buffer, len(buffer))
+        if not result or result >= len(buffer):
+            self.skipTest('The temporary directory has no supported short path')
+        alias = Path(buffer.value) / 'private'
+        if alias.resolve() == alias.absolute():
+            self.skipTest('The filesystem has 8.3 short names disabled')
+        with patch.object(recovery, 'LOCAL_OUTBOX', alias), patch.object(recovery.os, 'chmod', wraps=os.chmod) as permissions:
+            token = self.issue()
+            with self.factory() as db:
+                link = recovery.find_local_reset_link(db, 'person@example.com', 'http://127.0.0.1:3101')
+            self.assertEqual(link, 'http://127.0.0.1:3101/reset-password#token=' + token)
+            self.assertEqual(len(list(alias.glob('*.json'))), 1)
+            permissions.assert_called_once()
+            self.assertEqual(permissions.call_args.args[1], 0o600)
+
+    def test_local_recovery_rejects_symlink_and_junction_ancestors(self):
+        # The redirected ancestor may already exist before the outbox itself.
+        for method in ('is_symlink', 'is_junction'):
+            original = getattr(Path, method)
+            def redirected(path, original=original):
+                return path == self.outbox.parent or original(path)
+            with self.subTest(redirect=method), patch.object(Path, method, new=redirected):
+                with self.assertRaisesRegex(ValueError, 'redirected directory'):
+                    recovery._write_private_message('person@example.com', 'fixture-token', 'fixture-link')
+                with self.factory() as db:
+                    self.assertIsNone(recovery.find_local_reset_link(db, 'person@example.com', 'http://127.0.0.1:3101'))
+                self.assertFalse(self.outbox.exists())
 
     def test_restore_cutoff_revokes_old_session_and_accepts_new_same_second(self):
         with self.factory() as db:

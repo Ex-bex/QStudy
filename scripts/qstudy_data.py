@@ -50,6 +50,18 @@ def _path_parts(value: str, root: str | Path) -> tuple[str, ...] | None:
     return relative.parts
 
 
+def _current_path_parts(value: str, root: Path) -> tuple[str, ...] | None:
+    """Resolve current-machine aliases before checking private-root containment."""
+    path = Path(value)
+    if not path.is_absolute() or ".." in path.parts:
+        return None
+    try:
+        relative = path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return None
+    return relative.parts or None
+
+
 def _dotenv(text: str) -> dict[str, str]:
     values = {}
     for line in text.splitlines():
@@ -192,7 +204,7 @@ def preflight(project_root: str | Path, previous_project_root: str | Path | None
                     value = row["filepath"] or ""
                     relative = None
                     if _absolute(value):
-                        parts = _path_parts(value, uploads)
+                        parts = _current_path_parts(value, uploads)
                         if parts is None and previous_backend:
                             parts = _path_parts(value, previous_backend + "/uploads")
                         if parts:

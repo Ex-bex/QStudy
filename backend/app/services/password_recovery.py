@@ -84,8 +84,20 @@ def _send_email(email: str, content: str, subject: str):
         server.send_message(message)
 
 
+def _local_outbox_is_direct():
+    """Reject filesystem redirects, while accepting Windows 8.3 path aliases."""
+    directory = LOCAL_OUTBOX.absolute()
+    try:
+        # resolve() also expands ordinary short names such as RUNNER~1. That is
+        # canonical spelling, not a symlink; inspect the actual path ancestors.
+        return not any(path.is_symlink() or path.is_junction()
+                       for path in (directory, *directory.parents))
+    except OSError:
+        return False
+
+
 def _write_private_message(email: str, token: str, link: str):
-    if LOCAL_OUTBOX.resolve() != LOCAL_OUTBOX.absolute():
+    if not _local_outbox_is_direct():
         raise ValueError("Local recovery storage must not be a redirected directory")
     LOCAL_OUTBOX.mkdir(parents=True, exist_ok=True)
     # Keep links outside uploads/static directories; never send paths in responses.
@@ -139,7 +151,7 @@ def deliver_reset(bind, reset_id: int, email: str, token: str, mode: str):
 
 
 def find_local_reset_link(db: Session, email: str, site_url: str):
-    if LOCAL_OUTBOX.resolve() != LOCAL_OUTBOX.absolute():
+    if not _local_outbox_is_direct():
         return None
     candidates = []
     for path in LOCAL_OUTBOX.glob("*.json"):

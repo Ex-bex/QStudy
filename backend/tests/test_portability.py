@@ -89,9 +89,29 @@ class PortablePreflightTests(unittest.TestCase):
         result = data.preflight(self.project, apply=True)
         self.assertEqual(result["updated"], 1)
 
+    def test_current_directory_alias_is_canonicalized_without_previous_marker(self):
+        self.add_material(str(self.uploads / "material.txt"))
+        alias = Path(self.temp.name) / "Current project alias"
+        if os.name == "nt":
+            import _winapi
+            _winapi.CreateJunction(str(self.project.resolve()), str(alias))
+        else:
+            alias.symlink_to(self.project.resolve(), target_is_directory=True)
+        alias_reference = alias / "backend" / "uploads" / "material.txt"
+        self.assertEqual(resolve_upload_path(str(alias_reference), self.uploads),
+                         (self.uploads / "material.txt").resolve())
+        with data._connect(self.database) as connection:
+            connection.execute("UPDATE materials SET filepath=? WHERE id=1", (str(alias_reference),))
+        result = data.preflight(alias, apply=True)
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["unresolved_files"], 0)
+        with data._connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT filepath FROM materials").fetchone()[0], "material.txt")
+        self.assertEqual(data.preflight(self.project, apply=True)["updated"], 0)
+
     def test_original_uploads_directory_prefix_is_normalized(self):
         self.add_material("uploads/material.txt")
-        self.assertEqual(resolve_upload_path("uploads/material.txt", self.uploads), self.uploads / "material.txt")
+        self.assertEqual(resolve_upload_path("uploads/material.txt", self.uploads), (self.uploads / "material.txt").resolve())
         result = data.preflight(self.project, apply=True)
         self.assertEqual(result["updated"], 1)
         with data._connect(self.database) as connection:
@@ -101,7 +121,7 @@ class PortablePreflightTests(unittest.TestCase):
         self.add_material("uploads/material.txt")
         (self.uploads / "uploads").mkdir()
         (self.uploads / "uploads/material.txt").write_bytes(b"private notes")
-        self.assertEqual(resolve_upload_path("uploads/material.txt", self.uploads), self.uploads / "uploads/material.txt")
+        self.assertEqual(resolve_upload_path("uploads/material.txt", self.uploads), (self.uploads / "uploads/material.txt").resolve())
         result = data.preflight(self.project, apply=True)
         self.assertEqual(result["updated"], 0)
 
@@ -264,7 +284,7 @@ class PortableUploadApiTests(unittest.TestCase):
                 resolve_upload_path(invalid, self.original)
         with self.assertRaises(ValueError):
             safe_syllabus_path("file.txt", str(self.original))
-        self.assertEqual(safe_syllabus_path("syllabi/file.docx", str(self.original)), self.original / "syllabi/file.docx")
+        self.assertEqual(safe_syllabus_path("syllabi/file.docx", str(self.original)), (self.original / "syllabi/file.docx").resolve())
 
     def test_configuration_paths_are_independent_of_shell_working_directory(self):
         previous = Path.cwd()
