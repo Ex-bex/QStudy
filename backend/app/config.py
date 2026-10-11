@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     MAX_UPLOAD_BYTES: int = Field(default=25 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
     REGISTRATION_ENABLED: bool = True
     RATE_LIMIT_ENABLED: bool = True
+    # Private BFF-to-API authentication for proxy IP limits; empty disables forwarding locally.
+    BFF_PROXY_SECRET: str = ""
     BACKUPS_ENABLED: bool = True
     BACKUP_DIR: str = str(BACKEND_DIR.parent / ".backups" / "automatic")
     BACKUP_INTERVAL_HOURS: int = Field(default=24, ge=1, le=168)
@@ -91,6 +93,13 @@ class Settings(BaseSettings):
     def strong_secret(cls, value: str) -> str:
         if len(value) < 32 or value.lower().startswith(("change", "replace", "your_")):
             raise ValueError("SECRET_KEY must be a randomly generated secret of at least 32 characters")
+        return value
+
+    @field_validator("BFF_PROXY_SECRET")
+    @classmethod
+    def strong_proxy_secret(cls, value: str) -> str:
+        if value and (len(value) < 32 or value.lower().startswith(("change", "replace", "your_"))):
+            raise ValueError("BFF_PROXY_SECRET must be empty or a random secret of at least 32 characters")
         return value
 
 

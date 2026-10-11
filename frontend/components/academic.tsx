@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import PasswordInput from "./password-input";
 import "./academic.css";
 
 export const weekdays = [
@@ -359,6 +360,17 @@ export function RecordEditor({
                       name={field.name}
                       defaultChecked={Boolean(initial[field.name])}
                     />
+                  ) : field.type === "password" ? (
+                    <PasswordInput
+                      name={field.name}
+                      className="field"
+                      required={field.required}
+                      minLength={10}
+                      maxLength={128}
+                      defaultValue={String(initial[field.name] ?? "")}
+                      placeholder={field.placeholder}
+                      autoComplete="new-password"
+                    />
                   ) : (
                     <input
                       name={field.name}
@@ -369,8 +381,7 @@ export function RecordEditor({
                       required={field.required}
                       min={field.min}
                       max={field.max}
-                      maxLength={field.type === "password" ? 128 : 500}
-                      minLength={field.type === "password" ? 10 : undefined}
+                      maxLength={500}
                       defaultValue={
                         field.type === "times" &&
                         Array.isArray(initial[field.name])
@@ -378,9 +389,6 @@ export function RecordEditor({
                           : String(initial[field.name] ?? "")
                       }
                       placeholder={field.placeholder}
-                      autoComplete={
-                        field.type === "password" ? "new-password" : undefined
-                      }
                     />
                   )}{" "}
                   {field.hint && <small className="muted">{field.hint}</small>}

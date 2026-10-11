@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { LockKeyhole, Save, UserRound } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
+import PasswordInput from "@/components/password-input";
 import {
   PageTitle,
   ErrorNotice,
@@ -136,9 +137,8 @@ export default function ProfilePage() {
           <div className="academic-fields">
             <label className="academic-field">
               <span>Текущий пароль</span>
-              <input
+              <PasswordInput
                 className="field"
-                type="password"
                 name="current_password"
                 required
                 maxLength={128}
@@ -147,9 +147,8 @@ export default function ProfilePage() {
             </label>
             <label className="academic-field">
               <span>Новый пароль</span>
-              <input
+              <PasswordInput
                 className="field"
-                type="password"
                 name="new_password"
                 required
                 minLength={10}
@@ -162,9 +161,8 @@ export default function ProfilePage() {
             </label>
             <label className="academic-field">
               <span>Повторите новый пароль</span>
-              <input
+              <PasswordInput
                 className="field"
-                type="password"
                 name="confirm_password"
                 required
                 minLength={10}

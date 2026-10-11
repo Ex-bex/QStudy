@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sameSiteMutation, trustedClientIp } from "@/lib/proxy-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,15 +42,12 @@ async function proxy(
     return NextResponse.json({ detail: "Некорректный путь" }, { status: 400 });
   }
   const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
-  const origin = request.headers.get("origin");
-  let originMatches = false;
-  try {
-    const parsedOrigin = origin ? new URL(origin) : null;
-    originMatches =
-      !!parsedOrigin &&
-      parsedOrigin.host === request.headers.get("host") &&
-      parsedOrigin.protocol === request.nextUrl.protocol;
-  } catch {}
+  const originMatches = sameSiteMutation(
+    request.headers.get("origin"),
+    request.headers.get("host"),
+    request.nextUrl.protocol,
+    process.env.PUBLIC_BASE_URL,
+  );
   if (mutation && !originMatches) {
     return NextResponse.json(
       { detail: "Запрос с другого сайта запрещён" },
@@ -100,6 +98,16 @@ async function proxy(
     "",
   );
   const headers = new Headers();
+  const clientIp = trustedClientIp(
+    request.headers.get("x-real-ip"),
+    process.env.TRUST_PROXY_HEADERS,
+    process.env.NODE_ENV,
+    process.env.BFF_PROXY_SECRET,
+  );
+  if (clientIp) {
+    headers.set("X-QStudy-Client-IP", clientIp);
+    headers.set("X-QStudy-Proxy-Key", process.env.BFF_PROXY_SECRET!);
+  }
   if (request.headers.get("content-type"))
     headers.set("content-type", request.headers.get("content-type")!);
   const token = request.cookies.get(COOKIE)?.value;

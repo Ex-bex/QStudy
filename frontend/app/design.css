@@ -651,19 +651,6 @@
   font-size: 10px;
   font-weight: 400;
 }
-.password-field {
-  position: relative;
-  display: block;
-}
-.password-field .field {
-  padding-right: 45px;
-}
-.password-field > button {
-  position: absolute;
-  right: 13px;
-  top: 14px;
-  color: #a6b09f;
-}
 .auth-switch {
   text-align: center;
   font-size: 11px;

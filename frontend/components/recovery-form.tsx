@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Brand from "./brand";
 import LearningScene from "./learning-scene";
+import PasswordInput from "./password-input";
 import { api, setToken } from "@/lib/api";
 
 type Delivery = "local" | "smtp" | "disabled";
@@ -153,9 +154,8 @@ export default function RecoveryForm({ reset = false }: { reset?: boolean }) {
                 <>
                   <label>
                     Новый пароль
-                    <input
+                    <PasswordInput
                       className="field"
-                      type="password"
                       autoComplete="new-password"
                       minLength={10}
                       maxLength={128}
@@ -169,9 +169,8 @@ export default function RecoveryForm({ reset = false }: { reset?: boolean }) {
                   </label>
                   <label>
                     Повторите пароль
-                    <input
+                    <PasswordInput
                       className="field"
-                      type="password"
                       autoComplete="new-password"
                       minLength={10}
                       maxLength={128}

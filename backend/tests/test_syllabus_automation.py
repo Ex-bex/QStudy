@@ -244,11 +244,17 @@ class AutomaticSyllabusTests(unittest.TestCase):
             self.assertEqual(stage["delta"]["weeks"], [])
 
     def test_saved_ocr_marker_protects_retry_without_repeating_ocr(self):
+        self.assert_saved_ocr_marker_protects_retry("Windows")
+
+    def test_saved_tesseract_marker_protects_retry_without_repeating_ocr(self):
+        self.assert_saved_ocr_marker_protects_retry("Tesseract")
+
+    def assert_saved_ocr_marker_protects_retry(self, engine):
         self.scan()
         document = self.upload("scan.pdf")
         with patch("app.services.syllabus_import.recognize_pdf", return_value=(
                 "A scanned syllabus lists weeks 1, 2 and 4, and contains an assignment.",
-                ["Применено локальное OCR Windows: 1 страница."])):
+                [f"Применено локальное OCR {engine}: 1 страница."])):
             self.assertTrue(asyncio.run(background.process_one_job()))
         with patch.object(settings, "GEMINI_API_KEY", "fixture-key"):
             response = self.client.post(f"/api/syllabi/{document['id']}/analyze")

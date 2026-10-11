@@ -1,0 +1,22 @@
+{
+    email {$ACME_EMAIL}
+    admin off
+}
+
+{$QSTUDY_DOMAIN} {
+    encode zstd gzip
+    request_body {
+        max_size 27MB
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        -Server
+    }
+    reverse_proxy frontend:3000 {
+        # The application trusts only this direct reverse proxy's client address.
+        header_up X-Real-IP {remote_host}
+        header_up -X-QStudy-Proxy-Key
+        header_up -X-QStudy-Client-IP
+        flush_interval -1
+    }
+}

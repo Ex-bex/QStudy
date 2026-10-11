@@ -5,6 +5,8 @@ from threading import Lock
 from time import monotonic
 from uuid import uuid4
 import zipfile
+import ipaddress
+import secrets
 from fastapi import HTTPException, UploadFile, Request
 from app.config import settings
 from app.storage import relative_upload_path, resolve_upload_path
@@ -34,7 +36,14 @@ def rate_limit(key: str, limit: int = 10, seconds: int = 900):
 
 
 def client_key(request: Request) -> str:
-    # Never trust arbitrary forwarding headers from a caller.
+    # Only the BFF with a shared private key can supply the IP set by our edge proxy.
+    key = request.headers.get("x-qstudy-proxy-key", "")
+    if settings.BFF_PROXY_SECRET and secrets.compare_digest(key.encode(), settings.BFF_PROXY_SECRET.encode()):
+        forwarded = request.headers.get("x-qstudy-client-ip", "")
+        try:
+            return str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
     return request.client.host if request.client else "unknown"
 
 

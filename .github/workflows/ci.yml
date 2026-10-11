@@ -48,10 +48,45 @@ jobs:
         run: npm ci
       - name: Frontend tests
         working-directory: frontend
-        run: node --test lib/learning-selection.test.mjs lib/syllabus-draft.test.mjs lib/branding.test.mjs lib/branding-store.test.mjs
+        run: node --test lib/*.test.mjs
       - name: Lint
         working-directory: frontend
         run: npm run lint
       - name: Build
         working-directory: frontend
         run: npm run build
+
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate production scripts and prepare disposable configuration
+        run: |
+          bash -n scripts/production/Install-Docker.sh scripts/production/Manage-QStudy.sh
+          python3 -m unittest discover -s backend/tests -p test_production_configuration.py
+          python3 scripts/production/configure.py init qstudy-ci.example.org owner@example.org
+          python3 scripts/production/configure.py check --offline
+          sudo python3 scripts/production/configure.py permissions
+          docker compose --env-file deployment/.env -f deployment/compose.yml config --quiet
+      - name: Build Linux production images
+        run: docker compose --env-file deployment/.env -f deployment/compose.yml build
+      - name: Validate HTTPS proxy configuration
+        run: docker compose --env-file deployment/.env -f deployment/compose.yml run --rm --no-deps -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Verify native Linux OCR using synthetic documents
+        run: |
+          docker run --rm -e QSTUDY_REAL_OCR_TEST=1 -e SECRET_KEY=ci-only-qstudy-test-secret-at-least-32-characters -v "$PWD/backend/tests:/tests:ro" qstudy-backend:local python -m unittest discover -s /tests -p test_linux_pdf_ocr.py
+      - name: Check production authentication and persistence
+        run: |
+          docker compose --env-file deployment/.env -f deployment/compose.yml up -d --wait --wait-timeout 300 backend frontend
+          docker compose --env-file deployment/.env -f deployment/compose.yml exec -T frontend node --input-type=module < scripts/production/smoke.mjs
+          docker compose --env-file deployment/.env -f deployment/compose.yml exec -T backend python production_runtime.py backup
+          docker compose --env-file deployment/.env -f deployment/compose.yml restart backend
+          docker compose --env-file deployment/.env -f deployment/compose.yml up -d --wait --wait-timeout 300 backend frontend
+          docker compose --env-file deployment/.env -f deployment/compose.yml exec -T frontend node --input-type=module - --existing < scripts/production/smoke.mjs
+      - name: Stop disposable services
+        if: always()
+        run: docker compose --env-file deployment/.env -f deployment/compose.yml stop

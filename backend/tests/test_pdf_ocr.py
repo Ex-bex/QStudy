@@ -66,7 +66,7 @@ class PDFOCRTests(unittest.TestCase):
         return run
 
     def recognize(self, **kwargs):
-        with patch.object(pdf_ocr, "_windows_powershell", return_value=self.fake_powershell):
+        with patch.object(pdf_ocr.sys, "platform", "win32"), patch.object(pdf_ocr, "_windows_powershell", return_value=self.fake_powershell):
             return pdf_ocr.recognize_pdf(self.pdf, **kwargs)
 
     def assert_staging_removed(self):

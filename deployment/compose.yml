@@ -1,0 +1,119 @@
+name: qstudy
+
+x-logging: &bounded-logs
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "3"
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deployment/backend.Dockerfile
+    image: qstudy-backend:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////data/backend/studyhub.db
+      UPLOAD_DIR: /data/backend/uploads
+      BACKUP_DIR: /data/backups
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Run Manage-QStudy.sh init first}
+      CORS_ORIGINS: ${PUBLIC_BASE_URL:?Set the public HTTPS origin}
+      SECRET_KEY: ${SECRET_KEY:?Generate the application secret with init}
+      BFF_PROXY_SECRET: ${BFF_PROXY_SECRET:?Generate the proxy secret with init}
+      JOB_WORKERS: "2"
+      RECOVERY_DELIVERY: ${RECOVERY_DELIVERY:-disabled}
+    volumes:
+      - ./data/backend:/data/backend
+      - ./data/backups:/data/backups
+    networks:
+      - api
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 20
+      start_period: 90s
+    logging: *bounded-logs
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deployment/frontend.Dockerfile
+    image: qstudy-frontend:local
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      BACKEND_URL: http://backend:8000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set the public HTTPS origin}
+      BFF_PROXY_SECRET: ${BFF_PROXY_SECRET:?Generate the proxy secret with init}
+      TRUST_PROXY_HEADERS: "true"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - edge
+      - api
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 30s
+    logging: *bounded-logs
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      QSTUDY_DOMAIN: ${QSTUDY_DOMAIN:?Set your real DNS domain}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the certificate contact email}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    logging: *bounded-logs
+
+networks:
+  edge:
+  api:
+
+volumes:
+  caddy_data:
+  caddy_config:

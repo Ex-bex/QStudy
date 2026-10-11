@@ -12,7 +12,7 @@ from app.services import background
 from app.services.audit import record_audit
 from app.services.syllabus import (ACCESS_DATA_WARNING, AUTO_OCR_WARNING, SyllabusDraft,
                                   analyze_syllabus_text, fill_missing_course_facts, redact_access_data, safe_syllabus_path)
-from app.services.pdf_ocr import PDFOCRError, recognize_pdf
+from app.services.pdf_ocr import OCR_WARNING_PREFIXES, PDFOCRError, recognize_pdf
 from app.services.ai import AIError
 
 KIND = "syllabus_import"
@@ -41,7 +41,7 @@ def base_warnings(document):
         stored = []
     if isinstance(stored, list):
         warnings.extend(item for item in stored if isinstance(item, str) and
-                        item.startswith("Применено локальное OCR Windows:"))
+                        item.startswith(OCR_WARNING_PREFIXES))
     return list(dict.fromkeys(warnings))
 
 
@@ -140,7 +140,7 @@ async def _repair_ocr_gaps(ctx, payload, original, checkpoint, extracted_text, o
         if document.published_at is not None or document_fingerprint(document) != payload["fingerprint"]:
             # The normal finalization branch handles publication/manual edits.
             return original, []
-        ocr_used = ocr_required or any(warning.startswith("Применено локальное OCR Windows:")
+        ocr_used = ocr_required or any(warning.startswith(OCR_WARNING_PREFIXES)
                                        for warning in base_warnings(document))
         exhausted = job.attempts >= job.max_attempts
     if not ocr_used:
@@ -341,7 +341,7 @@ async def import_syllabus(ctx, payload):
         # OCR can lose a row without making the AI's JSON invalid. Preserve the
         # real source weeks as a draft rather than filling gaps or publishing an
         # incomplete plan. A native document may intentionally be noncontinuous.
-        ocr_used = ocr_required or any(warning.startswith("Применено локальное OCR Windows:")
+        ocr_used = ocr_required or any(warning.startswith(OCR_WARNING_PREFIXES)
                                        for warning in base_warnings(document))
         missing = _missing_weeks(draft)
         if ocr_used and missing:

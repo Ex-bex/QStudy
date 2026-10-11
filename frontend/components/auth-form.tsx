@@ -3,16 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Eye,
-  EyeOff,
-  Loader2,
-  ShieldCheck,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, ShieldCheck } from "lucide-react";
 import Brand from "./brand";
 import LearningScene from "./learning-scene";
+import PasswordInput from "./password-input";
 import { api, setToken } from "@/lib/api";
 
 export default function AuthForm({ register = false }: { register?: boolean }) {
@@ -21,7 +15,6 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [visible, setVisible] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   async function submit(e: React.FormEvent) {
@@ -123,28 +116,18 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
             </label>
             <label>
               Пароль
-              <span className="password-field">
-                <input
-                  className="field"
-                  type={visible ? "text" : "password"}
-                  autoComplete={register ? "new-password" : "current-password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={
-                    register ? "Придумайте надёжный пароль" : "Введите пароль"
-                  }
-                  minLength={register ? 10 : 1}
-                  maxLength={128}
-                  required
-                />
-                <button
-                  type="button"
-                  aria-label={visible ? "Скрыть пароль" : "Показать пароль"}
-                  onClick={() => setVisible(!visible)}
-                >
-                  {visible ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </span>
+              <PasswordInput
+                className="field"
+                autoComplete={register ? "new-password" : "current-password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={
+                  register ? "Придумайте надёжный пароль" : "Введите пароль"
+                }
+                minLength={register ? 10 : 1}
+                maxLength={128}
+                required
+              />
               {register && (
                 <small className="muted">
                   От 10 символов, с буквами и цифрами.
@@ -154,9 +137,8 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
             {register && (
               <label>
                 Повторите пароль
-                <input
+                <PasswordInput
                   className="field"
-                  type={visible ? "text" : "password"}
                   autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}

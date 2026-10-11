@@ -1,4 +1,4 @@
-"""Bounded local PDF scan recognition using the installed Windows OCR engine.
+"""Bounded PDF scan recognition using local Windows OCR or Linux Tesseract.
 
 Native text stays native. Only image/drawing pages with almost no text are
 rendered; neither documents nor recognized text are sent to a cloud service.
@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -20,6 +21,7 @@ MAX_IMAGE_DIMENSION = 3200
 MAX_CHARS = 200_000
 MAX_SECONDS = 480
 MIN_NATIVE_CHARS = 30
+OCR_WARNING_PREFIXES = ("Применено локальное OCR Windows:", "Применено локальное OCR Tesseract:")
 _HELPER = Path(__file__).resolve().parents[3] / "scripts" / "qstudy_ocr.ps1"
 _CONTRAST_LUT = bytes(round(255 * (value / 255) ** 3) for value in range(256))
 
@@ -70,7 +72,7 @@ def _windows_powershell() -> Path:
     return executable
 
 
-def _recognize_images(pages: list[dict], directory: Path, started: float) -> dict[int, str]:
+def _recognize_windows_images(pages: list[dict], directory: Path, started: float) -> dict[int, str]:
     executable = _windows_powershell()
     if not _HELPER.is_file():
         raise PDFOCRError("Локальный модуль OCR не установлен. Скопируйте папку scripts вместе с проектом")
@@ -134,6 +136,97 @@ def _recognize_images(pages: list[dict], directory: Path, started: float) -> dic
         raise PDFOCRError("Локальное OCR вернуло неполный результат. Повторите распознавание PDF") from None
 
 
+def _linux_tesseract() -> Path:
+    """Use a fixed executable or an absolute path set by the server owner.
+
+    Never resolve the executable through PATH or accept options from a document.
+    This setting is trusted server configuration, not a browser-upload field.
+    """
+    value = os.environ.get("TESSERACT_EXECUTABLE") or "/usr/bin/tesseract"
+    try:
+        executable = Path(value)
+        if any(ord(character) < 32 for character in value) or not executable.is_absolute():
+            raise ValueError("invalid executable")
+        executable = executable.resolve(strict=True)
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise ValueError("unavailable executable")
+    except (OSError, ValueError):
+        raise PDFOCRError("Локальное OCR Tesseract недоступно. Установите Tesseract и пакеты русского и английского языков на сервере Linux") from None
+    return executable
+
+
+def _run_tesseract(arguments: list[str], started: float, *, stdout) -> None:
+    try:
+        result = subprocess.run(arguments, shell=False, stdout=stdout, stderr=subprocess.DEVNULL,
+                                timeout=_remaining(started), check=False)
+    except subprocess.TimeoutExpired:
+        raise PDFOCRError("Локальное распознавание PDF заняло слишком долго. Разделите документ и повторите попытку") from None
+    except (OSError, UnicodeError):
+        raise PDFOCRError("Не удалось запустить локальное OCR Tesseract. Проверьте установку на сервере Linux") from None
+    if result.returncode:
+        raise PDFOCRError("Локальное OCR Tesseract не смогло прочитать PDF. Проверьте качество скана и установленные языки распознавания")
+    _remaining(started)
+
+
+def _tesseract_languages(executable: Path, directory: Path, started: float) -> str:
+    # A private file bounds Python memory even if a faulty engine writes a huge
+    # language listing. The listing can contain OS paths; it is never logged.
+    with tempfile.TemporaryFile(mode="w+b", dir=directory) as listing:
+        _run_tesseract([str(executable), "--list-langs"], started, stdout=listing)
+        listing.seek(0)
+        raw = listing.read(64_001)
+    try:
+        if len(raw) > 64_000:
+            raise ValueError("oversized language listing")
+        available = set(raw.decode("utf-8-sig", errors="strict").splitlines())
+    except (UnicodeError, ValueError):
+        raise PDFOCRError("Локальное OCR Tesseract вернуло некорректный список языков. Проверьте установку на сервере Linux") from None
+    if not {"rus", "eng"}.issubset(available):
+        raise PDFOCRError("В Tesseract не установлены русский и английский языки OCR. Установите пакеты tesseract-ocr-rus и tesseract-ocr-eng на сервере Linux")
+    return "rus+eng+kaz" if "kaz" in available else "rus+eng"
+
+
+def _recognize_linux_images(pages: list[dict], directory: Path, started: float) -> dict[int, str]:
+    executable = _linux_tesseract()
+    languages = _tesseract_languages(executable, directory, started)
+    recognized: dict[int, str] = {}
+    total = 0
+    for page in pages:
+        output_base = directory / f"recognized-{page['index'] + 1}"
+        output = output_base.with_suffix(".txt")
+        # Precreate with private permissions. Tesseract truncates this existing
+        # file; the enclosing staging directory is also private (0700).
+        with output.open("xb"):
+            pass
+        os.chmod(output, 0o600)
+        _run_tesseract([str(executable), page["path"], str(output_base), "-l", languages,
+                        "--psm", "3", "-c", "preserve_interword_spaces=1"],
+                       started, stdout=subprocess.DEVNULL)
+        try:
+            remaining_chars = MAX_CHARS - total
+            if output.stat().st_size > remaining_chars * 4 + 3:
+                raise PDFOCRError("В PDF слишком много текста для распознавания. Разделите документ на части")
+            with output.open("r", encoding="utf-8-sig", errors="strict") as result:
+                raw_text = result.read(remaining_chars + 1)
+            if len(raw_text) > remaining_chars:
+                raise PDFOCRError("В PDF слишком много текста для распознавания. Разделите документ на части")
+        except (OSError, UnicodeError):
+            raise PDFOCRError("Локальное OCR Tesseract вернуло некорректный результат. Повторите распознавание PDF") from None
+        text = "\n".join(line.replace("\x00", "").strip() for line in raw_text.splitlines() if line.strip()).strip()
+        total += len(text)
+        recognized[page["index"]] = text
+        _remaining(started)
+    return recognized
+
+
+def _recognize_images(pages: list[dict], directory: Path, started: float) -> dict[int, str]:
+    if sys.platform == "win32":
+        return _recognize_windows_images(pages, directory, started)
+    if sys.platform.startswith("linux"):
+        return _recognize_linux_images(pages, directory, started)
+    raise PDFOCRError("Локальное OCR сканов PDF доступно в Windows 10/11 или на Linux с Tesseract. Добавьте текстовый слой PDF и повторите попытку")
+
+
 def recognize_pdf(path: Path, page_indices=None) -> tuple[str, list[str]]:
     """Extract selected zero-based pages in document order, with local OCR.
 
@@ -187,7 +280,8 @@ def recognize_pdf(path: Path, page_indices=None) -> tuple[str, list[str]]:
             recognized = _recognize_images(scans, directory, started) if scans else {}
             if scans:
                 numbers = ", ".join(str(page["index"] + 1) for page in scans)
-                warnings.append(f"Применено локальное OCR Windows: страницы {numbers}, усилен контраст сканов. Проверьте названия, числа и таблицы по оригиналу PDF")
+                engine = "Tesseract" if sys.platform.startswith("linux") else "Windows"
+                warnings.append(f"Применено локальное OCR {engine}: страницы {numbers}, усилен контраст сканов. Проверьте названия, числа и таблицы по оригиналу PDF")
             parts = []
             total = 0
             for index in selected:

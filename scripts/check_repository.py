@@ -11,11 +11,13 @@ def private_path(filename: str) -> bool:
     environment = (name == ".env" or name.startswith(".env.")) and not name.endswith(".example")
     database = any(name.endswith(suffix) for suffix in (
         ".db", ".db-wal", ".db-shm", ".db-journal", ".sqlite", ".sqlite3",
-        ".sqlite-wal", ".sqlite-shm", ".sqlite3-wal", ".sqlite3-shm",
+        ".sqlite-wal", ".sqlite-shm", ".sqlite-journal", ".sqlite3-wal", ".sqlite3-shm", ".sqlite3-journal",
     ))
     storage = any(part in {".local", ".backups", "local-documents", "uploads", ".venv", "venv", "node_modules", ".next"}
                   or part.startswith("backup-") or part.startswith(".restore-") for part in parts)
-    return environment or database or storage or name == ".qstudy-admin-initial.txt"
+    production_data = len(parts) >= 2 and parts[:2] == ("deployment", "data")
+    private_key = name.endswith((".pem", ".key"))
+    return environment or database or storage or production_data or private_key or name == ".qstudy-admin-initial.txt"
 
 
 def main() -> int:
