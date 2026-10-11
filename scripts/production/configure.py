@@ -11,6 +11,7 @@ import secrets
 import socket
 import stat
 import sys
+import urllib.parse
 import urllib.request
 
 
@@ -177,19 +178,51 @@ def permissions(base: Path) -> dict:
     return {"status": "permissions_ready", "backend_uid": 10001, "backend_gid": 10001}
 
 
+class ProbeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        # Never follow another site or print an untrusted Location header.
+        raise ConfigurationError("The public HTTPS probe refused a redirect. Check the configured domain and proxy.")
+
+
+def assert_probe_origin(response_url: str, origin: str) -> None:
+    try:
+        actual = urllib.parse.urlsplit(response_url)
+        expected = urllib.parse.urlsplit(origin)
+        actual_port = 443 if actual.port is None else actual.port
+        same_origin = (
+            response_url == response_url.strip()
+            and actual.username is None and actual.password is None
+            and actual.scheme == "https" and actual.hostname == expected.hostname
+            and actual_port == 443
+        )
+    except (TypeError, ValueError):
+        same_origin = False
+    if not same_origin:
+        raise ConfigurationError("The public HTTPS probe received a response from another origin.")
+
+
 def probe(base: Path) -> dict:
-    values = read_environment(safe_path(base, ".env"))
-    origin = "https://" + normalized_domain(values.get("QSTUDY_DOMAIN", ""))
-    with urllib.request.urlopen(origin + "/api/health", timeout=25) as response:
-        health = json.loads(response.read(10_000))
-        if response.status != 200 or health.get("status") != "ok" or health.get("service") != "QStudy":
+    # Validate secrets, recovery mode, storage and the exact public URL before
+    # any requests. This probe verifies access from this host, not another network.
+    origin = check(base, offline=True)["public_url"]
+    opener = urllib.request.build_opener(ProbeRedirectHandler())
+    with opener.open(origin + "/api/health", timeout=25) as response:
+        assert_probe_origin(response.geturl(), origin)
+        try:
+            health = json.loads(response.read(10_000))
+        except (ValueError, UnicodeError) as error:
+            raise ConfigurationError("The public API health response is not valid QStudy JSON.") from error
+        if response.status != 200 or not isinstance(health, dict) or health.get("status") != "ok" or health.get("service") != "QStudy":
             raise ConfigurationError("The public API health response is not QStudy.")
-    with urllib.request.urlopen(origin + "/", timeout=25) as response:
+    with opener.open(origin + "/", timeout=25) as response:
+        assert_probe_origin(response.geturl(), origin)
         if response.status != 200:
             raise ConfigurationError("The public homepage is unavailable.")
-        if "max-age=" not in response.headers.get("Strict-Transport-Security", ""):
-            raise ConfigurationError("The public proxy is missing its HTTPS security header.")
-    return {"status": "public_https_verified", "public_url": origin}
+        hsts = re.search(r"(?:^|;)\s*max-age\s*=\s*(\d+)\s*(?:;|$)", response.headers.get("Strict-Transport-Security", ""), re.IGNORECASE)
+        if not hsts or int(hsts.group(1)) <= 0:
+            raise ConfigurationError("The public proxy is missing a valid HTTPS security header.")
+    return {"status": "public_https_verified", "public_url": origin,
+            "verified_from_this_host": True, "external_reachability_proven": False}
 
 
 def main() -> int:

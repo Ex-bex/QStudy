@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('help', 'init', 'check', 'start', 'update', 'resume', 'stop', 'status', 'admin', 'mail-check', 'backup', 'verify', 'restore', 'install-autostart', 'remove-autostart')]
+    [ValidateSet('help', 'init', 'check', 'prepare', 'start', 'update', 'resume', 'stop', 'status', 'admin', 'mail-check', 'backup', 'verify', 'restore', 'install-autostart', 'remove-autostart')]
     [string]$Action = 'help',
     [string]$Domain = '',
     [string]$Email = '',
@@ -7,6 +7,7 @@
     [string]$Archive = '',
     [switch]$Offline,
     [switch]$NoBrowser,
+    [switch]$NoPublish,
     [ValidateRange(10, 600)][int]$DockerWaitSeconds = 180
 )
 . (Join-Path $PSScriptRoot 'QStudy.WindowsHost.ps1')
@@ -33,6 +34,7 @@ function Write-QStudyHostHelp {
 QStudy Internet host on Windows (Docker Desktop, Linux containers, Caddy HTTPS)
   Manage-QStudy-Internet.cmd init -Domain YOUR-DOMAIN -Email YOUR-EMAIL
   Manage-QStudy-Internet.cmd check [-Offline]
+  Manage-QStudy-Internet.cmd prepare
   Manage-QStudy-Internet.cmd start [-NoBrowser]
   Manage-QStudy-Internet.cmd update
   Manage-QStudy-Internet.cmd stop
@@ -41,7 +43,7 @@ QStudy Internet host on Windows (Docker Desktop, Linux containers, Caddy HTTPS)
   Manage-QStudy-Internet.cmd mail-check
   Manage-QStudy-Internet.cmd backup
   Manage-QStudy-Internet.cmd verify -Archive BACKUP-BASENAME
-  Manage-QStudy-Internet.cmd restore -Archive BACKUP-BASENAME
+  Manage-QStudy-Internet.cmd restore -Archive BACKUP-BASENAME [-NoPublish]
   Manage-QStudy-Internet.cmd install-autostart
   Manage-QStudy-Internet.cmd remove-autostart
 Privately edit deployment/.env after init. Desktop installation/license,
@@ -49,6 +51,11 @@ router port forwarding TCP 80/443, public IP and DNS/DDNS are one-time setup.
 This manager never changes firewall rules, router settings or power settings.
 Autostart runs at this user's sign-in; enable Docker Desktop sign-in startup.
 Backend 8000 and frontend 3000 remain private container ports.
+prepare builds images, validates Caddy and starts only private backend/frontend;
+Internet is required for downloads, but public DNS and HTTPS are not tested.
+It refuses preparation while this checkout's public Caddy service is running.
+restore -NoPublish restores data and starts only private backend/frontend;
+Caddy stays stopped. Run start after DNS, router and account setup are ready.
 Read docs/home-hosting.md before publishing.
 '@
 }
@@ -196,6 +203,7 @@ function Set-QStudyHostAutostart([bool]$Install) {
 }
 
 try {
+    if ($NoPublish -and $Action -ne 'restore') { throw '-NoPublish is supported only with restore.' }
     if ($Action -eq 'help') { Write-QStudyHostHelp; exit 0 }
     if ($Domain -and $Action -ne 'init') { throw '-Domain is supported only with init. Edit both production domain settings explicitly for a later change.' }
     if ($Email -and $Action -notin @('init', 'admin')) { throw '-Email is supported only with init or admin.' }
@@ -205,6 +213,7 @@ try {
     if ($Action -eq 'init' -and (-not $Domain -or -not $Email)) { throw 'Use init -Domain YOUR-DOMAIN -Email YOUR-EMAIL.' }
     if ($Action -eq 'admin' -and (-not $Email -or $Email.StartsWith('-'))) { throw 'Use admin -Email ACCOUNT-EMAIL.' }
     if ($Offline -and $Action -in @('start', 'update')) { throw 'start/update require live DNS checks. Use check -Offline to prepare configuration before DNS is ready.' }
+    if ($Offline -and $Action -eq 'prepare') { throw 'prepare requires Internet access to download/build images. Public DNS is not required. Use check -Offline for configuration validation without downloads.' }
     $localDirectory = Assert-QStudyHostPath $taskRoot (Join-Path $taskRoot '.local')
     [IO.Directory]::CreateDirectory($localDirectory) | Out-Null
     $lockPath = Assert-QStudyHostPath $taskRoot (Join-Path $localDirectory 'internet-host.lock')
@@ -227,14 +236,15 @@ try {
             Assert-QStudyDockerReady
             Write-Host 'Configuration and Linux Docker engine are ready. A build, HTTPS certificate and an external Internet test are still required.'
         }
-        { $_ -in @('start', 'update', 'resume') } {
+        { $_ -in @('prepare', 'start', 'update', 'resume') } {
             Protect-QStudyHostStorage $taskRoot
-            $options = @('check'); if ($Action -eq 'resume') { $options += '--offline' }
+            $options = @('check'); if ($Action -in @('prepare', 'resume')) { $options += '--offline' }
             Invoke-QStudyConfiguration $options
             Assert-QStudyDockerReady -Wait:($Action -eq 'resume')
             if ($Action -ne 'resume') {
                 $running = @(Invoke-QStudyCompose @('ps', '--status', 'running', '--services') -Capture)
-                if ($Action -eq 'update' -and $running -contains 'backend') { Invoke-QStudyCompose @('exec', '-T', 'backend', 'python', 'production_runtime.py', 'backup') }
+                if ($Action -eq 'prepare' -and $running -contains 'caddy') { throw 'prepare refused: this checkout Caddy service is already running. Manage the current public site explicitly first; no services were stopped or replaced.' }
+                if ($Action -in @('prepare', 'update') -and $running -contains 'backend') { Invoke-QStudyCompose @('exec', '-T', 'backend', 'python', 'production_runtime.py', 'backup') }
                 Invoke-QStudyCompose @('build', '--pull', '--builder', 'default')
                 Invoke-QStudyCompose @('pull', 'caddy')
                 Invoke-QStudyCompose @('run', '--rm', '--no-deps', '-T', 'caddy', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile')
@@ -243,8 +253,10 @@ try {
             }
             $upArguments = @('up', '-d', '--no-build', '--wait', '--wait-timeout', '600')
             if ($Action -eq 'resume') { $upArguments += @('--pull', 'never') }
+            if ($Action -eq 'prepare') { $upArguments += @('backend', 'frontend') }
             Invoke-QStudyCompose $upArguments
-            if ($Action -eq 'resume') { Write-Host 'Existing production containers resumed. Public Internet availability was not tested at sign-in.' }
+            if ($Action -eq 'prepare') { Write-Host 'Preparation complete: production backend/frontend are healthy on private container networks; SMTP was checked if enabled. Caddy was not started, no public ports were published, and public DNS/HTTPS were not tested. Configure accounts and DNS/router access, then run start to publish.' }
+            elseif ($Action -eq 'resume') { Write-Host 'Existing production containers resumed. Public Internet availability was not tested at sign-in.' }
             else {
                 if (-not (Start-QStudyPublicProbe)) { throw 'The public HTTPS probe did not pass. Containers remain running for diagnosis; publication was not declared successful.' }
                 if (-not $NoBrowser) {
@@ -278,8 +290,13 @@ try {
                     Protect-QStudyHostStorage $taskRoot
                     # Restore failure deliberately leaves every service stopped.
                     Invoke-QStudyCompose @('run', '--rm', '--no-deps', '-T', 'backend', 'python', 'production_runtime.py', 'restore', $Archive, '--stopped')
-                    Invoke-QStudyCompose @('up', '-d', '--no-build', '--wait', '--wait-timeout', '600')
-                    if (-not (Start-QStudyPublicProbe)) { throw 'Data restored, but public HTTPS is not verified. Containers remain running; test from an external network.' }
+                    if ($NoPublish) {
+                        Invoke-QStudyCompose @('up', '-d', '--no-build', '--wait', '--wait-timeout', '600', 'backend', 'frontend')
+                        Write-Host 'Data restored: backend/frontend are healthy on private container networks. Caddy remains stopped; public HTTPS was not tested. Configure accounts and DNS/router access, then run start to publish.'
+                    } else {
+                        Invoke-QStudyCompose @('up', '-d', '--no-build', '--wait', '--wait-timeout', '600')
+                        if (-not (Start-QStudyPublicProbe)) { throw 'Data restored, but public HTTPS is not verified. Containers remain running; test from an external network.' }
+                    }
                 }
             }
         }

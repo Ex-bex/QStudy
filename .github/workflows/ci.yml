@@ -49,6 +49,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QStudyDuckDNS.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/production/Test-QStudyHostSetup.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/production/Test-QStudyHostWizard.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Backend tests
         working-directory: backend
         run: python -m unittest discover -s tests
@@ -78,6 +82,8 @@ jobs:
           bash -n scripts/production/Install-Docker.sh scripts/production/Manage-QStudy.sh
           python3 -m unittest discover -s backend/tests -p test_production_configuration.py
           python3 scripts/production/configure.py init qstudy-ci.example.org owner@example.org
+          # Only this disposable installation permits the smoke-test sign-up.
+          sed -i "s/^REGISTRATION_ENABLED='false'$/REGISTRATION_ENABLED='true'/" deployment/.env
           python3 scripts/production/configure.py check --offline
           sudo python3 scripts/production/configure.py permissions
           docker compose --env-file deployment/.env -f deployment/compose.yml config --quiet
