@@ -243,7 +243,8 @@ class SMTPDeliveryTests(unittest.TestCase):
             self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
             self.assertTrue(context.check_hostname)
             message = server.send_message.call_args.args[0]
-            self.assertEqual(message['From'], 'qstudy@fixture.example')
+            self.assertEqual(message['From'], 'QStudy <qstudy@fixture.example>')
+            self.assertEqual(message['From'].addresses[0].display_name, 'QStudy')
             self.assertEqual(message['To'], 'student@fixture.example')
 
     def test_ssl_encrypts_connection_and_supports_unauthenticated_relay(self):
@@ -260,6 +261,34 @@ class SMTPDeliveryTests(unittest.TestCase):
             server.starttls.assert_not_called()
             server.login.assert_not_called()
             server.send_message.assert_called_once()
+
+    def test_explicit_sender_display_name_is_preserved(self):
+        for sender, expected in (('QStudy Support <team@fixture.example>', 'QStudy Support'),
+                                 ('"Doe, Jane" <team@fixture.example>', 'Doe, Jane'),
+                                 ('Команда QStudy <team@fixture.example>', 'Команда QStudy')):
+            with self.subTest(sender=sender), patch.multiple(settings, SMTP_HOST='smtp.fixture.example', SMTP_PORT=587,
+                    SMTP_FROM=sender, SMTP_USERNAME='', SMTP_SECURITY='starttls'), \
+                    patch.object(recovery.smtplib, 'SMTP') as constructor:
+                recovery._send_email('student@fixture.example', 'Fixture message', 'QStudy fixture')
+                server = constructor.return_value.__enter__.return_value
+                message = server.send_message.call_args.args[0]
+                self.assertEqual(len(message['From'].addresses), 1)
+                self.assertEqual(message['From'].addresses[0].display_name, expected)
+                self.assertEqual(message['From'].addresses[0].addr_spec, 'team@fixture.example')
+
+    def test_invalid_multiple_or_injected_senders_reject_before_connecting(self):
+        senders = ('', ' ', 'not-an-email', 'person@', 'QStudy <person@example.com> garbage',
+                   'first@example.com, second@example.com', 'Group: person@example.com;',
+                   'person@example.com\r\nBcc: other@example.com', 'QStudy\n<person@example.com>',
+                   'person@example.com\x00', 'QStudy <person@example.com')
+        for sender in senders:
+            with self.subTest(sender=sender), patch.object(settings, 'SMTP_FROM', sender), \
+                    patch.object(recovery.smtplib, 'SMTP') as smtp, \
+                    patch.object(recovery.smtplib, 'SMTP_SSL') as smtp_ssl:
+                with self.assertRaisesRegex(ValueError, 'Invalid mail sender'):
+                    recovery._send_email('student@fixture.example', 'Fixture message', 'QStudy fixture')
+                smtp.assert_not_called()
+                smtp_ssl.assert_not_called()
 
 
 if __name__ == '__main__':

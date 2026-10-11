@@ -9,6 +9,7 @@ import ssl
 import tempfile
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from email.headerregistry import Address
 from pathlib import Path
 from urllib.parse import urlsplit
 import re
@@ -16,6 +17,7 @@ import re
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
+from pydantic import EmailStr, TypeAdapter, ValidationError
 
 from app.auth import hash_password
 from app.config import settings, BACKEND_DIR
@@ -61,12 +63,27 @@ def issue_reset(db: Session, email: str):
     return record.id, user.email, token
 
 
-def _send_email(email: str, content: str, subject: str):
-    if any(c in settings.SMTP_FROM for c in "\r\n"):
+def _mail_sender(value: str) -> Address:
+    """Use the product name by default and allow one valid sender mailbox."""
+    if not value or any(ord(character) < 32 or ord(character) == 127 for character in value):
         raise ValueError("Invalid mail sender")
+    try:
+        probe = EmailMessage()
+        probe["From"] = value
+        header = probe["From"]
+        if header.defects or len(header.addresses) != 1 or any(group.display_name is not None for group in header.groups):
+            raise ValueError("Invalid mail sender")
+        sender = header.addresses[0]
+        mailbox = str(TypeAdapter(EmailStr).validate_python(sender.addr_spec))
+        return Address(display_name=sender.display_name or "QStudy", addr_spec=mailbox)
+    except (ValueError, TypeError, IndexError, ValidationError) as error:
+        raise ValueError("Invalid mail sender") from error
+
+
+def _send_email(email: str, content: str, subject: str):
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = settings.SMTP_FROM
+    message["From"] = _mail_sender(settings.SMTP_FROM)
     message["To"] = email
     message.set_content(content)
     context = ssl.create_default_context()
