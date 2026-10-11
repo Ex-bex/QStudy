@@ -1,0 +1,105 @@
+.branding-admin-description {
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 7px;
+}
+.branding-admin-panel {
+  padding: 25px;
+}
+.branding-upload {
+  min-width: 0;
+}
+.branding-upload-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+.branding-logo-preview {
+  width: 100px;
+  height: 100px;
+  position: relative;
+  flex-shrink: 0;
+  border: 1px solid #dfe5df;
+  border-radius: 18px;
+  overflow: hidden;
+  background-color: #fff;
+  background-image: repeating-conic-gradient(
+    #eef1ed 0% 25%,
+    transparent 0% 50%
+  );
+  background-size: 16px 16px;
+}
+.branding-upload-fields {
+  flex: 1;
+  min-width: 0;
+}
+.branding-upload-fields input[type="file"] {
+  max-width: 100%;
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 400;
+  border: 1px solid #dfe5df;
+  border-radius: 10px;
+  padding: 9px;
+  background: #fafcf9;
+}
+.branding-upload-fields input[type="file"]::file-selector-button {
+  background: #edf3eb;
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 9px;
+  margin-right: 9px;
+  color: #315a41;
+  cursor: pointer;
+}
+.branding-upload-fields > .muted {
+  font-size: 11px;
+  line-height: 1.7;
+  margin-top: 8px;
+}
+.branding-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 14px;
+}
+.branding-upload-actions > button {
+  max-width: 100%;
+  white-space: normal;
+}
+.branding-file-name {
+  font-size: 11px;
+  color: #53634f;
+  overflow-wrap: anywhere;
+  margin-top: 8px;
+}
+.branding-upload-notice {
+  min-height: 16px;
+  color: #315e3e;
+  font-size: 12px;
+  margin-top: 12px;
+}
+.branding-department-upload {
+  border-top: 1px solid #e6ebe5;
+  padding-top: 18px;
+}
+.branding-department-upload .branding-upload-content {
+  flex-direction: column;
+  gap: 14px;
+}
+.branding-department-upload .branding-upload-fields {
+  width: 100%;
+}
+@media (max-width: 600px) {
+  .branding-admin-panel {
+    padding: 21px;
+  }
+  .branding-upload-content {
+    flex-direction: column;
+    gap: 15px;
+  }
+  .branding-upload-fields {
+    width: 100%;
+  }
+}

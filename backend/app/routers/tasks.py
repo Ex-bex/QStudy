@@ -3,26 +3,32 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Task, Subject, Topic, Note, Material
 from app.auth import get_current_user
+from app.security import validate_relations, validate_selection, save_upload
 from app.services.ai import generate_content, AIError
+from app.services import background
+from app.services.learning_context import LearningSelection, safe_learning_provenance
+from app.services.learning_generation import (prepare_generation, source_payload, learning_prompt,
+    validate_generation_source, generate_job_text, generated_provenance)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-class GenerateRequest(BaseModel):
-    subject_id: int
+class GenerateRequest(LearningSelection):
+    model_config = ConfigDict(extra="forbid")
+    subject_id: int | None = Field(default=None, gt=0)
     topic_id: Optional[int] = None
-    difficulty: str = "medium"   # easy / medium / hard
+    difficulty: str = Field(default="medium", pattern="^(easy|medium|hard)$")   # easy / medium / hard
     count: int = 5
 
 
 class AnswerRequest(BaseModel):
-    answer: str
+    answer: str = Field(min_length=1, max_length=20000)
 
 
 def parse_json(raw: str):
@@ -39,105 +45,67 @@ def task_public(t: Task) -> dict:
         "difficulty": t.difficulty, "status": t.status,
         "user_answer": t.user_answer, "subject_id": t.subject_id,
         "topic_id": t.topic_id, "created_at": str(t.created_at),
+        "source_context": safe_learning_provenance(t.source_context_json),
     }
 
 
 @router.post("/generate")
 async def generate_tasks(data: GenerateRequest, db: Session = Depends(get_db),
                          user=Depends(get_current_user)):
-    subject = db.query(Subject).filter(
-        Subject.id == data.subject_id, Subject.user_id == user.id).first()
-    if not subject:
-        raise HTTPException(404, "Предмет не найден")
-    topic = None
-    if data.topic_id:
-        topic = db.query(Topic).filter(Topic.id == data.topic_id).first()
-        if not topic:
-            raise HTTPException(404, "Тема не найдена")
-
-    def find_notes(topic_id: Optional[int]):
-        q = db.query(Note).filter(Note.user_id == user.id,
-                                  Note.subject_id == data.subject_id)
-        if topic_id:
-            q = q.filter(Note.topic_id == topic_id)
-        return q.limit(5).all()
-
-    def find_materials(topic_id: Optional[int]):
-        qm = db.query(Material).filter(
-            Material.user_id == user.id, Material.subject_id == data.subject_id,
-            Material.processed == True)  # noqa: E712
-        if topic_id:
-            qm = qm.filter(Material.topic_id == topic_id)
-        return [m for m in qm.limit(5) if m.extracted_text]
-
-    # Сначала ищем в рамках выбранной темы; если пусто — расширяем до предмета
-    topic_id = topic.id if topic else None
-    notes_list = find_notes(topic_id)
-    materials = find_materials(topic_id)
-    if topic and not notes_list and not materials:
-        notes_list = find_notes(None)
-        materials = find_materials(None)
-
-    parts, sources = [], []
-    for n in notes_list:
-        parts.append(f"Заметка «{n.title}»:\n{(n.content or '')[:2000]}")
-        sources.append(f"заметка «{n.title}»")
-    for m in materials:
-        parts.append(f"Материал «{m.filename}»:\n{m.extracted_text[:4000]}")
-        sources.append(f"файл «{m.filename}»")
-    context = "\n\n".join(parts)
-
+    validate_relations(db, data.subject_id, data.topic_id)
+    source = prepare_generation(db, user, data,
+        [data.subject_id] if data.subject_id is not None else [],
+        [data.topic_id] if data.topic_id is not None else [])
     count = max(1, min(data.count, 10))
-    prompt = f"Ты — преподаватель предмета «{subject.name}»."
-    if topic:
-        prompt += f" Тема: «{topic.title}»."
-
-    if context:
-        prompt += f"""
-Составь {count} задач или вопросов уровня «{data.difficulty}» СТРОГО по материалам студента ниже.
-Не задавай вопросов по темам, которых нет в материалах. Формы разнообразь: определения,
-«почему», «сравни», расчёты, мини-кейсы — но каждый вопрос должен быть ответим ИЗ этих материалов.
-
-МАТЕРИАЛЫ СТУДЕНТА:
-{context}
-"""
-    else:
-        prompt += f"""
-Составь {count} задач или вопросов уровня «{data.difficulty}» для проверки знаний студента.
-Материалов у студента нет — используй свои знания по предмету.
-Формы разнообразь: определения, «почему», расчёты, мини-кейсы — где уместно.
-"""
-
-    prompt += """
-Верни СТРОГО JSON-массив, без текста вокруг:
-[{"question": "текст вопроса", "answer": "эталонный ответ с объяснением", "hint": "подсказка, не раскрывающая ответ"}]
-"""
-
-    try:
-        raw = await generate_content(prompt, json_mode=True)
-        items = parse_json(raw)
-    except AIError as e:
-        raise HTTPException(502, str(e))
-    except Exception:
-        raise HTTPException(502, "ИИ вернул неожиданный формат — попробуй ещё раз")
-
-    if isinstance(items, dict):
-        items = items.get("tasks", [])
-
-    created = []
-    for item in items[:count]:
-        if not isinstance(item, dict) or not item.get("question"):
-            continue
-        task = Task(
-            user_id=user.id, subject_id=data.subject_id,
-            topic_id=topic.id if topic else None,
-            question=item["question"], answer=str(item.get("answer", "")),
-            hint=str(item.get("hint", "")), difficulty=data.difficulty,
-        )
-        db.add(task)
-        created.append(task)
+    prompt = learning_prompt(source, f"""Составь {count} разнообразных задач или вопросов уровня «{data.difficulty}».
+Проверяй понимание: определения, сравнения, расчёты и небольшие практические случаи по выбранным темам.
+Подсказка не должна раскрывать ответ. Верни только JSON-массив:
+[{{"question":"вопрос", "answer":"эталонный ответ с объяснением", "hint":"подсказка"}}]""")
+    import hashlib
+    payload = {"subject_id": data.subject_id, "topic_id": data.topic_id,
+        "difficulty": data.difficulty, "count": count, "prompt": prompt,
+        "sources": [source.title], **source_payload(source)}
+    identity = {key: value for key, value in payload.items() if key != "source_context"}
+    resource_key = "tasks:" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    job = background.enqueue_job(db, user.id, "tasks", f"Упражнения: {source.title}", payload, resource_key)
+    job_id, user_id = job.id, user.id
     db.commit()
-    return {"tasks": [task_public(t) for t in created], "sources": sources}
+    result = await background.await_job_result(job_id, user_id)
+    db.expire_all()
+    rows = db.query(Task).filter(Task.user_id == user_id, Task.id.in_(result["task_ids"])).all()
+    by_id = {row.id: row for row in rows}
+    return {"tasks": [task_public(by_id[item]) for item in result["task_ids"] if item in by_id],
+            "sources": result["sources"]}
+
+@background.register_handler("tasks")
+async def _generate_tasks_job(context, payload):
+    with context.session() as db:
+        context.require_current(db)
+        validate_relations(db, payload["subject_id"], payload["topic_id"])
+        validate_generation_source(context, db, payload)
+    raw, research = await generate_job_text(context, payload, generate_content)
+    try:
+        items = parse_json(raw)
+    except (ValueError, TypeError):
+        raise background.JobPermanentError("ИИ вернул некорректные упражнения. Повторите генерацию") from None
+    if isinstance(items, dict): items = items.get("tasks", [])
+    if not isinstance(items, list):
+        raise background.JobPermanentError("ИИ вернул некорректные упражнения. Повторите генерацию")
+    items = [item for item in items[:payload["count"]] if isinstance(item, dict) and isinstance(item.get("question"), str) and item["question"].strip()]
+    if not items:
+        raise background.JobPermanentError("ИИ не составил упражнения. Повторите генерацию")
+    with context.session() as db:
+        context.require_current(db)
+        validate_relations(db, payload["subject_id"], payload["topic_id"])
+        validate_generation_source(context, db, payload)
+        created = [Task(user_id=context.user_id, subject_id=payload["subject_id"], topic_id=payload["topic_id"],
+            question=item["question"][:20000], answer=str(item.get("answer", ""))[:20000],
+            hint=str(item.get("hint", ""))[:10000], difficulty=payload["difficulty"],
+            source_context_json=generated_provenance(payload, research)) for item in items]
+        db.add_all(created); db.flush()
+        result = {"task_ids": [task.id for task in created], "sources": payload["sources"]}
+        context.complete(db, result)
+        return result
 
 @router.post("/{task_id}/answer")
 async def answer_task(task_id: int, data: AnswerRequest, db: Session = Depends(get_db),
@@ -176,7 +144,7 @@ async def answer_task(task_id: int, data: AnswerRequest, db: Session = Depends(g
     return {
         "task": task_public(task),
         "verdict": verdict,
-        "score": int(result.get("score", 0)),
+        "score": max(0, min(100, int(result.get("score", 0)))),
         "feedback": result.get("feedback", ""),
     }
 
@@ -199,3 +167,36 @@ def delete_task(task_id: int, db: Session = Depends(get_db),
     db.delete(task)
     db.commit()
     return {"ok": True}
+
+class TaskInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=20000)
+    answer: str = Field(default="", max_length=20000)
+    hint: str = Field(default="", max_length=10000)
+    difficulty: str = Field(default="medium", pattern="^(easy|medium|hard)$")
+    subject_id: int | None = None
+    topic_id: int | None = None
+
+
+@router.post("", status_code=201)
+def create_task(data: TaskInput, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    validate_relations(db, data.subject_id, data.topic_id)
+    task = Task(user_id=user.id, **data.model_dump())
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task_public(task)
+
+
+@router.patch("/{task_id}")
+def update_task(task_id: int, data: TaskInput, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+    if not task:
+        raise HTTPException(404, "Задача не найдена")
+    validate_relations(db, data.subject_id, data.topic_id)
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(task, key, value)
+    task.status = "new"
+    task.user_answer = ""
+    db.commit()
+    return task_public(task)

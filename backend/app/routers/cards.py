@@ -4,19 +4,25 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Flashcard, Subject, Topic, Note, Material
 from app.auth import get_current_user
+from app.security import validate_relations, validate_selection, save_upload
 from app.services.ai import generate_content, AIError
+from app.services import background
+from app.services.learning_context import LearningSelection, safe_learning_provenance
+from app.services.learning_generation import (prepare_generation, source_payload, learning_prompt,
+    validate_generation_source, generate_job_text, generated_provenance)
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
 
-class GenerateRequest(BaseModel):
-    subject_id: int
+class GenerateRequest(LearningSelection):
+    model_config = ConfigDict(extra="forbid")
+    subject_id: int | None = Field(default=None, gt=0)
     topic_id: Optional[int] = None
     count: int = 10
 
@@ -38,6 +44,7 @@ def card_public(c: Flashcard) -> dict:
         "subject_id": c.subject_id, "topic_id": c.topic_id,
         "interval": c.interval, "repetitions": c.repetitions,
         "next_review": str(c.next_review), "created_at": str(c.created_at),
+        "source_context": safe_learning_provenance(c.source_context_json),
     }
 
 
@@ -69,71 +76,57 @@ def sm2(card: Flashcard, quality: int):
 @router.post("/generate")
 async def generate_cards(data: GenerateRequest, db: Session = Depends(get_db),
                          user=Depends(get_current_user)):
-    subject = db.query(Subject).filter(
-        Subject.id == data.subject_id, Subject.user_id == user.id).first()
-    if not subject:
-        raise HTTPException(404, "Предмет не найден")
-    topic = None
-    if data.topic_id:
-        topic = db.query(Topic).filter(Topic.id == data.topic_id).first()
-
-    parts = []
-    q = db.query(Note).filter(Note.user_id == user.id, Note.subject_id == data.subject_id)
-    if topic:
-        q = q.filter(Note.topic_id == topic.id)
-    for n in q.limit(5):
-        parts.append(f"Заметка «{n.title}»:\n{(n.content or '')[:2000]}")
-
-    qm = db.query(Material).filter(
-        Material.user_id == user.id, Material.subject_id == data.subject_id,
-        Material.processed == True)  # noqa: E712
-    if topic:
-        qm = qm.filter(Material.topic_id == topic.id)
-    for m in qm.limit(5):
-        if m.extracted_text:
-            parts.append(f"Материал «{m.filename}»:\n{m.extracted_text[:2000]}")
-    context = "\n\n".join(parts)
-
+    validate_relations(db, data.subject_id, data.topic_id)
+    source = prepare_generation(db, user, data,
+        [data.subject_id] if data.subject_id is not None else [],
+        [data.topic_id] if data.topic_id is not None else [])
     count = max(1, min(data.count, 30))
-    prompt = f"Предмет: «{subject.name}»."
-    if topic:
-        prompt += f" Тема: «{topic.title}»."
-    prompt += f"""
-Составь {count} флеш-карточек для запоминания. Формат: лицевая сторона — вопрос/термин,
-оборотная — короткий точный ответ (1-3 предложения). Покрывай разные факты: определения,
-формулы, даты, классификации — что уместно для предмета.
-
-{("Опирайся ТОЛЬКО на материалы студента ниже." if context else "Материалов нет — используй базовые знания по предмету.")}
-
-{f"МАТЕРИАЛЫ СТУДЕНТА:{chr(10)}{context}" if context else ""}
-
-Верни СТРОГО JSON-массив без текста вокруг:
-[{{"front": "вопрос или термин", "back": "краткий ответ"}}]"""
-
-    try:
-        raw = await generate_content(prompt, json_mode=True)
-        items = parse_json(raw)
-    except AIError as e:
-        raise HTTPException(502, str(e))
-    except Exception:
-        raise HTTPException(502, "ИИ вернул неожиданный формат — попробуй ещё раз")
-
-    if isinstance(items, dict):
-        items = items.get("cards", [])
-
-    created = []
-    for item in items[:count]:
-        if not isinstance(item, dict) or not item.get("front") or not item.get("back"):
-            continue
-        card = Flashcard(
-            user_id=user.id, subject_id=data.subject_id,
-            topic_id=topic.id if topic else None,
-            front=str(item["front"]), back=str(item["back"]),
-        )
-        db.add(card)
-        created.append(card)
+    prompt = learning_prompt(source, f"""Составь {count} карточек для запоминания по выбранным темам.
+Лицевая сторона — вопрос или термин, оборотная — короткий точный ответ (1–3 предложения).
+Покрывай разные понятия, не дублируй карточки. Верни только JSON-массив:
+[{{"front":"вопрос или термин", "back":"краткий ответ"}}]""")
+    import hashlib
+    payload = {"subject_id": data.subject_id, "topic_id": data.topic_id,
+        "count": count, "prompt": prompt, **source_payload(source)}
+    identity = {key: value for key, value in payload.items() if key != "source_context"}
+    resource_key = "cards:" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    job = background.enqueue_job(db, user.id, "cards", f"Карточки: {source.title}", payload, resource_key)
+    job_id, user_id = job.id, user.id
     db.commit()
-    return [card_public(c) for c in created]
+    result = await background.await_job_result(job_id, user_id)
+    db.expire_all()
+    rows = db.query(Flashcard).filter(Flashcard.user_id == user_id, Flashcard.id.in_(result["card_ids"])).all()
+    by_id = {row.id: row for row in rows}
+    return [card_public(by_id[item]) for item in result["card_ids"] if item in by_id]
+
+@background.register_handler("cards")
+async def _generate_cards_job(context, payload):
+    with context.session() as db:
+        context.require_current(db)
+        validate_relations(db, payload["subject_id"], payload["topic_id"])
+        validate_generation_source(context, db, payload)
+    raw, research = await generate_job_text(context, payload, generate_content)
+    try:
+        items = parse_json(raw)
+    except (ValueError, TypeError):
+        raise background.JobPermanentError("ИИ вернул некорректные карточки. Повторите генерацию") from None
+    if isinstance(items, dict): items = items.get("cards", [])
+    if not isinstance(items, list):
+        raise background.JobPermanentError("ИИ вернул некорректные карточки. Повторите генерацию")
+    items = [item for item in items[:payload["count"]] if isinstance(item, dict) and str(item.get("front", "")).strip() and str(item.get("back", "")).strip()]
+    if not items:
+        raise background.JobPermanentError("ИИ не составил карточки. Повторите генерацию")
+    with context.session() as db:
+        context.require_current(db)
+        validate_relations(db, payload["subject_id"], payload["topic_id"])
+        validate_generation_source(context, db, payload)
+        created = [Flashcard(user_id=context.user_id, subject_id=payload["subject_id"], topic_id=payload["topic_id"],
+            front=str(item["front"])[:10000], back=str(item["back"])[:10000],
+            source_context_json=generated_provenance(payload, research)) for item in items]
+        db.add_all(created); db.flush()
+        result = {"card_ids": [card.id for card in created]}
+        context.complete(db, result)
+        return result
 
 
 @router.get("/due")
@@ -189,3 +182,37 @@ def delete_card(card_id: int, db: Session = Depends(get_db),
     db.delete(card)
     db.commit()
     return {"ok": True}
+
+class CardInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    front: str = Field(min_length=1, max_length=10000)
+    back: str = Field(min_length=1, max_length=10000)
+    subject_id: int | None = None
+    topic_id: int | None = None
+
+
+@router.get("")
+def list_cards(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return [card_public(card) for card in db.query(Flashcard).filter(Flashcard.user_id == user.id).order_by(Flashcard.id.desc())]
+
+
+@router.post("", status_code=201)
+def create_card(data: CardInput, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    validate_relations(db, data.subject_id, data.topic_id)
+    card = Flashcard(user_id=user.id, **data.model_dump())
+    db.add(card)
+    db.commit()
+    db.refresh(card)
+    return card_public(card)
+
+
+@router.patch("/{card_id}")
+def update_card(card_id: int, data: CardInput, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    card = db.query(Flashcard).filter(Flashcard.id == card_id, Flashcard.user_id == user.id).first()
+    if not card:
+        raise HTTPException(404, "Карточка не найдена")
+    validate_relations(db, data.subject_id, data.topic_id)
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(card, key, value)
+    db.commit()
+    return card_public(card)

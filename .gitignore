@@ -2,11 +2,33 @@
 __pycache__/
 *.pyc
 venv/
+.venv/
 .env
+.env.*
+!.env.example
+!.env.*.example
 
 # Данные
 backend/*.db
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 backend/uploads/
+backend/.qstudy-location.json
+backend/.restore-*/
+backup-*/
+.backups/
+.qstudy-admin-initial.txt
+.local/
+local-documents/
+*.tsbuildinfo
 
 # Node
 node_modules/

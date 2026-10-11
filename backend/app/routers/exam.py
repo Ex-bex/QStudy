@@ -7,22 +7,28 @@ from datetime import datetime
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.config import settings
 from app.models import ExamSession, ExamQuestion, Subject, Topic, Note, Material
 from app.auth import get_current_user
+from app.security import validate_relations, validate_selection, save_upload
 from app.services.ai import generate_content, transcribe_audio, AIError
+from app.services import background
+from app.services.learning_context import LearningSelection, safe_learning_provenance
+from app.services.learning_generation import (prepare_generation, source_payload, learning_prompt,
+    validate_generation_source, generate_job_text, generated_provenance)
 
 router = APIRouter(prefix="/exam", tags=["exam"])
 
 
-class StartRequest(BaseModel):
-    subject_ids: List[int]
-    topic_ids: Optional[List[int]] = None
-    difficulty: str = "medium"
+class StartRequest(LearningSelection):
+    model_config = ConfigDict(extra="forbid")
+    subject_ids: List[int] = Field(default_factory=list, max_length=30)
+    topic_ids: Optional[List[int]] = Field(default=None, max_length=100)
+    difficulty: str = Field(default="medium", pattern="^(easy|medium|hard)$")
     count: int = 5
 
 
@@ -47,7 +53,7 @@ def _context(db: Session, user_id: int, subject_ids: list,
     parts = []
     for sid in subject_ids:
         subject = db.query(Subject).filter(
-            Subject.id == sid, Subject.user_id == user_id).first()
+            Subject.id == sid).first()
         if not subject:
             continue
         subj_topics = [t.title for t in db.query(Topic).filter(
@@ -70,7 +76,7 @@ def _context(db: Session, user_id: int, subject_ids: list,
         for m in qm.limit(4):
             if m.extracted_text:
                 parts.append(f"Материал «{m.filename}»:\n{m.extracted_text[:3000]}")
-    return "\n\n".join(parts)
+    return "\n\n".join(parts)[:60000]
 
 
 def question_public(q: ExamQuestion, reveal: bool) -> dict:
@@ -90,6 +96,7 @@ def session_public(s: ExamSession, reveal: bool = False) -> dict:
         "difficulty": s.difficulty, "status": s.status, "summary": s.summary,
         "created_at": str(s.created_at),
         "questions": [question_public(q, reveal) for q in s.questions],
+        "source_context": safe_learning_provenance(s.source_context_json),
     }
 
 
@@ -121,75 +128,82 @@ def _owned(db: Session, session_id: int, user) -> ExamSession:
 @router.post("/start")
 async def start_exam(data: StartRequest, db: Session = Depends(get_db),
                      user=Depends(get_current_user)):
-    if not data.subject_ids:
-        raise HTTPException(400, "Выбери хотя бы один предмет")
-
-    subjects = db.query(Subject).filter(
-        Subject.id.in_(data.subject_ids), Subject.user_id == user.id).all()
-    if not subjects:
-        raise HTTPException(404, "Предметы не найдены")
-
-    topic_titles = []
-    if data.topic_ids:
-        topics = db.query(Topic).filter(Topic.id.in_(data.topic_ids)).all()
-        topic_titles = [t.title for t in topics]
-
+    source = prepare_generation(db, user, data, data.subject_ids, data.topic_ids)
     count = max(1, min(data.count, 10))
-    context = _context(db, user.id, data.subject_ids, data.topic_ids)
-
-    subj_line = ", ".join(s.name for s in subjects)
-    prompt = f"Ты — преподаватель по предметам: {subj_line}."
-    if topic_titles:
-        prompt += f" Темы экзамена: {', '.join(topic_titles)}."
-    prompt += f"""
-Проведи устный экзамен. Составь {count} открытых вопросов уровня «{data.difficulty}» —
-требующих развёрнутого ответа (НЕ варианты «а/б/в»). Разнообразь: определения,
-«почему», «сравни», «приведи пример», мини-расчёты где уместно.
-
-{("Составь вопросы СТРОГО по материалам студента ниже — не выходи за их пределы." if context else "Материалов нет — используй свои знания по предметам.")}
-
-{f"МАТЕРИАЛЫ СТУДЕНТА:{chr(10)}{context}" if context else ""}
-
-Верни СТРОГО JSON-массив без текста вокруг:
-[{{"question": "текст вопроса", "reference": "эталонный ответ — ключевые пункты, которые должен назвать студент"}}]"""
-
-    try:
-        raw = await generate_content(prompt, json_mode=True)
-        items = parse_json(raw)
-    except AIError as e:
-        raise HTTPException(502, str(e))
-    except Exception:
-        raise HTTPException(502, "ИИ вернул неожиданный формат — попробуй ещё раз")
-
-    if isinstance(items, dict):
-        items = items.get("questions", [])
-
-    session = ExamSession(user_id=user.id, difficulty=data.difficulty,
-                          subject_ids_json=json.dumps(data.subject_ids),
-                          topic_ids_json=json.dumps(data.topic_ids or []))
+    prompt = learning_prompt(source, f"""Составь {count} открытых вопросов для устного экзамена уровня «{data.difficulty}».
+Вопросы требуют развёрнутого ответа: определения, объяснения, сравнения и примеры по выбранным темам.
+Эталонный ответ перечисляет ключевые пункты, которые должен назвать студент.
+Верни только JSON-массив:
+[{{"question":"вопрос", "reference":"ключевые пункты ответа"}}]""")
+    session = ExamSession(user_id=user.id, difficulty=data.difficulty, status="generating",
+        subject_ids_json=json.dumps(data.subject_ids), topic_ids_json=json.dumps(data.topic_ids or []),
+        source_context_json=json.dumps(source.provenance, ensure_ascii=False))
     db.add(session)
     db.flush()
-
-    made = 0
-    for item in items[:count]:
-        if not isinstance(item, dict) or not item.get("question"):
-            continue
-        db.add(ExamQuestion(session_id=session.id, order=made,
-                            question=item["question"],
-                            reference=str(item.get("reference", ""))))
-        made += 1
-    if made == 0:
-        db.rollback()
-        raise HTTPException(502, "ИИ не составил вопросов — попробуй ещё раз")
+    job = background.enqueue_job(db, user.id, "exam", f"Экзамен: {source.title}",
+        {"session_id": session.id, "subject_ids": list(data.subject_ids),
+         "topic_ids": list(data.topic_ids or []), "count": count, "prompt": prompt,
+         **source_payload(source)}, resource_key=f"exam:{session.id}")
     db.commit()
-    db.refresh(session)
+    result = await background.await_job_result(job.id, user.id)
+    db.expire_all()
+    session = _owned(db, result["exam_id"], user)
     return _full_public(db, session)
+
+def _exam_failure(db, user_id, payload):
+    db.query(ExamSession).filter(ExamSession.id == payload.get("session_id"),
+        ExamSession.user_id == user_id, ExamSession.status == "generating").update({"status": "error"})
+
+
+@background.register_handler("exam", on_error=_exam_failure)
+async def _generate_exam_job(context, payload):
+    with context.session() as db:
+        context.require_current(db)
+        session = db.query(ExamSession).filter(ExamSession.id == payload["session_id"],
+            ExamSession.user_id == context.user_id, ExamSession.status == "generating").first()
+        if not session:
+            raise background.JobCancelled("Экзамен удалён или изменён; генерация остановлена")
+        validate_selection(db, payload["subject_ids"], payload["topic_ids"])
+        validate_generation_source(context, db, payload)
+    raw, research = await generate_job_text(context, payload, generate_content)
+    try:
+        items = parse_json(raw)
+    except (ValueError, TypeError):
+        raise background.JobPermanentError("ИИ вернул некорректные вопросы. Повторите создание экзамена") from None
+    if isinstance(items, dict):
+        items = items.get("questions", [])
+    if not isinstance(items, list):
+        raise background.JobPermanentError("ИИ вернул некорректные вопросы. Повторите создание экзамена")
+    questions = []
+    for item in items[:payload["count"]]:
+        if not isinstance(item, dict) or not isinstance(item.get("question"), str) or not item["question"].strip():
+            continue
+        questions.append({"question": item["question"][:10000],
+            "reference": str(item.get("reference", ""))[:20000]})
+    if not questions:
+        raise background.JobPermanentError("ИИ не составил корректные вопросы. Повторите создание экзамена")
+    with context.session() as db:
+        context.require_current(db)
+        session = db.query(ExamSession).filter(ExamSession.id == payload["session_id"],
+            ExamSession.user_id == context.user_id, ExamSession.status == "generating").first()
+        if not session:
+            raise background.JobCancelled("Экзамен удалён или изменён; генерация остановлена")
+        validate_selection(db, payload["subject_ids"], payload["topic_ids"])
+        validate_generation_source(context, db, payload)
+        for previous in list(session.questions):
+            db.delete(previous)
+        for order, item in enumerate(questions):
+            db.add(ExamQuestion(session_id=session.id, order=order,
+                question=item["question"], reference=item["reference"]))
+        session.status = "active"
+        session.source_context_json = generated_provenance(payload, research)
+        context.complete(db, {"exam_id": session.id})
 
 
 @router.post("/{session_id}/answer/{question_id}")
 async def answer_question(session_id: int, question_id: int,
                           file: Optional[UploadFile] = File(None),
-                          text_answer: str = Form(""),
+                          text_answer: str = Form("", max_length=20000),
                           db: Session = Depends(get_db),
                           user=Depends(get_current_user)):
     s = _owned(db, session_id, user)
@@ -204,11 +218,7 @@ async def answer_question(session_id: int, question_id: int,
         raise HTTPException(400, "На этот вопрос уже ответили")
 
     if file is not None:
-        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-        tmp = os.path.join(settings.UPLOAD_DIR,
-                           f"exam_{uuid.uuid4().hex}_{file.filename}")
-        with open(tmp, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+        _, tmp, _ = await save_upload(file, {"webm", "mp3", "wav", "ogg", "m4a"})
         try:
             answer_text = await transcribe_audio(tmp)
         except AIError as e:
@@ -253,7 +263,7 @@ async def answer_question(session_id: int, question_id: int,
 
     q.user_answer = answer_text
     q.verdict = verdict
-    q.score = int(result.get("score", 0))
+    q.score = max(0, min(100, int(result.get("score", 0))))
     q.feedback = result.get("feedback", "")
     db.commit()
     return {"question": question_public(q, reveal=False)}
@@ -312,7 +322,8 @@ async def finish_exam(session_id: int, db: Session = Depends(get_db),
 @router.get("")
 def list_exams(db: Session = Depends(get_db), user=Depends(get_current_user)):
     sessions = db.query(ExamSession).filter(
-        ExamSession.user_id == user.id).order_by(ExamSession.id.desc()).limit(20).all()
+        ExamSession.user_id == user.id,
+        ExamSession.status.in_(("active", "finished"))).order_by(ExamSession.id.desc()).limit(20).all()
     return [_full_public(db, s) for s in sessions]
 
 

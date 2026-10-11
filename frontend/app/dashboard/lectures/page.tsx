@@ -1,238 +1,258 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowUpRight, BookOpen, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import { setActivity } from "@/lib/context";
-import type { Lecture, Subject, Topic } from "@/types";
+import { useJobRefresh } from "@/lib/notifications";
 import {
-  BookOpen, RefreshCw, Loader2, Sparkles, ChevronDown, ChevronRight,
-  FileText, AlertTriangle, Pencil, Save, X,
-} from "lucide-react";
-import ReactMarkdown from "react-markdown";
+  LearningSourceSelector,
+  SourceContext,
+  useLearningSource,
+} from "@/components/learning-source";
+import {
+  useResource,
+  PageTitle,
+  ErrorNotice,
+  Empty,
+  Loading,
+  errorMessage,
+} from "@/components/academic";
+import type { Subject, Topic, Lecture } from "@/types";
 
 export default function LecturesPage() {
-  const router = useRouter();
-
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [topicsBySubject, setTopicsBySubject] = useState<Record<number, Topic[]>>({});
-  const [lectures, setLectures] = useState<Record<number, Lecture>>({});
-  const [openTopic, setOpenTopic] = useState<number | null>(null);
-
-  const [generating, setGenerating] = useState<number | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [editContent, setEditContent] = useState("");
-  const [error, setError] = useState("");
-
+  const source = useLearningSource();
+  const {
+    data: subjects,
+    loading,
+    error,
+  } = useResource<Subject[]>("/subjects");
+  const {
+    data: lectures,
+    error: lectureError,
+    reload: reloadLectures,
+  } = useResource<Lecture[]>("/lectures");
+  const [topics, setTopics] = useState<Record<number, Topic[]>>({});
+  const [topicError, setTopicError] = useState("");
+  const [subjectId, setSubjectId] = useState("");
+  const [topicId, setTopicId] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState("");
+  const [notice, setNotice] = useState("");
+  useJobRefresh("lecture", reloadLectures);
   useEffect(() => {
-    (async () => {
-      const subs = await api<Subject[]>("/subjects");
-      setSubjects(subs);
-      const tMap: Record<number, Topic[]> = {};
-      for (const s of subs) {
-        tMap[s.id] = await api<Topic[]>(`/subjects/${s.id}/topics`);
-      }
-      setTopicsBySubject(tMap);
-      const lecRows = await api<Lecture[]>("/lectures");
-      const lMap: Record<number, Lecture> = {};
-      lecRows.forEach((l) => (lMap[l.topic_id] = l));
-      setLectures(lMap);
-    })().catch(() => {});
-  }, []);
-
+    setActivity({
+      page: "lectures",
+      course_id: source.courseMode
+        ? source.selection.course_id || undefined
+        : undefined,
+      module: source.courseMode ? source.selection.module : undefined,
+      week_numbers: source.courseMode
+        ? source.selection.week_numbers
+        : undefined,
+      work_ids: source.courseMode ? source.selection.work_ids : undefined,
+      use_web: source.selection.use_web,
+    });
+  }, [source.courseMode, source.selection]);
   useEffect(() => {
-    setActivity({ page: "lectures" });
-  }, []);
-
-  async function refreshLecture(topicId: number) {
-    const l = await api<Lecture>(`/lectures/topic/${topicId}`);
-    setLectures((prev) => ({ ...prev, [topicId]: l }));
-    return l;
-  }
-
-  async function toggleTopic(topicId: number) {
-    if (openTopic === topicId) { setOpenTopic(null); return; }
-    setOpenTopic(topicId);
-    if (!lectures[topicId]) await refreshLecture(topicId);
-  }
-
-  async function generate(topicId: number) {
-    setGenerating(topicId);
-    setError("");
+    let active = true;
+    if (!subjects) return;
+    Promise.all(
+      subjects.map(async (subject) => ({
+        id: subject.id,
+        topics: await api<Topic[]>(`/subjects/${subject.id}/topics`),
+      })),
+    )
+      .then((rows) => {
+        if (active)
+          setTopics(
+            Object.fromEntries(rows.map((row) => [row.id, row.topics])),
+          );
+      })
+      .catch((e) => {
+        if (active) setTopicError(errorMessage(e));
+      });
+    return () => {
+      active = false;
+    };
+  }, [subjects]);
+  async function generate() {
+    if (
+      (source.courseMode && source.selectionError) ||
+      (!source.courseMode && !subjectId)
+    ) {
+      setGenerationError(
+        source.courseMode ? source.selectionError : "Выберите предмет.",
+      );
+      return;
+    }
+    setGenerating(true);
+    setGenerationError("");
     try {
-      await api(`/lectures/topic/${topicId}/generate`, { method: "POST" });
-      // Пошла фоновая генерация; статус обновится через уведомление/поллинг
-      setLectures((prev) => ({
-        ...prev,
-        [topicId]: { ...prev[topicId], status: "generating", content: prev[topicId]?.content ?? "" },
-      }));
-      pollStatus(topicId);
-    } catch (e: any) {
-      setError(e.message);
-      setGenerating(null);
+      await api("/lectures/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          ...source.payload,
+          subject_ids: source.courseMode ? [] : [Number(subjectId)],
+          topic_ids: !source.courseMode && topicId ? [Number(topicId)] : [],
+        }),
+      });
+      setNotice(
+        "Лекция сохранена в очереди ИИ. Готовый конспект появится ниже; состояние задачи доступно в разделе «Задания ИИ».",
+      );
+      await reloadLectures();
+    } catch (e) {
+      setGenerationError(errorMessage(e));
+    } finally {
+      setGenerating(false);
     }
   }
-
-  function pollStatus(topicId: number) {
-    const timer = setInterval(async () => {
-      const l = await refreshLecture(topicId);
-      if (l.status === "ready" || l.status === "empty") {
-        clearInterval(timer);
-        setGenerating(null);
-      }
-    }, 4000);
-  }
-
-  async function saveEdit(topicId: number) {
-    const l = await api<Lecture>(`/lectures/topic/${topicId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ content: editContent }),
-    });
-    setLectures((prev) => ({ ...prev, [topicId]: l }));
-    setEditing(false);
-  }
-
   return (
-    <div className="mx-auto max-w-4xl">
-      <h1 className="mb-1 text-2xl font-bold">Лекции</h1>
-      <p className="mb-8 text-gray-400">
-        Живые лекции по каждой теме: собираются из твоих заметок и файлов, обновляются при изменении материалов
-      </p>
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
-          {error}
+    <div>
+      <PageTitle
+        eyebrow="ЛИЧНАЯ БАЗА ЗНАНИЙ"
+        title="Лекции"
+        description="Создавайте конспекты по силабусу или своим предметам, дополняйте их и разбирайте вместе с ИИ."
+      />
+      <div className="panel" style={{ padding: 22, marginBottom: 24 }}>
+        <LearningSourceSelector source={source} disabled={generating} />
+        <div className="academic-filter" style={{ marginBottom: 0 }}>
+          {!source.courseMode && (
+            <>
+              <select
+                className="field"
+                aria-label="Предмет для лекции"
+                value={subjectId}
+                onChange={(event) => {
+                  setSubjectId(event.target.value);
+                  setTopicId("");
+                }}
+              >
+                <option value="">Выберите предмет</option>
+                {subjects?.map((subject) => (
+                  <option key={subject.id} value={subject.id}>
+                    {subject.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="field"
+                aria-label="Тема для лекции"
+                disabled={!subjectId}
+                value={topicId}
+                onChange={(event) => setTopicId(event.target.value)}
+              >
+                <option value="">Все темы</option>
+                {(topics[Number(subjectId)] || []).map((topic) => (
+                  <option key={topic.id} value={topic.id}>
+                    {topic.title}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          <button
+            className="btn btn-primary"
+            disabled={
+              generating ||
+              (source.courseMode &&
+                (source.loading || Boolean(source.selectionError)))
+            }
+            onClick={generate}
+          >
+            <Sparkles size={16} />
+            {generating ? "Добавляем в очередь…" : "Создать лекцию с ИИ"}
+          </button>
         </div>
-      )}
-
-      {subjects.map((s) => (
-        <div key={s.id} className="mb-6 overflow-hidden rounded-2xl border border-gray-800">
-          {/* Шапка предмета */}
-          <div className="flex items-center gap-3 bg-gray-900 px-4 py-3">
-            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: s.color }} />
-            <span className="font-semibold">{s.name}</span>
-            <span className="text-xs text-gray-500">{topicsBySubject[s.id]?.length ?? 0} тем</span>
+        {notice && (
+          <p
+            className="academic-success"
+            role="status"
+            style={{ marginTop: 14 }}
+          >
+            {notice} <Link href="/dashboard/jobs">Открыть задания</Link>
+          </p>
+        )}
+      </div>
+      <ErrorNotice
+        message={generationError || error || lectureError || topicError}
+      />
+      {!!lectures?.some((lecture) => lecture.topic_id === null) && (
+        <section className="academic-section">
+          <div className="academic-section-heading">
+            <h2>Мои конспекты по программе</h2>
           </div>
-
-          {/* Строки-темы, как таблица */}
-          <div className="divide-y divide-gray-800 border-t border-gray-800">
-            {(topicsBySubject[s.id] ?? []).map((t) => {
-              const lec = lectures[t.id];
-              const isOpen = openTopic === t.id;
-              return (
-                <div key={t.id}>
-                  <button
-                    onClick={() => toggleTopic(t.id)}
-                    className="flex w-full items-center gap-3 bg-gray-950 px-4 py-3 text-left transition hover:bg-gray-900"
+          <div className="academic-grid">
+            {lectures
+              .filter((lecture) => lecture.topic_id === null)
+              .map((lecture) => (
+                <article className="panel academic-card" key={lecture.id}>
+                  <h3>
+                    {lecture.source_context?.course_title ||
+                      lecture.subject_name ||
+                      lecture.source_context?.subject_titles?.join(", ") ||
+                      "Учебный конспект"}
+                  </h3>
+                  <SourceContext value={lecture.source_context} />
+                  <p className="muted">
+                    {lecture.status === "ready"
+                      ? lecture.content.slice(0, 180)
+                      : "ИИ составляет лекцию…"}
+                  </p>
+                  <Link
+                    href={`/dashboard/lectures/course/${lecture.id}`}
+                    className="academic-card-link"
                   >
-                    {isOpen ? <ChevronDown className="h-4 w-4 text-gray-500" />
-                             : <ChevronRight className="h-4 w-4 text-gray-500" />}
-                    <FileText className="h-4 w-4 shrink-0 text-indigo-400" />
-                    <span className="flex-1 text-sm">{t.title}</span>
-
-                    {/* Статус лекции */}
-                    {generating === t.id || lec?.status === "generating" ? (
-                      <span className="flex items-center gap-1 text-xs text-indigo-300">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> составляется
-                      </span>
-                    ) : lec?.status === "ready" ? (
-                      <span className="flex items-center gap-2">
-                        {lec.stale && (
-                          <span className="flex items-center gap-1 text-xs text-amber-400">
-                            <AlertTriangle className="h-3.5 w-3.5" /> материалы изменились
-                          </span>
-                          )}
-                        <span className="text-xs text-green-400">готова</span>
-                      </span>
-                    ) : (
-                      <span className="text-xs text-gray-600">нет лекции</span>
-                    )}
-                  </button>
-
-                  {/* Развёрнутая лекция */}
-                  {isOpen && (
-                    <div className="bg-gray-900 p-5">
-                      {!lec || lec.status === "empty" || !lec.content ? (
-                        <div className="flex flex-col items-center py-8 text-center">
-                          <Sparkles className="mb-3 h-8 w-8 text-gray-600" />
-                          <p className="mb-1 text-sm font-medium">Лекции ещё нет</p>
-                          <p className="mb-4 text-xs text-gray-500">
-                            {lec && lec.materials_count === 0
-                              ? "Добавь заметки или обработай файлы по этой теме — и ИИ составит лекцию из них"
-                              : "ИИ соберёт лекцию из твоих материалов по этой теме"}
-                          </p>
-                          <button
-                            onClick={() => generate(t.id)}
-                            disabled={lec && lec.materials_count === 0}
-                            className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-40"
-                          >
-                            <Sparkles className="h-4 w-4" /> Составить лекцию
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="mb-3 flex flex-wrap items-center gap-2">
-                            {lec.stale && (
-                              <span className="flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
-                                <AlertTriangle className="h-3.5 w-3.5" /> материалы менялись — обнови
-                              </span>
-                            )}
-                            <button
-                              onClick={() => generate(t.id)}
-                              disabled={generating === t.id}
-                              className="flex items-center gap-1 rounded-lg bg-gray-800 px-3 py-1.5 text-xs hover:bg-gray-700 disabled:opacity-50"
-                            >
-                              <RefreshCw className={`h-3.5 w-3.5 ${generating === t.id ? "animate-spin" : ""}`} />
-                              {lec.stale ? "Обновить лекцию" : "Пересобрать"}
-                            </button>
-                            <button
-                              onClick={() => { setEditing(true); setEditContent(lec.content); }}
-                              className="flex items-center gap-1 rounded-lg bg-gray-800 px-3 py-1.5 text-xs hover:bg-gray-700"
-                            >
-                              <Pencil className="h-3.5 w-3.5" /> Править
-                            </button>
-                          </div>
-
-                          {editing ? (
-                            <>
-                              <textarea
-                                value={editContent}
-                                onChange={(e) => setEditContent(e.target.value)}
-                                rows={18}
-                                className="w-full resize-y rounded-xl border border-gray-800 bg-gray-950 p-4 font-mono text-sm outline-none focus:border-indigo-500"
-                              />
-                              <div className="mt-2 flex gap-2">
-                                <button onClick={() => saveEdit(t.id)}
-                                  className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs hover:bg-indigo-500">
-                                  <Save className="h-3.5 w-3.5" /> Сохранить
-                                </button>
-                                <button onClick={() => setEditing(false)}
-                                  className="flex items-center gap-1 rounded-lg bg-gray-800 px-3 py-1.5 text-xs hover:bg-gray-700">
-                                  <X className="h-3.5 w-3.5" /> Отмена
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <div className="prose prose-invert max-w-none text-sm">
-                              <ReactMarkdown>{lec.content}</ReactMarkdown>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {(topicsBySubject[s.id] ?? []).length === 0 && (
-              <div className="bg-gray-950 px-4 py-3 text-sm text-gray-500">Темы не созданы</div>
-            )}
+                    Открыть конспект <ArrowUpRight size={17} />
+                  </Link>
+                </article>
+              ))}
           </div>
+        </section>
+      )}
+      <div className="academic-section-heading">
+        <h2>Лекции по предметам</h2>
+      </div>
+      {loading ? (
+        <Loading />
+      ) : subjects?.length ? (
+        <div className="academic-grid">
+          {subjects.map((subject) => (
+            <article className="panel academic-card" key={subject.id}>
+              <div className="academic-card-icon">
+                <BookOpen size={22} />
+              </div>
+              <h3>{subject.name}</h3>
+              <div className="academic-meta">
+                <span>{topics[subject.id]?.length ?? "—"} тем</span>
+                <span>
+                  {
+                    (topics[subject.id] || []).filter((topic) =>
+                      lectures?.some(
+                        (lecture) =>
+                          lecture.topic_id === topic.id &&
+                          lecture.status === "ready",
+                      ),
+                    ).length
+                  }{" "}
+                  готовых лекций
+                </span>
+              </div>
+              <Link
+                className="academic-card-link"
+                href={`/dashboard/lectures/${subject.id}`}
+              >
+                Открыть лекции <ArrowUpRight size={17} />
+              </Link>
+            </article>
+          ))}
         </div>
-      ))}
-
-      {subjects.length === 0 && (
-        <p className="text-gray-500">Сначала создай предметы и темы.</p>
+      ) : (
+        <Empty title="Предметы ещё не добавлены">
+          После добавления предметов и тем администратором здесь можно будет
+          создавать собственные лекции.
+        </Empty>
       )}
     </div>
   );

@@ -1,41 +1,66 @@
-export const API_URL = "http://localhost:8000/api";
+export const API_URL = "/api";
 
-export function setToken(t: string | null) {
+// The server keeps the session in an HttpOnly cookie. Remove legacy tokens.
+export function setToken(token: string | null) {
   if (typeof window !== "undefined") {
-    t ? localStorage.setItem("token", t) : localStorage.removeItem("token");
+    localStorage.removeItem("token");
+    sessionStorage.removeItem("token");
+    if (!token) {
+      sessionStorage.removeItem("qstudy_activity");
+      sessionStorage.removeItem("studyhub_activity");
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith("chat_draft_")) localStorage.removeItem(key);
+      }
+    }
   }
 }
-
 export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
+  return null;
 }
-
-export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+  }
+}
+export async function api<T = any>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
   const body = options.body;
-  // FormData и URLSearchParams сами ставят правильный Content-Type — не мешаем им
   const isForm = body instanceof FormData || body instanceof URLSearchParams;
-
+  const headers = new Headers(options.headers);
+  if (body && !isForm && !headers.has("Content-Type"))
+    headers.set("Content-Type", "application/json");
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: {
-      ...(isForm ? {} : { "Content-Type": "application/json" }),
-      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
-      ...options.headers,
-    },
+    headers,
+    credentials: "same-origin",
+    cache: "no-store",
   });
-
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     const detail = data?.detail;
-    let message = `Ошибка ${res.status}`;
-    if (typeof detail === "string") message = detail;
-    else if (Array.isArray(detail)) message = detail.map((e: any) => e.msg).join("; ");
-    throw new Error(message);
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((e: { msg: string }) => e.msg).join("; ")
+          : `Ошибка ${res.status}`;
+    if (
+      res.status === 401 &&
+      typeof window !== "undefined" &&
+      !path.startsWith("/auth/")
+    ) {
+      window.dispatchEvent(new Event("qstudy:unauthorized"));
+    }
+    throw new ApiError(message, res.status);
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
-
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;

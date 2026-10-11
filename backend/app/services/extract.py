@@ -57,7 +57,8 @@ def extract_pptx(path: str) -> str:
 
 
 def extract_txt(path: str) -> str:
-    raw = open(path, "rb").read()
+    with open(path, "rb") as source:
+        raw = source.read()
     for enc in ("utf-8", "cp1251"):  # вторая — на случай старых файлов с винды
         try:
             return _clip(raw.decode(enc))

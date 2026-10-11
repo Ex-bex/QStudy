@@ -1,0 +1,126 @@
+.operations {
+  display: grid;
+  gap: 28px;
+  margin: 30px 0;
+}
+.operations h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.backups,
+.journal {
+  overflow: hidden;
+  padding: 22px;
+}
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.summary div {
+  display: grid;
+  gap: 7px;
+}
+.summary small,
+.archive small,
+.event small,
+.caption,
+.pagination span {
+  color: var(--muted, #778273);
+  font-size: 12px;
+}
+.summary strong {
+  font-size: 15px;
+  font-weight: 550;
+}
+.caption {
+  line-height: 1.6;
+  margin: 13px 0;
+}
+.archiveList {
+  margin-top: 18px;
+}
+.archive {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border, #e4e8e1);
+}
+.archive div,
+.event > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.archive strong,
+.event strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.event {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(0, 2fr);
+  gap: 20px;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--border, #e4e8e1);
+}
+.eventTime {
+  font-size: 12px;
+}
+.event small {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 18px;
+}
+.pagination span {
+  flex: 1;
+}
+.spin {
+  animation: rotation 1s linear infinite;
+}
+@keyframes rotation {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 640px) {
+  .backups,
+  .journal {
+    padding: 16px;
+  }
+  .summary {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .summary div {
+    grid-template-columns: 1fr 1.2fr;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .event {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+  .archive {
+    gap: 8px;
+  }
+  .archive a span {
+    display: none;
+  }
+  .pagination {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

@@ -1,224 +1,411 @@
 "use client";
-import { setActivity } from "@/lib/context";
+
 import { useEffect, useRef, useState } from "react";
-import { api, formatBytes, getToken, API_URL } from "@/lib/api";
+import Link from "next/link";
+import {
+  Download,
+  FileText,
+  Mic,
+  Music,
+  Play,
+  Save,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
+import { api, API_URL, formatBytes } from "@/lib/api";
+import { setActivity } from "@/lib/context";
+import { useJobRefresh } from "@/lib/notifications";
+import {
+  useResource,
+  PageTitle,
+  ErrorNotice,
+  Empty,
+  Loading,
+  RecordEditor,
+  DeleteButton,
+  errorMessage,
+} from "@/components/academic";
 import type { Material, Subject } from "@/types";
-import { Mic, Square, Trash2, Music, Play, Loader2 } from "lucide-react";
 
+const MAX_SECONDS = 3600;
+const MAX_BYTES = 25 * 1024 * 1024;
 export default function VoicePage() {
-  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const { data: subjects } = useResource<Subject[]>("/subjects");
+  const {
+    data: materials,
+    loading,
+    error: loadError,
+    reload,
+  } = useResource<Material[]>("/files");
+  useJobRefresh("file", reload);
+  const files = materials?.filter((file) => file.file_type === "audio") || [];
   const [subjectId, setSubjectId] = useState("");
-  const [files, setFiles] = useState<Material[]>([]);
-
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioExtension, setAudioExtension] = useState("webm");
   const [uploading, setUploading] = useState(false);
-
+  const [requesting, setRequesting] = useState(false);
   const [playingId, setPlayingId] = useState<number | null>(null);
-  const [playingUrl, setPlayingUrl] = useState<string | null>(null);
-  const [loadingPlay, setLoadingPlay] = useState<number | null>(null);
-
-  const recorderRef = useRef<MediaRecorder | null>(null);
+  const [processingId, setProcessingId] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const recorder = useRef<MediaRecorder | null>(null);
+  const stream = useRef<MediaStream | null>(null);
   const chunks = useRef<Blob[]>([]);
+  const blob = useRef<Blob | null>(null);
+  const bytes = useRef(0);
+  const elapsed = useRef(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-
+  const mounted = useRef(true);
+  const objectUrl = useRef<string | null>(null);
   useEffect(() => {
-    api<Subject[]>("/subjects").then(setSubjects).catch(() => {});
-    api<Material[]>("/files")
-      .then((all) => setFiles(all.filter((f) => f.file_type === "audio")))
-      .catch(() => {});
+    mounted.current = true;
+    setActivity({ page: "voice" });
     return () => {
+      mounted.current = false;
       if (timer.current) clearInterval(timer.current);
+      if (recorder.current?.state === "recording") recorder.current.stop();
+      stream.current?.getTracks().forEach((track) => track.stop());
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     };
   }, []);
-useEffect(() => { setActivity({ page: "review" }); }, []);
+  function discard() {
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = null;
+    blob.current = null;
+    setAudioUrl(null);
+    setSeconds(0);
+  }
+  function stop() {
+    if (recorder.current?.state === "recording") recorder.current.stop();
+    if (timer.current) clearInterval(timer.current);
+    setRecording(false);
+  }
   async function start() {
+    setRequesting(true);
+    setError("");
+    setSuccess("");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
+      if (
+        !navigator.mediaDevices?.getUserMedia ||
+        typeof MediaRecorder === "undefined"
+      )
+        throw new Error(
+          "Браузер не поддерживает запись. Можно загрузить готовую аудиозапись в разделе файлов.",
+        );
+      const capture = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+      if (!mounted.current) {
+        capture.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      stream.current = capture;
+      const captureRecorder = new MediaRecorder(capture);
       chunks.current = [];
-      rec.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.current.push(e.data);
+      bytes.current = 0;
+      elapsed.current = 0;
+      captureRecorder.ondataavailable = (event) => {
+        if (event.data.size) {
+          chunks.current.push(event.data);
+          bytes.current += event.data.size;
+          if (bytes.current >= MAX_BYTES) {
+            stop();
+            setError(
+              "Достигнут лимит записи 25 МБ. Сохраните текущую запись и начните следующую.",
+            );
+          }
+        }
       };
-      rec.onstop = () => {
-        const blob = new Blob(chunks.current, { type: rec.mimeType || "audio/webm" });
-        setAudioUrl(URL.createObjectURL(blob));
-        stream.getTracks().forEach((t) => t.stop());
+      captureRecorder.onstop = () => {
+        capture.getTracks().forEach((track) => track.stop());
+        if (timer.current) clearInterval(timer.current);
+        if (!mounted.current) return;
+        const recordingBlob = new Blob(chunks.current, {
+          type: captureRecorder.mimeType || "audio/webm",
+        });
+        blob.current = recordingBlob;
+        setAudioExtension(
+          recordingBlob.type.includes("mp4")
+            ? "m4a"
+            : recordingBlob.type.includes("ogg")
+              ? "ogg"
+              : "webm",
+        );
+        if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+        const url = URL.createObjectURL(recordingBlob);
+        objectUrl.current = url;
+        setAudioUrl(url);
+        setRecording(false);
       };
-      rec.start();
-      recorderRef.current = rec;
-      setRecording(true);
+      captureRecorder.start(1000);
+      recorder.current = captureRecorder;
       setSeconds(0);
-      timer.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    } catch {
-      alert("Нет доступа к микрофону. Разреши доступ в браузере и попробуй снова.");
+      setRecording(true);
+      timer.current = setInterval(() => {
+        elapsed.current += 1;
+        setSeconds(elapsed.current);
+        if (elapsed.current >= MAX_SECONDS) stop();
+      }, 1000);
+    } catch (e) {
+      stream.current?.getTracks().forEach((track) => track.stop());
+      setError(
+        e instanceof DOMException && e.name === "NotAllowedError"
+          ? "Разрешите доступ к микрофону в браузере."
+          : errorMessage(e),
+      );
+    } finally {
+      setRequesting(false);
     }
   }
-
-  function stop() {
-    recorderRef.current?.stop();
-    setRecording(false);
-    if (timer.current) clearInterval(timer.current);
-  }
-
-async function upload() {
-  if (!audioUrl) return;
-  setUploading(true);
-  try {
-    const blob = await (await fetch(audioUrl)).blob();
-    const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
-    // Имя без запрещённых символов (: / \ * ? " < > |)
-    const stamp = new Date()
-      .toLocaleString("ru", {
-        day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-      })
-      .replace(/[:/\\*?"<>|]/g, "-");
-    const fd = new FormData();
-    fd.append("file", new File([blob], `Запись ${stamp}.${ext}`, { type: blob.type }));
-    if (subjectId) fd.append("subject_id", subjectId);
-    const material = await api<Material>("/files/upload", { method: "POST", body: fd });
-    setFiles((prev) => [material, ...prev]);
-    setAudioUrl(null);
-  } catch (err: any) {
-    alert(err.message);
-  } finally {
-    setUploading(false);
-  }
-}
-
-  async function playSaved(f: Material) {
-    if (playingId === f.id) {
-      setPlayingId(null);
-      setPlayingUrl(null);
+  async function upload() {
+    const recordingBlob = blob.current;
+    if (!recordingBlob) return;
+    if (recordingBlob.size > MAX_BYTES) {
+      setError(
+        "Запись превышает 25 МБ. Скачайте её и разделите на части перед загрузкой.",
+      );
       return;
     }
-    setLoadingPlay(f.id);
+    setUploading(true);
+    setError("");
     try {
-      const res = await fetch(`${API_URL}/files/${f.id}/download`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      if (!res.ok) throw new Error("Не удалось загрузить запись");
-      setPlayingUrl(URL.createObjectURL(await res.blob()));
-      setPlayingId(f.id);
-    } catch (e: any) {
-      alert(e.message);
+      const extension = recordingBlob.type.includes("mp4")
+        ? "m4a"
+        : recordingBlob.type.includes("ogg")
+          ? "ogg"
+          : "webm";
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
+      const form = new FormData();
+      form.append(
+        "file",
+        new File([recordingBlob], `Запись-${stamp}.${extension}`, {
+          type: recordingBlob.type,
+        }),
+      );
+      if (subjectId) form.append("subject_id", subjectId);
+      await api("/files/upload", { method: "POST", body: form });
+      await reload();
+      discard();
+      setSuccess(
+        "Запись сохранена. Нажмите «Расшифровать», чтобы получить текст.",
+      );
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
-      setLoadingPlay(null);
+      setUploading(false);
     }
   }
-
-  async function deleteFile(id: number) {
-    if (!confirm("Удалить запись?")) return;
-    await api(`/files/${id}`, { method: "DELETE" });
-    setFiles((prev) => prev.filter((f) => f.id !== id));
+  async function process(file: Material) {
+    setProcessingId(file.id);
+    setError("");
+    try {
+      await api(`/files/${file.id}/process`, { method: "POST" });
+      await reload();
+      setSuccess("Запись расшифрована. Текст доступен в разделе файлов.");
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setProcessingId(null);
+    }
   }
-
-  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
-
   return (
-    <div className="mx-auto max-w-3xl">
-      <h1 className="mb-1 text-2xl font-bold">Диктофон</h1>
-      <p className="mb-8 text-gray-400">
-        Записывай лекции с голоса. Позже ИИ расшифрует записи в текст.
-      </p>
-
-      {/* Запись */}
-      <div className="mb-6 flex flex-col items-center rounded-2xl border border-gray-800 bg-gray-900 p-6">
-        {recording ? (
-          <>
-            <button
-              onClick={stop}
-              className="flex h-20 w-20 animate-pulse items-center justify-center rounded-full bg-red-600 hover:bg-red-500"
-            >
-              <Square className="h-8 w-8" />
-            </button>
-            <p className="mt-3 font-mono text-xl text-red-400">{mm}:{ss}</p>
-            <p className="text-xs text-gray-500">Идёт запись...</p>
-          </>
-        ) : (
-          <>
-            <button
-              onClick={start}
-              className="flex h-20 w-20 items-center justify-center rounded-full bg-indigo-600 hover:bg-indigo-500"
-            >
-              <Mic className="h-8 w-8" />
-            </button>
-            <p className="mt-3 text-sm text-gray-400">Нажми, чтобы начать запись</p>
-          </>
-        )}
-
+    <div>
+      <PageTitle
+        eyebrow="СЛУШАТЬ И ЗАПОМИНАТЬ"
+        title="Диктофон"
+        description="Сохраните лекцию голосом, а затем превратите её в учебный текст."
+      />
+      <ErrorNotice message={error || loadError} />
+      {success && (
+        <p className="academic-success" role="status">
+          {success}
+        </p>
+      )}
+      <section
+        className="panel"
+        style={{ maxWidth: 800, margin: "0 auto 30px", padding: 32 }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 16,
+          }}
+        >
+          <button
+            className={`btn ${recording ? "btn-danger" : "btn-primary"}`}
+            style={{ width: 78, height: 78, borderRadius: "50%" }}
+            disabled={
+              requesting || uploading || (Boolean(audioUrl) && !recording)
+            }
+            aria-label={recording ? "Остановить запись" : "Начать запись"}
+            onClick={recording ? stop : start}
+          >
+            {recording ? <Square size={27} /> : <Mic size={28} />}
+          </button>
+          <strong
+            style={{
+              fontSize: 27,
+              fontVariantNumeric: "tabular-nums",
+              fontWeight: 500,
+            }}
+          >
+            {String(Math.floor(seconds / 60)).padStart(2, "0")}:
+            {String(seconds % 60).padStart(2, "0")}
+          </strong>
+          <p className="muted" style={{ fontSize: 12, textAlign: "center" }}>
+            {recording
+              ? "Идёт запись. Нажмите кнопку, чтобы остановить."
+              : audioUrl
+                ? "Прослушайте и сохраните запись."
+                : "Нажмите, чтобы начать. До 60 минут или 25 МБ."}
+          </p>
+        </div>
         {audioUrl && !recording && (
-          <div className="mt-5 w-full border-t border-gray-800 pt-5">
-            <audio controls src={audioUrl} className="w-full" />
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div
+            className="academic-stack"
+            style={{
+              borderTop: "1px solid #e7eae7",
+              marginTop: 25,
+              paddingTop: 25,
+            }}
+          >
+            <audio controls src={audioUrl} style={{ width: "100%" }} />
+            <label className="academic-field">
+              <span>Предмет</span>
               <select
+                className="field"
                 value={subjectId}
                 onChange={(e) => setSubjectId(e.target.value)}
-                className="rounded-lg border border-gray-800 bg-gray-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
               >
                 <option value="">Без предмета</option>
-                {subjects.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                {subjects?.map((subject) => (
+                  <option value={subject.id} key={subject.id}>
+                    {subject.name}
+                  </option>
                 ))}
               </select>
+            </label>
+            <div className="academic-actions">
               <button
-                onClick={upload}
+                className="btn btn-primary"
                 disabled={uploading}
-                className="flex items-center gap-1 rounded-lg bg-indigo-600 px-4 py-1.5 text-sm hover:bg-indigo-500 disabled:opacity-50"
+                onClick={upload}
               >
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Сохранить
+                <Save size={15} />
+                {uploading ? "Сохраняем…" : "Сохранить"}
               </button>
-              <button
-                onClick={() => setAudioUrl(null)}
-                className="rounded-lg bg-gray-800 px-4 py-1.5 text-sm hover:bg-gray-700"
+              <a
+                className="btn btn-secondary"
+                href={audioUrl}
+                download={`Запись.${audioExtension}`}
               >
-                Выбросить
+                <Download size={15} /> Скачать
+              </a>
+              <button
+                className="btn btn-secondary"
+                disabled={uploading}
+                onClick={discard}
+              >
+                <X size={15} /> Отменить
               </button>
             </div>
           </div>
         )}
+      </section>
+      <div className="academic-section-heading">
+        <h2>Мои записи</h2>
+        <Link href="/dashboard/files" className="btn btn-secondary">
+          <FileText size={15} /> Все файлы
+        </Link>
       </div>
-
-      {/* Сохранённые записи */}
-      <h2 className="mb-3 font-semibold">Сохранённые записи</h2>
-      <div className="space-y-2">
-        {files.map((f) => (
-          <div key={f.id} className="rounded-xl border border-gray-800 bg-gray-900 p-3">
-            <div className="flex items-center gap-3">
-              <Music className="h-5 w-5 shrink-0 text-indigo-400" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{f.filename}</div>
-                <div className="text-xs text-gray-500">
-                  {formatBytes(f.size)} · {new Date(f.created_at).toLocaleDateString("ru")}
+      {loading ? (
+        <Loading />
+      ) : files.length ? (
+        <div className="academic-stack">
+          {files.map((file) => (
+            <article className="panel" key={file.id}>
+              <div className="academic-file" style={{ padding: 0 }}>
+                <div className="academic-card-icon">
+                  <Music size={20} />
+                </div>
+                <div className="academic-file-info">
+                  <h3>{file.filename}</h3>
+                  <p className="academic-meta" style={{ marginTop: 6 }}>
+                    {formatBytes(file.size)} ·{" "}
+                    {new Date(file.created_at).toLocaleDateString("ru-RU")}
+                  </p>
+                </div>
+                <div className="academic-actions">
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() =>
+                      setPlayingId(playingId === file.id ? null : file.id)
+                    }
+                  >
+                    <Play size={14} />
+                    {playingId === file.id ? "Скрыть" : "Прослушать"}
+                  </button>
+                  {!file.processed && (
+                    <button
+                      className="btn btn-secondary"
+                      disabled={processingId !== null}
+                      onClick={() => process(file)}
+                    >
+                      <Sparkles size={14} />
+                      {processingId === file.id
+                        ? "Распознаём…"
+                        : "Расшифровать"}
+                    </button>
+                  )}
+                  <RecordEditor
+                    compact
+                    title="Переименовать запись"
+                    fields={[
+                      { name: "filename", label: "Название", required: true },
+                    ]}
+                    initial={{ filename: file.filename }}
+                    method="PATCH"
+                    endpoint={`/files/${file.id}`}
+                    onSaved={reload}
+                  />
+                  <DeleteButton
+                    title="Удалить запись?"
+                    disabled={processingId === file.id}
+                    endpoint={`/files/${file.id}`}
+                    onDeleted={async () => {
+                      if (playingId === file.id) setPlayingId(null);
+                      await reload();
+                    }}
+                  />
                 </div>
               </div>
-              <button
-                onClick={() => playSaved(f)}
-                className="flex items-center gap-1 rounded-lg bg-gray-800 px-3 py-1.5 text-xs hover:bg-gray-700"
-              >
-                {loadingPlay === f.id ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Play className="h-3.5 w-3.5" />
-                )}
-                {playingId === f.id ? "Скрыть" : "Прослушать"}
-              </button>
-              <button onClick={() => deleteFile(f.id)} className="text-gray-500 hover:text-red-400">
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-            {playingId === f.id && playingUrl && (
-              <audio controls autoPlay src={playingUrl} className="mt-3 w-full" />
-            )}
-          </div>
-        ))}
-        {files.length === 0 && (
-          <p className="text-gray-500">Записей пока нет — запиши первую.</p>
-        )}
-      </div>
+              {playingId === file.id && (
+                <audio
+                  controls
+                  autoPlay
+                  preload="metadata"
+                  src={`${API_URL}/files/${file.id}/download`}
+                  onError={() =>
+                    setError(
+                      "Не удалось воспроизвести запись. Попробуйте скачать её в разделе файлов.",
+                    )
+                  }
+                  style={{ width: "100%", marginTop: 20 }}
+                />
+              )}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <Empty title="Записей пока нет">
+          Запишите первую лекцию или загрузите готовое аудио в разделе файлов.
+        </Empty>
+      )}
     </div>
   );
 }

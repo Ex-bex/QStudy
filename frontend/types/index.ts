@@ -1,3 +1,5 @@
+import type { LearningSourceContext } from "./learning";
+
 export interface Subject {
   id: number;
   name: string;
@@ -24,6 +26,7 @@ export interface Note {
 }
 
 export interface Task {
+  source_context?: LearningSourceContext | null;
   id: number;
   question: string;
   hint: string;
@@ -70,6 +73,7 @@ export interface ExamQuestion {
 }
 
 export interface ExamSession {
+  source_context?: LearningSourceContext | null;
   id: number;
   subject_id: number | null;
   topic_id: number | null;
@@ -85,6 +89,7 @@ export interface ExamSession {
 }
 
 export interface Flashcard {
+  source_context?: LearningSourceContext | null;
   id: number;
   front: string;
   back: string;
@@ -107,6 +112,7 @@ export interface TestQuestion {
 }
 
 export interface TestSession {
+  source_context?: LearningSourceContext | null;
   id: number;
   difficulty: string;
   status: string;
@@ -121,8 +127,9 @@ export interface TestSession {
 }
 
 export interface Lecture {
+  source_context?: LearningSourceContext | null;
   id: number;
-  topic_id: number;
+  topic_id: number | null;
   content: string;
   status: string;
   updated_at: string;
@@ -138,4 +145,26 @@ export interface JobNotification {
   title: string;
   status: string;
   error: string;
+  result?: {
+    test_id?: number;
+    lecture_id?: number;
+    exam_id?: number;
+    task_ids?: number[];
+    card_ids?: number[];
+  };
+}
+
+export interface ChatSession {
+  id: number;
+  title: string;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  source_context?: LearningSourceContext | null;
+  id: number;
+  session_id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
 }

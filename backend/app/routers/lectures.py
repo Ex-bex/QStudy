@@ -2,15 +2,18 @@ import json
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.database import get_db, SessionLocal
+from app.database import get_db
 from app.models import Lecture, Topic, Subject, Note, Material
 from app.auth import get_current_user
 from app.services.ai import generate_content, AIError
 from app.services import background
+from app.services.learning_context import LearningSelection, safe_learning_provenance
+from app.services.learning_generation import (prepare_generation, source_payload, learning_prompt,
+    validate_generation_source, generate_job_text, generated_provenance)
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
 
@@ -38,7 +41,7 @@ def _collect_materials(db: Session, user_id: int, topic: Topic, subject) -> str:
     for m in qm.all():
         if m.extracted_text:
             parts.append(f"— Материал «{m.filename}»:\n{m.extracted_text[:4000]}")
-    return "\n\n".join(parts)
+    return "\n\n".join(parts)[:60000]
 
 
 def lecture_public(l: Lecture) -> dict:
@@ -46,6 +49,7 @@ def lecture_public(l: Lecture) -> dict:
         "id": l.id, "topic_id": l.topic_id, "content": l.content,
         "status": l.status,
         "updated_at": str(l.updated_at),
+        "source_context": safe_learning_provenance(l.source_context_json),
     }
 
 
@@ -80,13 +84,14 @@ def get_lecture(topic_id: int, db: Session = Depends(get_db),
         db.query(Note).filter(
             Note.user_id == user.id, Note.topic_id == topic_id).count()
         + db.query(Material).filter(
-            Material.user_id == user_id, Material.topic_id == topic_id,
+            Material.user_id == user.id, Material.topic_id == topic_id,
             Material.processed == True).count())  # noqa: E712
     return d
 
 
 @router.post("/topic/{topic_id}/generate")
-async def generate_lecture(topic_id: int, db: Session = Depends(get_db),
+async def generate_lecture(topic_id: int, selection: LearningSelection | None = Body(default=None),
+                           db: Session = Depends(get_db),
                            user=Depends(get_current_user)):
     topic = db.query(Topic).filter(Topic.id == topic_id).first()
     if not topic:
@@ -95,60 +100,145 @@ async def generate_lecture(topic_id: int, db: Session = Depends(get_db),
     if not subject:
         raise HTTPException(404, "Предмет не найден")
 
-    context = _collect_materials(db, user.id, topic, subject)
-    if not context.strip():
-        raise HTTPException(
-            400, "Материалов темы нет: добавь заметки или загрузи и обработай файлы")
+    source = prepare_generation(db, user, selection or LearningSelection(), [subject.id], [topic_id])
 
-    user_id_local = user.id
-    job = background.create_job(user.id, "lecture", f"Лекция: {topic.title}")
-
-    async def _work():
-        db2 = SessionLocal()
-        try:
-            prompt = f"""Составь подробную учебную лекцию по теме.
-
-{context}
-
-Требования:
-- Академичный, но живой тон, в markdown
-- Структура: # заголовок, ## разделы от простого к сложному
-- Ключевые определения выделены, формулы в LaTeX ($...$)
-- Примеры и аналогии там, где уместно
-- В конце: ## Кратко — выжимка в 5-8 пунктах
-- Опирайся СТРОГО на материалы выше; если в них пробел — заполни из общих знаний, пометив «(из общей теории)»
-
-Верни только текст лекции."""
-            text = await generate_content(prompt)
-            lec = db2.query(Lecture).filter(
-                Lecture.user_id == user_id_local,
-                Lecture.topic_id == topic_id).first()
-            if not lec:
-                lec = Lecture(user_id=user_id_local, topic_id=topic_id)
-                db2.add(lec)
-            lec.content = text
-            lec.status = "ready"
-            lec.materials_hash = _materials_signature(db2, user_id_local, topic_id)
-            db2.commit()
-        except Exception:
-            db2.rollback()
-            raise
-        finally:
-            db2.close()
-
-    background.run_job(job, _work())
+    lecture = db.query(Lecture).filter(Lecture.user_id == user.id, Lecture.topic_id == topic_id).first()
+    if lecture and lecture.status == "generating":
+        raise HTTPException(409, "Лекция уже создаётся. Дождитесь завершения")
+    if lecture is None:
+        lecture = Lecture(user_id=user.id, topic_id=topic_id)
+        db.add(lecture)
+        db.flush()
+    lecture.status = "generating"
+    prompt = learning_prompt(source, "Составь подробную лекцию по выбранной теме на языке материалов. "
+        "Формат Markdown: заголовок, разделы от простого к сложному, определения и примеры, "
+        "в конце 5–8 основных выводов. Дополнение из общей теории явно помечай. Верни только текст лекции.")
+    job = background.enqueue_job(db, user.id, "lecture", f"Лекция: {topic.title}",
+        {"lecture_id": lecture.id, "topic_id": topic_id, "prompt": prompt,
+         "materials_hash": _materials_signature(db, user.id, topic_id), **source_payload(source)},
+        resource_key=f"lecture:{lecture.id}")
+    db.commit()
+    background.wake_worker()
     return {"job_id": job.id, "status": "started"}
 
 
+def _lecture_failure(db, user_id, payload):
+    db.query(Lecture).filter(Lecture.id == payload.get("lecture_id"),
+        Lecture.user_id == user_id, Lecture.status == "generating").update({"status": "error"})
+
+
+@background.register_handler("lecture", on_error=_lecture_failure)
+async def _generate_lecture_job(context, payload):
+    with context.session() as db:
+        context.require_current(db)
+        lecture = db.query(Lecture).filter(Lecture.id == payload["lecture_id"],
+            Lecture.user_id == context.user_id, Lecture.topic_id == payload["topic_id"]).first()
+        if not lecture or (payload["topic_id"] is not None and not db.get(Topic, payload["topic_id"])) or lecture.status != "generating":
+            raise background.JobCancelled("Тема или лекция изменена; генерация остановлена")
+        validate_generation_source(context, db, payload)
+    text, research = await generate_job_text(context, payload, generate_content, json_mode=False, key="text")
+    with context.session() as db:
+        context.require_current(db)
+        lecture = db.query(Lecture).filter(Lecture.id == payload["lecture_id"],
+            Lecture.user_id == context.user_id, Lecture.topic_id == payload["topic_id"]).first()
+        if not lecture or (payload["topic_id"] is not None and not db.get(Topic, payload["topic_id"])) or lecture.status != "generating":
+            raise background.JobCancelled("Тема или лекция изменена; генерация остановлена")
+        validate_generation_source(context, db, payload)
+        lecture.content = text
+        lecture.status = "ready"
+        lecture.materials_hash = payload["materials_hash"]
+        lecture.source_context_json = generated_provenance(payload, research)
+        result = {"lecture_id": lecture.id, "topic_id": lecture.topic_id}
+        context.complete(db, result)
+        return result
+
+
+class LectureUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(max_length=150000)
+
+
 @router.patch("/topic/{topic_id}")
-def update_lecture(topic_id: int, data: dict,
+def update_lecture(topic_id: int, data: LectureUpdate,
                    db: Session = Depends(get_db), user=Depends(get_current_user)):
     lec = db.query(Lecture).filter(
         Lecture.user_id == user.id, Lecture.topic_id == topic_id).first()
     if not lec:
         raise HTTPException(404, "Лекция не найдена")
-    if "content" in data:
-        lec.content = data["content"]
-        lec.status = "ready"
+    if lec.status == "generating":
+        raise HTTPException(409, "Дождитесь завершения генерации перед редактированием")
+    lec.content = data.content
+    lec.status = "ready"
     db.commit()
     return lecture_public(lec)
+
+
+@router.delete("/topic/{topic_id}")
+def delete_lecture(topic_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    lecture = db.query(Lecture).filter(Lecture.user_id == user.id, Lecture.topic_id == topic_id).first()
+    if not lecture:
+        raise HTTPException(404, "Лекция не найдена")
+    if lecture.status == "generating":
+        raise HTTPException(409, "Дождитесь завершения генерации перед удалением")
+    db.delete(lecture)
+    db.commit()
+    return {"ok": True}
+
+
+class LearningLectureRequest(LearningSelection):
+    subject_ids: list[int] = Field(default_factory=list, max_length=30)
+    topic_ids: list[int] = Field(default_factory=list, max_length=100)
+
+
+@router.post("/generate")
+async def generate_learning_lecture(data: LearningLectureRequest, db: Session = Depends(get_db),
+                                    user=Depends(get_current_user)):
+    source = prepare_generation(db, user, data, data.subject_ids, data.topic_ids)
+    lecture = Lecture(user_id=user.id, topic_id=None, status="generating",
+                      source_context_json=json.dumps(source.provenance, ensure_ascii=False))
+    db.add(lecture)
+    db.flush()
+    prompt = learning_prompt(source, "Составь подробную учебную лекцию по всем выбранным темам. "
+        "Используй Markdown, определения, доступные объяснения и примеры; для каждой темы отдельный раздел. "
+        "В конце добавь вопросы для самопроверки и основные выводы. Отделяй требования силабуса от "
+        "теоретических дополнений. Верни только текст лекции.")
+    job = background.enqueue_job(db, user.id, "lecture", f"Лекция: {source.title}",
+        {"lecture_id": lecture.id, "topic_id": None, "materials_hash": source.fingerprint,
+         "prompt": prompt, **source_payload(source)}, resource_key=f"lecture:{lecture.id}")
+    db.commit()
+    background.wake_worker()
+    return {"job_id": job.id, "lecture_id": lecture.id, "status": "started"}
+
+
+def _owned_lecture(db, lecture_id, user):
+    lecture = db.query(Lecture).filter(Lecture.user_id == user.id, Lecture.id == lecture_id).first()
+    if lecture is None:
+        raise HTTPException(404, "Лекция не найдена")
+    return lecture
+
+
+@router.get("/{lecture_id}")
+def read_learning_lecture(lecture_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return lecture_public(_owned_lecture(db, lecture_id, user))
+
+
+@router.patch("/{lecture_id}")
+def edit_learning_lecture(lecture_id: int, data: LectureUpdate,
+                         db: Session = Depends(get_db), user=Depends(get_current_user)):
+    lecture = _owned_lecture(db, lecture_id, user)
+    if lecture.status == "generating":
+        raise HTTPException(409, "Дождитесь завершения генерации перед редактированием")
+    lecture.content = data.content
+    lecture.status = "ready"
+    db.commit()
+    return lecture_public(lecture)
+
+
+@router.delete("/{lecture_id}")
+def remove_learning_lecture(lecture_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    lecture = _owned_lecture(db, lecture_id, user)
+    if lecture.status == "generating":
+        raise HTTPException(409, "Дождитесь завершения генерации перед удалением")
+    db.delete(lecture)
+    db.commit()
+    return {"ok": True}

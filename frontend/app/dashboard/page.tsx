@@ -3,238 +3,490 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, formatBytes } from "@/lib/api";
-import type { Subject, Note, Material, Task } from "@/types";
+import { useAuth } from "@/lib/auth";
 import {
-  BookOpen, StickyNote, FolderOpen, Layers, Sparkles, Search, Loader2,
-  FileText, ListChecks, GraduationCap,
+  civilDate,
+  isEntryOnDate,
+  scheduleTimeLabel,
+  weekPatternLabel,
+} from "@/lib/timetable";
+import type { Note, Material, Task } from "@/types";
+import type { Group, GroupDetail, Schedule } from "@/types/academic";
+import {
+  BookOpen,
+  StickyNote,
+  FolderOpen,
+  Layers,
+  Sparkles,
+  Search,
+  Loader2,
+  FileText,
+  ArrowUpRight,
+  ArrowRight,
+  Plus,
+  CalendarDays,
+  GraduationCap,
+  Mic,
 } from "lucide-react";
 
-interface SearchResult {
+type SearchResult = {
   notes: { id: number; title: string; snippet: string }[];
-  materials: { id: number; filename: string; snippet: string; processed: boolean }[];
+  materials: { id: number; filename: string; snippet: string }[];
   tasks: { id: number; question: string; status: string }[];
   cards: { id: number; front: string }[];
-}
-
-const EMPTY: SearchResult = { notes: [], materials: [], tasks: [], cards: [] };
-
+};
 export default function DashboardPage() {
-  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const { user } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
   const [files, setFiles] = useState<Material[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [due, setDue] = useState(0);
-
-  const [q, setQ] = useState("");
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [group, setGroup] = useState<GroupDetail | null>(null);
+  const [today, setToday] = useState<Schedule[]>([]);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [referenceDate, setReferenceDate] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
-
   useEffect(() => {
-    Promise.all([
-      api<Subject[]>("/subjects"),
-      api<Note[]>("/notes"),
-      api<Material[]>("/files"),
-      api<Task[]>("/tasks"),
-      api<{ total: number; due: number }>("/cards/stats"),
-    ])
-      .then(([s, n, f, t, cs]) => {
-        setSubjects(s);
+    let active = true;
+    (async () => {
+      try {
+        const [n, f, t, c, g] = await Promise.all([
+          api<Note[]>("/notes"),
+          api<Material[]>("/files"),
+          api<Task[]>("/tasks"),
+          api<{ due: number }>("/cards/stats"),
+          api<Group[]>("/groups"),
+        ]);
+        if (!active) return;
         setNotes(n);
         setFiles(f);
         setTasks(t);
-        setDue(cs.due);
-      })
-      .catch(() => {});
-  }, []);
-
-  async function doSearch(e?: React.FormEvent) {
-    e?.preventDefault();
-    if (q.trim().length < 2) return;
+        setDue(c.due);
+        setGroups(g);
+        if (user.group_id) {
+          const date = civilDate();
+          const detail = await api<GroupDetail>(`/groups/${user.group_id}`);
+          if (active) {
+            setGroup(detail);
+            setReferenceDate(date);
+            setToday([]);
+            setScheduleDate("");
+            for (let offset = 0; offset < 14; offset++) {
+              const next = new Date(`${date}T12:00:00Z`);
+              next.setUTCDate(next.getUTCDate() + offset);
+              const candidate = next.toISOString().slice(0, 10);
+              const schedule = detail.schedule
+                .filter((entry) => isEntryOnDate(entry, candidate))
+                .sort((a, b) => a.start_time.localeCompare(b.start_time));
+              if (schedule.length) {
+                setToday(schedule);
+                setScheduleDate(candidate);
+                break;
+              }
+            }
+          }
+        } else {
+          setGroup(null);
+          setToday([]);
+          setScheduleDate("");
+        }
+      } catch (e) {
+        if (active)
+          setError(
+            e instanceof Error ? e.message : "Не удалось загрузить данные",
+          );
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [user.group_id]);
+  async function search(e: React.FormEvent) {
+    e.preventDefault();
+    if (query.trim().length < 2) return;
     setSearching(true);
+    setError("");
     try {
-      const res = await api<SearchResult>(`/search?q=${encodeURIComponent(q.trim())}`);
-      setResults(res);
-    } catch {
-      setResults(EMPTY);
+      setResults(
+        await api<SearchResult>(
+          `/search?q=${encodeURIComponent(query.trim())}`,
+        ),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка поиска");
     } finally {
       setSearching(false);
     }
   }
-
-  const totalSize = files.reduce((acc, f) => acc + f.size, 0);
-  const processed = files.filter((f) => f.processed).length;
-  const solved = tasks.filter((t) => t.status === "solved").length;
-
-  const cards = [
-    { label: "Предметы", value: subjects.length, icon: BookOpen, href: "/dashboard/subjects" },
-    { label: "Заметки", value: notes.length, icon: StickyNote, href: "/dashboard/notes" },
-    { label: "Файлы", value: `${processed}/${files.length}`, icon: FolderOpen, href: "/dashboard/files", sub: "прочитано ИИ" },
-    { label: "Решено задач", value: solved, icon: ListChecks, href: "/dashboard/tasks" },
+  const firstName = user.name?.split(" ")[0] || user.email.split("@")[0];
+  const sourceDate = today.find(
+    (entry) => entry.source_updated_at,
+  )?.source_updated_at;
+  const stats = [
+    {
+      label: "Дисциплин в группе",
+      value: group?.courses.length || 0,
+      icon: BookOpen,
+      href: group ? `/dashboard/groups/${group.id}` : "/dashboard/groups",
+      sub: "УЧЕБНЫЙ ПЛАН",
+    },
+    {
+      label: "Личных заметок",
+      value: notes.length,
+      icon: StickyNote,
+      href: "/dashboard/notes",
+      sub: "ВАШИ ИДЕИ",
+    },
+    {
+      label: "Материалов",
+      value: files.length,
+      icon: FolderOpen,
+      href: "/dashboard/files",
+      sub: formatBytes(files.reduce((sum, f) => sum + f.size, 0)),
+    },
+    {
+      label: "Карточек к повторению",
+      value: due,
+      icon: Layers,
+      href: "/dashboard/review",
+      sub: "ЗАКРЕПЛЯЕМ",
+    },
   ];
-
-  const totalHits = results
-    ? results.notes.length + results.materials.length + results.tasks.length + results.cards.length
-    : 0;
-
   return (
-    <div className="mx-auto max-w-5xl">
-      <h1 className="mb-1 text-2xl font-bold">Обзор</h1>
-      <p className="mb-8 text-gray-400">Всё твоё обучение в одном месте</p>
-
-      {/* Пора повторить */}
-      {due > 0 && (
-        <Link
-          href="/dashboard/review"
-          className="mb-6 flex items-center justify-between rounded-2xl border border-indigo-500/40 bg-indigo-500/10 p-4 transition hover:border-indigo-400"
-        >
-          <div className="flex items-center gap-3">
-            <Layers className="h-5 w-5 text-indigo-400" />
-            <span className="font-medium">Пора повторить {due} {due === 1 ? "карточку" : "карточек"}</span>
-          </div>
-          <span className="text-sm text-indigo-300">Начать →</span>
-        </Link>
-      )}
-
-      {/* Поиск */}
-      <form onSubmit={doSearch} className="mb-6 flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Поиск по заметкам, файлам, задачам и карточкам..."
-            className="w-full rounded-xl border border-gray-800 bg-gray-900 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-indigo-500"
-          />
+    <div>
+      <div className="dashboard-welcome">
+        <div>
+          <span className="eyebrow">СЕГОДНЯ — ХОРОШИЙ ДЕНЬ ДЛЯ ОТКРЫТИЙ</span>
+          <h1>
+            Привет, {firstName}
+            <span className="brand-dot">.</span>
+          </h1>
+          <p>Ваше обучение, чуть спокойнее и понятнее.</p>
         </div>
+        <Link href="/dashboard/notes" className="btn btn-secondary">
+          <Plus size={15} />
+          Новая заметка
+        </Link>
+      </div>
+      {error && (
+        <div className="alert" role="alert">
+          {error}
+        </div>
+      )}
+      <form className="dashboard-search" onSubmit={search}>
+        <Search size={16} />
+        <input
+          className="field"
+          aria-label="Поиск по личным материалам"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Найти заметку, материал или задачу…"
+        />
         <button
-          type="submit"
-          disabled={searching || q.trim().length < 2}
-          className="rounded-xl bg-indigo-600 px-4 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+          className="btn btn-secondary"
+          disabled={searching || query.trim().length < 2}
         >
-          {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Найти"}
+          {searching ? <Loader2 size={14} className="animate-spin" /> : "Найти"}
         </button>
       </form>
-
-      {/* Результаты поиска */}
       {results && (
-        <div className="mb-8 space-y-4 rounded-2xl border border-gray-800 bg-gray-900 p-5">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold">Результаты</h2>
-            <span className="text-xs text-gray-500">найдено: {totalHits}</span>
+        <div className="panel search-results">
+          <div className="section-head">
+            <h2>Результаты поиска</h2>
+            <button
+              className="muted"
+              onClick={() => setResults(null)}
+              aria-label="Закрыть результаты"
+            >
+              Закрыть ×
+            </button>
           </div>
-
-          {totalHits === 0 && <p className="text-sm text-gray-500">Ничего не найдено</p>}
-
-          {results.notes.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs uppercase text-gray-500">Заметки</p>
-              {results.notes.map((r) => (
-                <Link key={r.id} href="/dashboard/notes"
-                  className="block rounded-lg px-3 py-2 text-sm hover:bg-gray-800">
-                  <div className="font-medium">{r.title}</div>
-                  <div className="text-xs text-gray-500">{r.snippet}</div>
-                </Link>
-              ))}
-            </div>
-          )}
-
-          {results.materials.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs uppercase text-gray-500">Файлы</p>
-              {results.materials.map((r) => (
-                <Link key={r.id} href="/dashboard/files"
-                  className="flex items-start gap-2 rounded-lg px-3 py-2 text-sm hover:bg-gray-800">
-                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
-                  <div>
-                    <div className="font-medium">{r.filename}</div>
-                    <div className="text-xs text-gray-500">{r.snippet}</div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-
-          {results.tasks.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs uppercase text-gray-500">Задачи</p>
-              {results.tasks.map((r) => (
-                <Link key={r.id} href="/dashboard/tasks"
-                  className="block rounded-lg px-3 py-2 text-sm hover:bg-gray-800">
-                  <div className="line-clamp-1">{r.question}</div>
-                  <div className="text-xs text-gray-500">статус: {r.status}</div>
-                </Link>
-              ))}
-            </div>
-          )}
-
-          {results.cards.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs uppercase text-gray-500">Карточки</p>
-              {results.cards.map((r) => (
-                <Link key={r.id} href="/dashboard/review"
-                  className="block rounded-lg px-3 py-2 text-sm hover:bg-gray-800">
-                  <div className="line-clamp-1">{r.front}</div>
-                </Link>
-              ))}
-            </div>
+          {results.notes.map((n) => (
+            <Link key={`n${n.id}`} href="/dashboard/notes">
+              {n.title}
+              <small>{n.snippet}</small>
+            </Link>
+          ))}
+          {results.materials.map((f) => (
+            <Link key={`f${f.id}`} href="/dashboard/files">
+              {f.filename}
+              <small>{f.snippet}</small>
+            </Link>
+          ))}
+          {results.tasks.map((t) => (
+            <Link key={`t${t.id}`} href="/dashboard/tasks">
+              {t.question}
+            </Link>
+          ))}
+          {results.cards.map((c) => (
+            <Link key={`c${c.id}`} href="/dashboard/review">
+              {c.front}
+            </Link>
+          ))}
+          {Object.values(results).every((a) => !a.length) && (
+            <p className="muted">Ничего не найдено. Попробуйте другое слово.</p>
           )}
         </div>
       )}
-
-      {/* Статистика */}
-      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {cards.map(({ label, value, icon: Icon, href, sub }) => (
-          <Link key={label} href={href}
-            className="rounded-2xl border border-gray-800 bg-gray-900 p-5 transition hover:border-indigo-500/50">
-            <Icon className="mb-3 h-5 w-5 text-indigo-400" />
-            <div className="text-2xl font-bold">{value}</div>
-            <div className="text-sm text-gray-400">{label}</div>
-            {sub && <div className="text-xs text-gray-500">{sub}</div>}
+      <div className="welcome-banner">
+        <span className="eyebrow" style={{ marginBottom: 10 }}>
+          МАЛЕНЬКИЕ ШАГИ. БОЛЬШОЙ ПРОГРЕСС.
+        </span>
+        <h2>
+          Сфокусируйтесь
+          <br />
+          на следующем открытии.
+        </h2>
+        <p>Откройте учебный план, выберите тему и двигайтесь в своём ритме.</p>
+        <Link
+          className="btn btn-primary"
+          href={group ? `/dashboard/groups/${group.id}` : "/dashboard/groups"}
+        >
+          К моему обучению
+          <ArrowUpRight size={14} />
+        </Link>
+        <div className="banner-art" aria-hidden="true">
+          <div>
+            Q<small>STUDY</small>
+          </div>
+          <span />
+        </div>
+      </div>
+      <div className="stat-grid">
+        {stats.map(({ label, value, icon: Icon, href, sub }) => (
+          <Link key={label} href={href} className="stat-card">
+            <div className="stat-card-top">
+              <Icon size={18} />
+              <span>{sub}</span>
+            </div>
+            <strong>{loading ? "—" : value.toString().padStart(2, "0")}</strong>
+            <p>{label}</p>
           </Link>
         ))}
       </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Недавние заметки */}
-        <div className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-semibold">Недавние заметки</h2>
-            <Link href="/dashboard/notes" className="text-sm text-indigo-400 hover:underline">Все</Link>
-          </div>
-          {notes.slice(0, 5).map((n) => (
-            <Link key={n.id} href="/dashboard/notes"
-              className="block rounded-lg px-3 py-2 text-sm hover:bg-gray-800">
-              <div className="font-medium">{n.title}</div>
-              <div className="text-xs text-gray-500">
-                {new Date(n.updated_at).toLocaleString("ru", {
-                  day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-                })}
+      <div className="dashboard-grid">
+        <div>
+          <div className="panel">
+            <div className="section-head">
+              <h2>Моё расписание</h2>
+              <Link
+                href={
+                  group ? `/dashboard/groups/${group.id}` : "/dashboard/groups"
+                }
+              >
+                {group?.name || "Все группы"}
+                <ArrowUpRight size={12} />
+              </Link>
+            </div>
+            {scheduleDate && (
+              <p className="muted" style={{ marginBottom: 16, fontSize: 12 }}>
+                {scheduleDate === referenceDate
+                  ? "Сегодня"
+                  : "Ближайший учебный день"}
+                {" · "}
+                {new Date(`${scheduleDate}T12:00:00Z`).toLocaleDateString(
+                  "ru-RU",
+                  {
+                    timeZone: "Asia/Almaty",
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                  },
+                )}
+                {" · UTC+5"}
+              </p>
+            )}
+            {today.length > 0 ? (
+              today.map((s) => (
+                <Link
+                  className="daily-schedule"
+                  key={s.id}
+                  href={`/dashboard/groups/${s.group_id}/courses/${s.course_id}`}
+                >
+                  <span
+                    style={{
+                      minWidth: 72,
+                      maxWidth: 100,
+                      whiteSpace: "normal",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {scheduleTimeLabel(s)}
+                  </span>
+                  <div>
+                    <strong>{s.course_title}</strong>
+                    <small>
+                      {s.lesson_type} · Кабинет {s.room || "не указан"} ·{" "}
+                      {weekPatternLabel(s.week_pattern)}
+                    </small>
+                    {s.teacher && <small>{s.teacher}</small>}
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <div className="schedule-empty">
+                <CalendarDays size={24} />
+                <strong>
+                  {loading
+                    ? "Загружаем расписание…"
+                    : !user.group_id
+                      ? "Найдите свою группу"
+                      : group?.schedule.length
+                        ? "Сегодня занятий нет"
+                        : "Расписание ещё не опубликовано"}
+                </strong>
+                <p>
+                  {!user.group_id
+                    ? "Попросите администратора назначить вам группу."
+                    : "Учебный план и материалы доступны на странице группы."}
+                </p>
+                <Link
+                  href={
+                    !user.group_id
+                      ? "/dashboard/profile"
+                      : `/dashboard/groups/${user.group_id}`
+                  }
+                  style={{
+                    display: "inline-block",
+                    marginTop: 12,
+                    color: "#5d8050",
+                  }}
+                >
+                  {!user.group_id ? "Мой профиль →" : "Открыть группу →"}
+                </Link>
               </div>
-            </Link>
-          ))}
-          {notes.length === 0 && <p className="px-3 text-sm text-gray-500">Пока пусто</p>}
-        </div>
-
-        {/* ИИ-панель */}
-        <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-600/10 to-purple-600/10 p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-indigo-400" />
-            <h2 className="font-semibold">ИИ-помощник</h2>
+            )}
+            {today.some((entry) => entry.source_file) && (
+              <p
+                className="muted"
+                style={{ marginTop: 14, fontSize: 11, lineHeight: 1.6 }}
+              >
+                По загруженному справочнику
+                {sourceDate
+                  ? ` от ${new Date(`${sourceDate}T12:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "Asia/Almaty" })}`
+                  : ""}
+                . В нём не указаны даты семестра, время окончания и
+                периодичность занятий. Изменения проверяйте у куратора.
+              </p>
+            )}
           </div>
-          <ul className="space-y-2 text-sm text-gray-300">
-            <li>💬 Чат видит твои материалы и знает, чем ты занят</li>
-            <li>📝 Тренажёр: задачи по твоим конспектам с проверкой</li>
-            <li>🎓 Экзаменатор: отвечай голосом, получай разбор</li>
-            <li>🔁 Повторение: карточки появляются перед забыванием</li>
-          </ul>
-          <p className="mt-4 rounded-lg bg-gray-900/60 px-3 py-2 text-xs text-gray-400">
-            Хранилище: {formatBytes(totalSize)} · Обработано ИИ: {processed} из {files.length}
-          </p>
-          <Link href="/dashboard/exam"
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500">
-            <GraduationCap className="h-4 w-4" /> Проверить себя экзаменом
-          </Link>
+          <div style={{ marginTop: 23 }}>
+            <div className="section-head">
+              <h2>Быстрый старт</h2>
+              <span className="muted" style={{ fontSize: 9 }}>
+                Всё, что помогает учиться
+              </span>
+            </div>
+            <div className="quick-links">
+              {[
+                {
+                  href: "/dashboard/syllabi",
+                  label: "Силабусы",
+                  icon: FileText,
+                },
+                {
+                  href: "/dashboard/exam",
+                  label: "Подготовка к экзамену",
+                  icon: GraduationCap,
+                },
+                {
+                  href: "/dashboard/voice",
+                  label: "Записать лекцию",
+                  icon: Mic,
+                },
+              ].map(({ href, label, icon: Icon }) => (
+                <Link key={href} href={href} className="quick-link">
+                  <Icon size={22} />
+                  <span>{label}</span>
+                  <ArrowUpRight size={13} />
+                </Link>
+              ))}
+            </div>
+          </div>
         </div>
+        <div>
+          <div className="panel">
+            <div className="section-head">
+              <h2>Недавние заметки</h2>
+              <Link href="/dashboard/notes">
+                Все заметки
+                <ArrowUpRight size={12} />
+              </Link>
+            </div>
+            {notes.slice(0, 3).map((n) => (
+              <Link href="/dashboard/notes" key={n.id} className="recent-note">
+                <FileText />
+                <div>
+                  <strong>{n.title}</strong>
+                  <small>
+                    {new Date(
+                      n.updated_at +
+                        (/Z|[+-]\d\d:\d\d$/.test(n.updated_at) ? "" : "Z"),
+                    ).toLocaleDateString("ru-RU", {
+                      day: "numeric",
+                      month: "long",
+                    })}
+                  </small>
+                </div>
+                <span>↗</span>
+              </Link>
+            ))}
+            {notes.length === 0 && (
+              <div className="empty-state" style={{ padding: "21px 0" }}>
+                <StickyNote size={22} />
+                <p>Хорошей мысли нужно место.</p>
+                <Link
+                  href="/dashboard/notes"
+                  style={{ color: "#6b895a", fontSize: 10 }}
+                >
+                  Создать первую заметку →
+                </Link>
+              </div>
+            )}
+          </div>
+          <div className="assistant-mini">
+            <span>
+              <Sparkles size={15} /> QSTUDY AI
+            </span>
+            <h3>
+              Не нужно разбираться
+              <br />
+              во всём в одиночку.
+            </h3>
+            <p>
+              Объясним сложную тему, проверим знания и найдём ответы в
+              материалах.
+            </p>
+            <Link href="/dashboard/chat">
+              О чём хотите узнать?
+              <ArrowRight size={15} />
+            </Link>
+          </div>
+        </div>
+      </div>
+      <div
+        style={{
+          marginTop: 25,
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 15,
+          color: "#a1ae95",
+          fontSize: 9,
+        }}
+      >
+        <span>
+          {loading
+            ? "Загрузка…"
+            : `Групп: ${groups.length} · Решено задач: ${tasks.filter((t) => t.status === "solved").length}`}
+        </span>
+        <span>Каждый день — немного ближе.</span>
       </div>
     </div>
   );

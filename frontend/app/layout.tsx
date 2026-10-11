@@ -1,15 +1,26 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { BrandingProvider } from "@/components/branding-provider";
 
 export const metadata: Metadata = {
-  title: "StudyHub — умная учёба",
-  description: "Личная учебная платформа с ИИ",
+  title: {
+    default: "QStudy — пространство для роста",
+    template: "%s · QStudy",
+  },
+  description:
+    "Ваше обучение в одном пространстве: группы, расписание, учебный план и личный ИИ-помощник.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="ru">
-      <body className="bg-gray-950 text-gray-100 antialiased">{children}</body>
+    <html lang="ru" data-scroll-behavior="smooth">
+      <body className="antialiased">
+        <BrandingProvider>{children}</BrandingProvider>
+      </body>
     </html>
   );
 }
