@@ -9,7 +9,7 @@ task_env_file="$task_root/deployment/.env"
 
 help() {
     cat <<'EOF'
-QStudy production management (Linux VPS)
+QStudy production management (Linux home server or VPS)
   sudo bash scripts/production/Manage-QStudy.sh init DOMAIN CONTACT_EMAIL
   sudo bash scripts/production/Manage-QStudy.sh check [--offline]
   sudo bash scripts/production/Manage-QStudy.sh permissions
@@ -40,7 +40,8 @@ command -v python3 >/dev/null || { printf '%s\n' 'Install Python with Install-Do
 task_action="$1"
 shift
 compose() {
-    docker compose --project-directory "$task_root/deployment" --env-file "$task_env_file" -f "$task_compose_file" "$@"
+    env -u PUBLIC_BASE_URL -u SECRET_KEY -u BFF_PROXY_SECRET -u QSTUDY_DOMAIN -u ACME_EMAIL -u RECOVERY_DELIVERY \
+        docker compose --project-name qstudy --project-directory "$task_root/deployment" --env-file "$task_env_file" -f "$task_compose_file" "$@"
 }
 docker_ready() {
     command -v docker >/dev/null || { printf '%s\n' 'Run Install-Docker.sh first.' >&2; exit 1; }
