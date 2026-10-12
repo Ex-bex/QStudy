@@ -108,8 +108,12 @@ jobs:
           # remain in place to verify that account data survives that transition.
           docker compose --env-file deployment/.env -f deployment/compose.yml stop
           mv deployment/.env deployment/.env.ci-https
-          python3 scripts/production/configure.py init-http 8.8.8.8 18080
-          python3 scripts/production/configure.py check --offline
+          # The existing Linux data directories already belong to the app UID.
+          # Initialize/check as root, but keep the private dotenv readable by the
+          # CI runner that invokes Compose. Data ownership remains unchanged.
+          sudo python3 scripts/production/configure.py init-http 8.8.8.8 18080
+          sudo chown "$(id -u):$(id -g)" deployment/.env
+          sudo python3 scripts/production/configure.py check --offline
           sudo python3 scripts/production/configure.py permissions
           if sudo bash scripts/production/Manage-QStudy.sh check --offline; then
             echo 'Legacy Linux HTTPS manager must refuse HTTP mode'
