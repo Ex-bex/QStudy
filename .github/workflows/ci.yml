@@ -130,7 +130,7 @@ jobs:
           docker compose --env-file deployment/.env -f deployment/compose.http.yml config --quiet
           docker compose --env-file deployment/.env -f deployment/compose.http.yml run --rm --no-deps -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
           docker compose --env-file deployment/.env -f deployment/compose.http.yml up -d --no-build --force-recreate --wait --wait-timeout 300 backend frontend caddy
-          python3 scripts/production/configure.py probe --local
+          sudo python3 scripts/production/configure.py probe --local
           docker compose --env-file deployment/.env -f deployment/compose.http.yml exec -T backend python production_runtime.py account-status
           docker compose --env-file deployment/.env -f deployment/compose.http.yml exec -T frontend node --input-type=module - --existing < scripts/production/smoke.mjs
           # 8.8.8.8 is only a synthetic configured Host/Origin. All connections
