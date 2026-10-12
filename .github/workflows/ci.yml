@@ -171,7 +171,8 @@ jobs:
           status, headers, data = request("/api/auth/login", method="POST", body=payload, extra={"Origin": origin, "Content-Type": "application/x-www-form-urlencoded"})
           assert status == 200, "Existing student account works through the public HTTP proxy"
           cookie = next(value for key, value in headers.items() if key.lower() == "set-cookie")
-          assert "HttpOnly" in cookie and "SameSite=Strict" in cookie and "Secure" not in cookie, "HTTP session retains script/CSRF protections with the explicit HTTP cookie mode"
+          attributes = {part.strip().lower() for part in cookie.split(";")[1:]}
+          assert "httponly" in attributes and "samesite=strict" in attributes and "secure" not in attributes, "HTTP session retains script/CSRF protections with the explicit HTTP cookie mode"
           assert request("/api/auth/me", extra={"Cookie": cookie.split(";", 1)[0]})[0] == 200
           assert request("/api/auth/login", method="POST", body=payload, extra={"Origin": "https://evil.example", "Content-Type": "application/x-www-form-urlencoded"})[0] == 403
           print("Direct HTTP proxy, exact Host/port, private ports, cookie and persisted-account checks passed.")
