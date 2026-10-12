@@ -272,6 +272,168 @@ class ProductionConfigurationTests(unittest.TestCase):
                         configuration.probe(self.base)
                 self.assertEqual(opener.open.call_count, 1)
 
+    def test_local_http_probe_uses_loopback_with_exact_public_host_including_port_80(self):
+        for port in (80, 3000):
+            with self.subTest(port=port):
+                if (self.base / ".env").exists():
+                    (self.base / ".env").unlink()
+                configuration.initialize_http(self.base, "94.125.99.135", port)
+                public_origin = f"http://94.125.99.135:{port}"
+                local_origin = f"http://127.0.0.1:{port}"
+                opener = MagicMock()
+                # A transport may normalize the default HTTP port in its URL.
+                response_origin = "http://127.0.0.1" if port == 80 else local_origin
+                health = self.response(response_origin + "/api/health", hsts="")
+                opener.open.side_effect = [health, self.response(response_origin + "/", hsts="")]
+                with patch.object(configuration.urllib.request, "build_opener", return_value=opener) as factory, patch.object(configuration.socket, "getaddrinfo") as dns:
+                    report = configuration.probe(self.base, local=True)
+                self.assertEqual(report, {"status": "local_http_verified", "public_url": public_origin,
+                                          "host_mode": "http", "verified_locally": True,
+                                          "external_reachability_proven": False})
+                requests = [call.args[0] for call in opener.open.call_args_list]
+                self.assertEqual([request.full_url for request in requests], [local_origin + "/api/health", local_origin + "/"])
+                self.assertEqual([request.get_header("Host") for request in requests], [f"94.125.99.135:{port}"] * 2)
+                self.assertTrue(all(call.kwargs == {"timeout": 25} for call in opener.open.call_args_list))
+                handlers = factory.call_args.args
+                self.assertTrue(any(isinstance(handler, urllib.request.ProxyHandler) and handler.proxies == {} for handler in handlers))
+                self.assertTrue(any(isinstance(handler, configuration.ProbeRedirectHandler) for handler in handlers))
+                health.read.assert_called_once_with(10_000)
+                dns.assert_not_called()
+
+    def test_local_http_probe_bypasses_system_proxy_in_real_urllib_processing(self):
+        configuration.initialize_http(self.base, "94.125.99.135", 3000)
+        builder = urllib.request.build_opener
+        requested = []
+
+        class LocalTransport(urllib.request.HTTPHandler):
+            def http_open(self, request):
+                requested.append((request.full_url, request.get_header("Host"), request.has_proxy()))
+                body = b'{"status":"ok","service":"QStudy"}' if request.selector == "/api/health" else b"QStudy"
+                response = urllib.response.addinfourl(io.BytesIO(body), Message(), request.full_url, 200)
+                response.msg = "OK"
+                return response
+
+        def direct_opener(*handlers):
+            return builder(*handlers, LocalTransport())
+
+        with patch.dict(configuration.os.environ, {"http_proxy": "http://proxy.invalid:8123", "HTTP_PROXY": "http://proxy.invalid:8123", "no_proxy": "", "NO_PROXY": ""}), patch.object(configuration.urllib.request, "build_opener", side_effect=direct_opener), patch.object(configuration.socket, "create_connection", side_effect=AssertionError("Tests must not open network connections")):
+            report = configuration.probe(self.base, local=True)
+        self.assertEqual(requested, [("http://127.0.0.1:3000/api/health", "94.125.99.135:3000", False),
+                                     ("http://127.0.0.1:3000/", "94.125.99.135:3000", False)])
+        self.assertEqual(report["status"], "local_http_verified")
+
+    def test_local_http_probe_requires_http_mode_and_valid_configuration_before_requests(self):
+        self.initialize()
+        with patch.object(configuration.urllib.request, "build_opener") as factory:
+            with self.assertRaises(configuration.ConfigurationError) as raised:
+                configuration.probe(self.base, local=True)
+            factory.assert_not_called()
+        self.assertIn("only", str(raised.exception))
+        (self.base / ".env").unlink()
+        configuration.initialize_http(self.base, "94.125.99.135", 3000)
+        original = configuration.read_environment(self.base / ".env")
+        for key, value in (("QSTUDY_HTTP_PORT", "65536"), ("QSTUDY_HTTP_PORT", "03000"),
+                           ("PUBLIC_BASE_URL", "http://94.125.99.135:3001"),
+                           ("ALLOW_PUBLIC_HTTP", "false"), ("SECRET_KEY", "short"),
+                           ("BFF_PROXY_SECRET", original["SECRET_KEY"]), ("RECOVERY_DELIVERY", "local")):
+            with self.subTest(key=key, value=value):
+                self.replace(key, value)
+                with patch.object(configuration.urllib.request, "build_opener") as factory, patch.object(configuration.socket, "getaddrinfo") as dns:
+                    with self.assertRaises(configuration.ConfigurationError):
+                        configuration.probe(self.base, local=True)
+                    factory.assert_not_called()
+                    dns.assert_not_called()
+                self.replace(key, original[key])
+
+    def test_local_http_probe_checks_response_connection_origin_at_both_stages(self):
+        configuration.initialize_http(self.base, "94.125.99.135", 3000)
+        local_origin = "http://127.0.0.1:3000"
+        for bad_url in ("http://94.125.99.135:3000/", "http://localhost:3000/", "http://127.0.0.1:3001/",
+                        "https://127.0.0.1:3000/", "http://PRIVATE_VALUE@127.0.0.1:3000/"):
+            for stage in ("health", "homepage"):
+                with self.subTest(url=bad_url, stage=stage):
+                    opener = MagicMock()
+                    opener.open.side_effect = ([self.response(bad_url)] if stage == "health" else
+                                               [self.response(local_origin + "/api/health"), self.response(bad_url)])
+                    with patch.object(configuration.urllib.request, "build_opener", return_value=opener):
+                        with self.assertRaises(configuration.ConfigurationError) as raised:
+                            configuration.probe(self.base, local=True)
+                    self.assertIn("another origin", str(raised.exception))
+                    self.assertNotIn("PRIVATE_VALUE", str(raised.exception))
+                    self.assertEqual(opener.open.call_count, 1 if stage == "health" else 2)
+
+    def test_local_http_probe_refuses_redirects_at_both_stages(self):
+        configuration.initialize_http(self.base, "94.125.99.135", 3000)
+        builder = urllib.request.build_opener
+        for stage in ("health", "homepage"):
+            for code in (301, 302, 303, 307, 308):
+                requested = []
+
+                class RedirectTransport(urllib.request.HTTPHandler):
+                    def http_open(self, request):
+                        requested.append(request.full_url)
+                        headers = Message()
+                        redirected = stage == "health" or request.selector == "/"
+                        if redirected:
+                            headers["Location"] = "http://94.125.99.135:3000/PRIVATE_LOCATION"
+                        body = b"" if redirected else b'{"status":"ok","service":"QStudy"}'
+                        response = urllib.response.addinfourl(io.BytesIO(body), headers, request.full_url, code if redirected else 200)
+                        response.msg = "Redirect" if redirected else "OK"
+                        return response
+
+                def direct_opener(*handlers):
+                    return builder(*handlers, RedirectTransport())
+
+                with self.subTest(stage=stage, code=code), patch.object(configuration.urllib.request, "build_opener", side_effect=direct_opener), patch.object(configuration.socket, "create_connection", side_effect=AssertionError("Tests must not open network connections")):
+                    with self.assertRaises(configuration.ConfigurationError) as raised:
+                        configuration.probe(self.base, local=True)
+                self.assertEqual(requested, ["http://127.0.0.1:3000/api/health"] + (["http://127.0.0.1:3000/"] if stage == "homepage" else []))
+                self.assertNotIn("PRIVATE_LOCATION", str(raised.exception))
+
+    def test_local_http_probe_does_not_require_reachable_public_ip(self):
+        configuration.initialize_http(self.base, "94.125.99.135", 3000)
+        opener = MagicMock()
+        opener.open.side_effect = urllib.error.URLError("Public IP is unavailable from this host")
+        with patch.object(configuration.urllib.request, "build_opener", return_value=opener):
+            with self.assertRaises(urllib.error.URLError):
+                configuration.probe(self.base)
+        self.assertEqual(opener.open.call_args.args[0], "http://94.125.99.135:3000/api/health")
+        opener.open.side_effect = [self.response("http://127.0.0.1:3000/api/health", hsts=""),
+                                   self.response("http://127.0.0.1:3000/", hsts="")]
+        with patch.object(configuration.urllib.request, "build_opener", return_value=opener):
+            report = configuration.probe(self.base, local=True)
+        self.assertTrue(report["verified_locally"])
+        self.assertFalse(report["external_reachability_proven"])
+        self.assertNotIn("verified_from_this_host", report)
+
+    def test_local_http_probe_requires_qstudy_health_and_successful_homepage(self):
+        configuration.initialize_http(self.base, "94.125.99.135", 3000)
+        for health_status, health_body, homepage_status in ((200, b'{"status":"ok","service":"Other"}', 200),
+                                                          (503, b'{"status":"ok","service":"QStudy"}', 200),
+                                                          (200, b'not-json-PRIVATE_RESPONSE', 200),
+                                                          (200, b'{"status":"ok","service":"QStudy"}', 503)):
+            with self.subTest(health_status=health_status, homepage_status=homepage_status):
+                opener = MagicMock()
+                opener.open.side_effect = [self.response("http://127.0.0.1:3000/api/health", status=health_status, body=health_body),
+                                           self.response("http://127.0.0.1:3000/", status=homepage_status)]
+                with patch.object(configuration.urllib.request, "build_opener", return_value=opener):
+                    with self.assertRaises(configuration.ConfigurationError) as raised:
+                        configuration.probe(self.base, local=True)
+                self.assertNotIn("PRIVATE_RESPONSE", str(raised.exception))
+                self.assertEqual(opener.open.call_count, 2 if homepage_status == 503 else 1)
+
+    def test_cli_local_http_probe_returns_safe_report(self):
+        configuration.initialize_http(self.base, "94.125.99.135", 3000)
+        output = io.StringIO()
+        opener = MagicMock()
+        opener.open.side_effect = [self.response("http://127.0.0.1:3000/api/health", hsts=""),
+                                   self.response("http://127.0.0.1:3000/", hsts="")]
+        with patch.object(configuration.sys, "argv", ["configure.py", "probe", "--local"]), patch.object(configuration, "deployment_directory", return_value=self.base), patch.object(configuration.urllib.request, "build_opener", return_value=opener), contextlib.redirect_stdout(output):
+            self.assertEqual(configuration.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())["status"], "local_http_verified")
+        self.assertNotIn("SECRET_KEY", output.getvalue())
+        self.assertNotIn("BFF_PROXY_SECRET", output.getvalue())
+
     def test_http_probe_refuses_redirect_before_contacting_another_address(self):
         configuration.initialize_http(self.base, "8.8.8.8", 8080)
         requested = []

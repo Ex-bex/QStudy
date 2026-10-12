@@ -114,6 +114,7 @@ try {
         }
     }
     Write-Host ('Сайт: ' + $state.siteUrl)
+    Write-Host 'Это локальный запуск. Для доступа из интернета используйте Start-QStudy-Internet.cmd; внешний адрес выводится отдельным запуском.'
     if ($state.siteUrl -ne $state.localUrl) { Write-Host ('На этом компьютере: ' + $state.localUrl) }
     foreach ($url in @($state.lanUrls | Select-Object -Skip 1)) { Write-Host ('Другой сетевой адрес: ' + $url) }
     if ($useLan -and @($state.lanUrls).Count -eq 0) { Write-Warning 'Активный сетевой IPv4-адрес не найден. Открываю локальный адрес.' }

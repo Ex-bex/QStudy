@@ -272,28 +272,44 @@ def assert_probe_origin(response_url: str, origin: str) -> None:
         raise ConfigurationError("The public site probe received a response from another origin.")
 
 
-def probe(base: Path) -> dict:
+def probe(base: Path, local: bool = False) -> dict:
     # Validate secrets, recovery mode, storage and the exact public URL before
     # any requests. This probe verifies access from this host, not another network.
     configuration = check(base, offline=True)
     origin = configuration["public_url"]
-    opener = urllib.request.build_opener(ProbeRedirectHandler())
-    with opener.open(origin + "/api/health", timeout=25) as response:
-        assert_probe_origin(response.geturl(), origin)
+    if local and configuration["host_mode"] != "http":
+        raise ConfigurationError("The local probe is available only for explicit public IPv4 HTTP hosting.")
+    connection_origin = f"http://127.0.0.1:{configuration['public_port']}" if local else origin
+    handlers = [urllib.request.ProxyHandler({}), ProbeRedirectHandler()] if local else [ProbeRedirectHandler()]
+    opener = urllib.request.build_opener(*handlers)
+
+    def open_response(path: str):
+        # Connect directly to the published local port while preserving Caddy's
+        # exact public Host check. This must not depend on router NAT loopback
+        # or pass through a system HTTP proxy.
+        request = (urllib.request.Request(connection_origin + path, headers={"Host": urllib.parse.urlsplit(origin).netloc})
+                   if local else connection_origin + path)
+        return opener.open(request, timeout=25)
+
+    with open_response("/api/health") as response:
+        assert_probe_origin(response.geturl(), connection_origin)
         try:
             health = json.loads(response.read(10_000))
         except (ValueError, UnicodeError) as error:
             raise ConfigurationError("The public API health response is not valid QStudy JSON.") from error
         if response.status != 200 or not isinstance(health, dict) or health.get("status") != "ok" or health.get("service") != "QStudy":
             raise ConfigurationError("The public API health response is not QStudy.")
-    with opener.open(origin + "/", timeout=25) as response:
-        assert_probe_origin(response.geturl(), origin)
+    with open_response("/") as response:
+        assert_probe_origin(response.geturl(), connection_origin)
         if response.status != 200:
             raise ConfigurationError("The public homepage is unavailable.")
         if configuration["host_mode"] == "https":
             hsts = re.search(r"(?:^|;)\s*max-age\s*=\s*(\d+)\s*(?:;|$)", response.headers.get("Strict-Transport-Security", ""), re.IGNORECASE)
             if not hsts or int(hsts.group(1)) <= 0:
                 raise ConfigurationError("The public proxy is missing a valid HTTPS security header.")
+    if local:
+        return {"status": "local_http_verified", "public_url": origin, "host_mode": "http",
+                "verified_locally": True, "external_reachability_proven": False}
     return {"status": "public_" + configuration["host_mode"] + "_verified", "public_url": origin,
             "host_mode": configuration["host_mode"],
             "verified_from_this_host": True, "external_reachability_proven": False}
@@ -311,7 +327,8 @@ def main() -> int:
     validation = subparsers.add_parser("check")
     validation.add_argument("--offline", action="store_true")
     subparsers.add_parser("permissions")
-    subparsers.add_parser("probe")
+    verification = subparsers.add_parser("probe")
+    verification.add_argument("--local", action="store_true", help="Verify the HTTP port locally with its configured public Host, without requiring router NAT loopback.")
     arguments = parser.parse_args()
     base = deployment_directory()
     try:
@@ -324,7 +341,7 @@ def main() -> int:
         elif arguments.command == "permissions":
             result = permissions(base)
         else:
-            result = probe(base)
+            result = probe(base, local=arguments.local)
     except ConfigurationError as error:
         print("QStudy: " + str(error), file=sys.stderr)
         return 1

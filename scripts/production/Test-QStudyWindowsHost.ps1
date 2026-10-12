@@ -25,6 +25,8 @@ $oldBuilder = $env:BUILDX_BUILDER
 $oldSelectedBuilder = $env:QSTUDY_TEST_BUILDX_SELECTED
 $oldBuildxConfig = $env:BUILDX_CONFIG
 $oldHttpMode = $env:QSTUDY_TEST_HOST_MODE
+$oldAccountState = $env:QSTUDY_TEST_ACCOUNT_STATE
+$oldHostImages = $env:QSTUDY_TEST_HOST_IMAGES
 $fixtureDeployment = Join-Path $fixture 'deployment'
 $fixtureScripts = Join-Path $fixture 'scripts\production'
 $manager = Join-Path $fixtureScripts 'Manage-QStudy.ps1'
@@ -67,6 +69,8 @@ try {
     $env:DOCKER_CONTEXT = ''
     $env:QSTUDY_TEST_DOCKER_ENDPOINT = ''
     $env:QSTUDY_TEST_DOCKER_RUNNING = ''
+    $env:QSTUDY_TEST_ACCOUNT_STATE = ''
+    $env:QSTUDY_TEST_HOST_IMAGES = ''
     [IO.Directory]::CreateDirectory($fixtureScripts) | Out-Null
     [IO.Directory]::CreateDirectory($fixtureDeployment) | Out-Null
     foreach ($name in @('Manage-QStudy.ps1', 'QStudy.WindowsHost.ps1', 'configure.py')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $fixtureScripts }
@@ -105,6 +109,23 @@ if ($commandArgs[0] -eq 'inspect') { Write-Output (ConvertTo-Json -InputObject @
 if ($commandArgs -contains 'version') { Write-Output 'Docker Compose test'; return }
 if ($commandArgs -contains 'ps') { if ($commandArgs -contains '--services') { if ($env:QSTUDY_TEST_DOCKER_RUNNING) { foreach ($service in $env:QSTUDY_TEST_DOCKER_RUNNING.Split(',')) { if ($service -ne 'none') { Write-Output $service } } } else { Write-Output 'backend' } }; return }
 if ($env:QSTUDY_TEST_DOCKER_FAILURE -and $commandArgs -contains $env:QSTUDY_TEST_DOCKER_FAILURE) { $global:LASTEXITCODE = 1; Write-Output 'Disposable failure'; return }
+if ($commandArgs[0] -eq 'image' -and $commandArgs -contains 'inspect') {
+    if ($env:QSTUDY_TEST_HOST_IMAGES -eq 'missing') { $global:LASTEXITCODE = 1; return }
+    Write-Output ('sha256:' + ('1' * 64)); return
+}
+if ($commandArgs -contains 'account-status') {
+    $report = @{ active_admin_exists = $true; account_count = 1 }
+    switch ($env:QSTUDY_TEST_ACCOUNT_STATE) {
+        'no-admin' { $report.active_admin_exists = $false; $report.account_count = 0 }
+        'invalid-json' { Write-Output 'PRIVATE-INVALID-FIXTURE-ACCOUNT-OUTPUT'; return }
+        'invalid-bool' { $report.active_admin_exists = 'true' }
+        'negative-count' { $report.account_count = -1 }
+        'zero-active-count' { $report.account_count = 0 }
+        'private-fields' { $report.email = 'private-fixture@example.org'; $report.hashed_password = 'PRIVATE-FIXTURE-HASH' }
+    }
+    Write-Output (ConvertTo-Json -InputObject $report -Compress); return
+}
+if ($commandArgs -contains 'first-admin') { Write-Output '{"status":"created","active_admin_exists":true,"account_count":1}'; return }
 if ($commandArgs -contains 'build') {
     $builderIndex = [Array]::IndexOf($commandArgs, '--builder')
     $builder = if ($builderIndex -ge 0) { $commandArgs[$builderIndex + 1] } elseif ($env:BUILDX_BUILDER) { $env:BUILDX_BUILDER } else { $env:QSTUDY_TEST_BUILDX_SELECTED }
@@ -377,6 +398,95 @@ print(json.dumps({"status": "disposable", "host_mode": mode,
     Reset-DockerCalls
     $result = Invoke-FixtureManager @('resume', '-Offline', '-NoBrowser')
     Assert-HostCheck ($result.code -eq 0 -and @((Read-DockerCalls) | Where-Object { $_ -contains 'up' -and $_ -contains (Join-Path $fixtureDeployment 'compose.http.yml') }).Count -eq 1) 'HTTP sign-in resume keeps the selected IP/port profile'
+
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('account-status')
+    $accountReportPath = Join-Path $fixture '.local\host-account-status.json'
+    Assert-HostCheck ($result.code -eq 0 -and (Test-Path -LiteralPath $accountReportPath -PathType Leaf)) ('host account status produces its private report: ' + $result.output)
+    $accountReport = [IO.File]::ReadAllText($accountReportPath) | ConvertFrom-Json
+    Assert-HostCheck ($accountReport.active_admin_exists -is [bool] -and $accountReport.active_admin_exists -and $accountReport.account_count -is [int] -and $accountReport.account_count -eq 1) 'account status preserves real JSON bool and count types'
+    Assert-HostCheck (@($accountReport.PSObject.Properties.Name | Where-Object { $_ -notin @('active_admin_exists', 'account_count', 'checked_utc') }).Count -eq 0) 'the persisted account report contains counts and admin presence only, with a check timestamp'
+    $acl = Get-Acl -LiteralPath $accountReportPath
+    $unsafeRules = @($acl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin $allowed })
+    Assert-HostCheck ($acl.AreAccessRulesProtected -and $unsafeRules.Count -eq 0) 'host account report is private to owner, system and administrators'
+    $accountCalls = @((Read-DockerCalls) | Where-Object { $_ -contains 'account-status' })
+    Assert-HostCheck ($accountCalls.Count -eq 1 -and $accountCalls[0] -contains 'production_runtime.py' -and $accountCalls[0] -contains '-T') 'status uses the safe runtime command with captured noninteractive output'
+
+    $env:QSTUDY_TEST_ACCOUNT_STATE = 'private-fields'
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('account-status')
+    $accountReportText = [IO.File]::ReadAllText($accountReportPath)
+    Assert-HostCheck ($result.code -eq 0 -and $result.output -notmatch 'private-fixture@example|PRIVATE-FIXTURE-HASH' -and $accountReportText -notmatch 'private-fixture@example|PRIVATE-FIXTURE-HASH|hashed_password') 'unknown private fields never enter account output or its report'
+    foreach ($invalidAccountState in @('invalid-json', 'invalid-bool', 'negative-count', 'zero-active-count')) {
+        $env:QSTUDY_TEST_ACCOUNT_STATE = $invalidAccountState
+        Reset-DockerCalls
+        $result = Invoke-FixtureManager @('account-status')
+        Assert-HostCheck ($result.code -ne 0 -and $result.output -notmatch 'PRIVATE-INVALID-FIXTURE-ACCOUNT-OUTPUT') ('invalid account reports fail without exposing captured output: ' + $invalidAccountState)
+        Assert-HostCheck ([IO.File]::ReadAllText($accountReportPath) -ceq $accountReportText) 'invalid status does not overwrite the last safe report'
+    }
+    $env:QSTUDY_TEST_ACCOUNT_STATE = ''
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('first-admin', '-Email', 'first-fixture@example.org', '-Name', 'Fixture Administrator')
+    $firstAdminCalls = @((Read-DockerCalls) | Where-Object { $_ -contains 'first-admin' })
+    Assert-HostCheck ($result.code -eq 0 -and $firstAdminCalls.Count -eq 1) 'first administrator uses its guarded runtime operation'
+    Assert-HostCheck ($firstAdminCalls[0] -contains 'production_runtime.py' -and $firstAdminCalls[0] -contains 'first-fixture@example.org' -and $firstAdminCalls[0] -contains '--name' -and $firstAdminCalls[0] -contains 'Fixture Administrator' -and $firstAdminCalls[0] -notcontains '-T') 'first-admin keeps interactive password input and forwards email/name as separate arguments'
+    Assert-HostCheck (@((Read-DockerCalls) | Where-Object { $_ -contains 'app.bootstrap_admin' }).Count -eq 0) 'first-admin never invokes the existing-account password-reset/bootstrap command'
+
+    $env:QSTUDY_TEST_DOCKER_RUNNING = 'backend,frontend,caddy'
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('stack-status')
+    $stackReportPath = Join-Path $fixture '.local\host-stack-status.json'
+    Assert-HostCheck ($result.code -eq 0 -and (Test-Path -LiteralPath $stackReportPath -PathType Leaf)) 'stack status writes a private structured report'
+    $stackReport = [IO.File]::ReadAllText($stackReportPath) | ConvertFrom-Json
+    Assert-HostCheck ($stackReport.backend_running -is [bool] -and $stackReport.backend_running -and $stackReport.frontend_running -is [bool] -and $stackReport.frontend_running -and $stackReport.caddy_running -is [bool] -and $stackReport.caddy_running -and $stackReport.images_ready -is [bool] -and $stackReport.images_ready) 'stack status reports running services and cached image readiness as booleans'
+    Assert-HostCheck (@((Read-DockerCalls) | Where-Object { $_ -contains 'image' -and $_ -contains 'inspect' }).Count -eq 3) 'cached readiness checks only the three required production images'
+    Assert-HostCheck (@((Read-DockerCalls) | Where-Object { $_ -contains 'build' -or $_ -contains 'pull' -or $_ -contains 'up' -or $_ -contains 'stop' }).Count -eq 0) 'stack status never changes running services or downloads images'
+    $env:QSTUDY_TEST_DOCKER_RUNNING = 'none'
+    $env:QSTUDY_TEST_HOST_IMAGES = 'missing'
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('stack-status')
+    $stackReport = [IO.File]::ReadAllText($stackReportPath) | ConvertFrom-Json
+    Assert-HostCheck ($result.code -eq 0 -and -not $stackReport.backend_running -and -not $stackReport.frontend_running -and -not $stackReport.caddy_running -and -not $stackReport.images_ready) 'absent services and a missing cached image are reported as false'
+    $env:QSTUDY_TEST_HOST_IMAGES = ''
+    $env:QSTUDY_TEST_DOCKER_RUNNING = ''
+
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('resume-private', '-Offline', '-NoBrowser')
+    $privateResumeCalls = @(Read-DockerCalls)
+    $privateResumeUp = @($privateResumeCalls | Where-Object { $_ -contains 'up' })
+    Assert-HostCheck ($result.code -eq 0 -and $privateResumeUp.Count -eq 1 -and $privateResumeUp[0] -contains 'backend' -and $privateResumeUp[0] -contains 'frontend' -and $privateResumeUp[0] -notcontains 'caddy') 'private resume starts only backend/frontend, leaving the public proxy untouched'
+    Assert-HostCheck ($privateResumeUp[0] -contains '--no-build' -and $privateResumeUp[0] -contains '--pull' -and $privateResumeUp[0] -contains 'never' -and @($privateResumeCalls | Where-Object { $_ -contains 'build' -or $_ -contains 'pull' }).Count -eq 0) 'private resume uses existing images without build, pull or implicit downloads'
+    Assert-HostCheck (@((Read-ConfigurationCalls) | Where-Object { $_ -contains 'probe' }).Count -eq 0 -and [IO.File]::ReadAllText($browserLog) -eq '') 'private resume neither probes the public endpoint nor opens a browser'
+
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('launch', '-NoBrowser')
+    $launchCalls = @(Read-DockerCalls)
+    $launchConfiguration = @(Read-ConfigurationCalls)
+    Assert-HostCheck ($result.code -eq 0) ('HTTP launch works from cached production images with local origin-aware probe: ' + $result.output)
+    Assert-HostCheck ($launchConfiguration.Count -eq 2 -and $launchConfiguration[0] -contains 'check' -and $launchConfiguration[0] -contains '--offline' -and $launchConfiguration[1] -contains 'probe' -and $launchConfiguration[1] -contains '--local') 'HTTP launch checks offline configuration then probes locally, avoiding a NAT-loopback requirement'
+    $accountIndex = -1; $upIndex = -1
+    for ($i = 0; $i -lt $launchCalls.Count; $i++) { if ($launchCalls[$i] -contains 'account-status') { $accountIndex = $i }; if ($launchCalls[$i] -contains 'up') { $upIndex = $i } }
+    Assert-HostCheck ($accountIndex -ge 0 -and $upIndex -gt $accountIndex) 'launch requires an active administrator before starting the public proxy'
+    $launchUp = @($launchCalls | Where-Object { $_ -contains 'up' })
+    Assert-HostCheck ($launchUp.Count -eq 1 -and $launchUp[0] -contains '--no-build' -and $launchUp[0] -contains '--pull' -and $launchUp[0] -contains 'never' -and $launchUp[0] -notcontains 'backend' -and $launchUp[0] -notcontains 'frontend') 'launch resumes the full saved stack while explicitly forbidding implicit build and pull'
+    Assert-HostCheck (@($launchCalls | Where-Object { $_ -contains 'build' -or $_ -contains 'pull' -or $_ -contains 'first-admin' -or $_ -contains 'app.bootstrap_admin' }).Count -eq 0) 'repeat launch never rebuilds images or changes existing administrator passwords'
+    Assert-HostCheck ($result.output -match 'phone with Wi-Fi disabled' -and $result.output -match 'NAT loopback') 'successful local startup still explains the independent external test'
+
+    foreach ($failedLaunchState in @('no-admin', 'invalid-json', 'invalid-bool', 'negative-count', 'zero-active-count')) {
+        $env:QSTUDY_TEST_ACCOUNT_STATE = $failedLaunchState
+        Reset-DockerCalls
+        $result = Invoke-FixtureManager @('launch', '-NoBrowser')
+        Assert-HostCheck ($result.code -ne 0) ('launch refuses a missing or invalid administrator status: ' + $failedLaunchState)
+        Assert-HostCheck (@((Read-DockerCalls) | Where-Object { $_ -contains 'up' -or $_ -contains 'build' -or $_ -contains 'pull' }).Count -eq 0 -and @((Read-ConfigurationCalls) | Where-Object { $_ -contains 'probe' }).Count -eq 0) 'failed administrator guard forbids public up, image mutations and endpoint probes'
+        Assert-HostCheck ($result.output -notmatch 'PRIVATE-INVALID-FIXTURE-ACCOUNT-OUTPUT') 'launch refuses without exposing captured account output'
+    }
+    $env:QSTUDY_TEST_ACCOUNT_STATE = ''
+    $env:QSTUDY_TEST_HOST_MODE = 'https'
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('launch', '-NoBrowser')
+    $httpsLaunchProbes = @((Read-ConfigurationCalls) | Where-Object { $_ -contains 'probe' })
+    Assert-HostCheck ($result.code -eq 0 -and $httpsLaunchProbes.Count -eq 1 -and $httpsLaunchProbes[0] -notcontains '--local') 'HTTPS launch retains the public TLS probe without using the HTTP-only local option'
+
     $env:QSTUDY_TEST_HOST_MODE = 'untrusted'
     Reset-DockerCalls
     $result = Invoke-FixtureManager @('start', '-NoBrowser')
@@ -424,6 +534,8 @@ print(json.dumps({"status": "disposable", "host_mode": mode,
     $env:QSTUDY_TEST_BUILDX_SELECTED = $oldSelectedBuilder
     $env:BUILDX_CONFIG = $oldBuildxConfig
     $env:QSTUDY_TEST_HOST_MODE = $oldHttpMode
+    $env:QSTUDY_TEST_ACCOUNT_STATE = $oldAccountState
+    $env:QSTUDY_TEST_HOST_IMAGES = $oldHostImages
     if (Test-Path -LiteralPath $junction) { Remove-Item -LiteralPath $junction -Force }
     $resolvedFixture = [IO.Path]::GetFullPath($fixture)
     $allowedPrefix = [IO.Path]::GetFullPath((Join-Path $workspace '.local\windows-host-tests')) + [IO.Path]::DirectorySeparatorChar

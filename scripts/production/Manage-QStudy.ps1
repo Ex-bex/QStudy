@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('help', 'init', 'init-http', 'check', 'prepare', 'start', 'update', 'resume', 'stop', 'status', 'admin', 'mail-check', 'backup', 'verify', 'restore', 'install-autostart', 'remove-autostart')]
+    [ValidateSet('help', 'init', 'init-http', 'check', 'prepare', 'start', 'update', 'resume', 'resume-private', 'launch', 'stop', 'status', 'stack-status', 'account-status', 'first-admin', 'admin', 'mail-check', 'backup', 'verify', 'restore', 'install-autostart', 'remove-autostart')]
     [string]$Action = 'help',
     [string]$Domain = '',
     [string]$Email = '',
@@ -41,6 +41,11 @@ QStudy Internet host on Windows (Docker Desktop, Linux containers, Caddy HTTPS)
   Manage-QStudy-Internet.cmd init -Domain YOUR-DOMAIN -Email YOUR-EMAIL
   Manage-QStudy-Internet.cmd check [-Offline]
   Manage-QStudy-Internet.cmd prepare
+  Start-QStudy-Internet.cmd
+  Manage-QStudy-Internet.cmd launch [-NoBrowser]
+  Manage-QStudy-Internet.cmd stack-status
+  Manage-QStudy-Internet.cmd account-status
+  Manage-QStudy-Internet.cmd first-admin -Email ACCOUNT-EMAIL [-Name DISPLAY-NAME]
   Manage-QStudy-Internet.cmd start [-NoBrowser]
   Manage-QStudy-Internet.cmd update
   Manage-QStudy-Internet.cmd stop
@@ -212,6 +217,23 @@ function Start-QStudyPublicProbe {
     return $false
 }
 
+function Save-QStudyManagerReport([string]$Filename, $Report) {
+    $path = Assert-QStudyHostPath $taskRoot (Join-Path $taskRoot ('.local\' + $Filename))
+    $reportObject = [PSCustomObject]$Report
+    $reportObject | Add-Member -NotePropertyName checked_utc -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
+    [IO.File]::WriteAllText($path, ($reportObject | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+    (Get-Item -LiteralPath $path).SetAccessControl((New-QStudyPrivateAcl $false $path))
+    Write-Output ($reportObject | ConvertTo-Json -Depth 4 -Compress)
+}
+
+function Test-QStudyHostImages {
+    foreach ($image in @('qstudy-backend:local', 'qstudy-frontend:local', 'caddy:2-alpine')) {
+        try { Invoke-QStudyDocker @('image', 'inspect', '--format', '{{.Id}}', $image) -Capture | Out-Null }
+        catch { return $false }
+    }
+    return $true
+}
+
 function Set-QStudyHostAutostart([bool]$Install) {
     $spec = Get-QStudyHostTaskSpec $taskRoot
     $existing = Get-ScheduledTask -TaskName $spec.name -TaskPath '\' -ErrorAction SilentlyContinue
@@ -238,13 +260,13 @@ try {
     if ($Domain -and $Action -ne 'init') { throw '-Domain is supported only with init. Edit both production domain settings explicitly for a later change.' }
     if ($PublicIP -and $Action -ne 'init-http') { throw '-PublicIP is supported only with init-http.' }
     if ($PSBoundParameters.ContainsKey('Port') -and $Action -ne 'init-http') { throw '-Port is supported only with init-http.' }
-    if ($Email -and $Action -notin @('init', 'admin')) { throw '-Email is supported only with init or admin.' }
-    if ($Name -and $Action -ne 'admin') { throw '-Name is supported only with admin.' }
+    if ($Email -and $Action -notin @('init', 'admin', 'first-admin')) { throw '-Email is supported only with init, admin or first-admin.' }
+    if ($Name -and $Action -notin @('admin', 'first-admin')) { throw '-Name is supported only with admin or first-admin.' }
     if ($Archive -and $Action -notin @('verify', 'restore')) { throw '-Archive is supported only with verify or restore.' }
     if ($Action -in @('verify', 'restore')) { Assert-QStudyBackupBasename $Archive }
     if ($Action -eq 'init' -and (-not $Domain -or -not $Email)) { throw 'Use init -Domain YOUR-DOMAIN -Email YOUR-EMAIL.' }
     if ($Action -eq 'init-http' -and (-not $PublicIP)) { throw 'Use init-http -PublicIP YOUR-PUBLIC-IP -Port 8080.' }
-    if ($Action -eq 'admin' -and (-not $Email -or $Email.StartsWith('-'))) { throw 'Use admin -Email ACCOUNT-EMAIL.' }
+    if ($Action -in @('admin', 'first-admin') -and (-not $Email -or $Email.StartsWith('-'))) { throw 'Use admin or first-admin -Email ACCOUNT-EMAIL.' }
     if ($Offline -and $Action -in @('start', 'update')) { throw 'start/update require live DNS checks. Use check -Offline to prepare configuration before DNS is ready.' }
     if ($Offline -and $Action -eq 'prepare') { throw 'prepare requires Internet access to download/build images. Public DNS is not required. Use check -Offline for configuration validation without downloads.' }
     $localDirectory = Assert-QStudyHostPath $taskRoot (Join-Path $taskRoot '.local')
@@ -275,12 +297,12 @@ try {
             Assert-QStudyDockerReady
             Write-Host ('Configuration and Linux Docker engine are ready: ' + $taskPublicUrl + '. A build and an external Internet test are still required.')
         }
-        { $_ -in @('prepare', 'start', 'update', 'resume') } {
+        { $_ -in @('prepare', 'start', 'update', 'resume', 'resume-private', 'launch') } {
             Protect-QStudyHostStorage $taskRoot
-            $options = @('check'); if ($Action -in @('prepare', 'resume')) { $options += '--offline' }
+            $options = @('check'); if ($Action -in @('prepare', 'resume', 'resume-private', 'launch')) { $options += '--offline' }
             Invoke-QStudyConfiguration $options
-            Assert-QStudyDockerReady -Wait:($Action -eq 'resume')
-            if ($Action -ne 'resume') {
+            Assert-QStudyDockerReady -Wait:($Action -in @('resume', 'resume-private', 'launch'))
+            if ($Action -notin @('resume', 'resume-private', 'launch')) {
                 $running = @(Invoke-QStudyCompose @('ps', '--status', 'running', '--services') -Capture)
                 if ($Action -eq 'prepare' -and $running -contains 'caddy') { throw 'prepare refused: this checkout Caddy service is already running. Manage the current public site explicitly first; no services were stopped or replaced.' }
                 if ($Action -in @('prepare', 'update') -and $running -contains 'backend') { Invoke-QStudyCompose @('exec', '-T', 'backend', 'python', 'production_runtime.py', 'backup') }
@@ -290,12 +312,27 @@ try {
                 Invoke-QStudyCompose @('up', '-d', '--no-build', '--wait', '--wait-timeout', '600', 'backend')
                 Invoke-QStudyCompose @('exec', '-T', 'backend', 'python', 'production_runtime.py', 'mail-check-if-enabled')
             }
+            if ($Action -eq 'launch') {
+                $accountText = @(Invoke-QStudyCompose @('exec', '-T', 'backend', 'python', 'production_runtime.py', 'account-status') -Capture) -join ''
+                try { $account = $accountText | ConvertFrom-Json }
+                catch { throw 'Active administrator check failed; no public proxy was started. Private command output is hidden.' }
+                if ($null -eq $account.PSObject.Properties['active_admin_exists'] -or $account.active_admin_exists -isnot [bool] -or -not $account.active_admin_exists -or
+                    $null -eq $account.PSObject.Properties['account_count'] -or $account.account_count -isnot [int] -or $account.account_count -lt 1) {
+                    throw 'Prepare a first administrator privately before launch. No public proxy was started.'
+                }
+            }
             $upArguments = @('up', '-d', '--no-build', '--wait', '--wait-timeout', '600')
-            if ($Action -eq 'resume') { $upArguments += @('--pull', 'never') }
-            if ($Action -eq 'prepare') { $upArguments += @('backend', 'frontend') }
+            if ($Action -in @('resume', 'resume-private', 'launch')) { $upArguments += @('--pull', 'never') }
+            if ($Action -in @('prepare', 'resume-private')) { $upArguments += @('backend', 'frontend') }
             Invoke-QStudyCompose $upArguments
             if ($Action -eq 'prepare') { Write-Host 'Preparation complete: production backend/frontend are healthy on private container networks; SMTP was checked if enabled. Caddy was not started, no public ports were published, and public DNS/HTTPS were not tested. Configure accounts and DNS/router access, then run start to publish.' }
             elseif ($Action -eq 'resume') { Write-Host 'Existing production containers resumed. Public Internet availability was not tested at sign-in.' }
+            elseif ($Action -eq 'resume-private') { Write-Host 'Private backend/frontend are ready; no public proxy was started.' }
+            elseif ($Action -eq 'launch' -and $taskHostMode -eq 'http') {
+                Invoke-QStudyConfiguration @('probe', '--local')
+                Write-Host ('QStudy is ready on this computer: ' + $taskPublicUrl + '. Verify Internet access from a phone with Wi-Fi disabled. A router without NAT loopback may not open the public URL from inside this LAN.')
+                if (-not $NoBrowser) { Start-Process -FilePath $taskPublicUrl | Out-Null }
+            }
             else {
                 if (-not (Start-QStudyPublicProbe)) { throw 'The public endpoint probe did not pass. Containers remain running for diagnosis; publication was not declared successful.' }
                 if (-not $NoBrowser) {
@@ -309,6 +346,24 @@ try {
             switch ($Action) {
                 'stop' { Invoke-QStudyCompose @('stop', 'caddy', 'frontend', 'backend') }
                 'status' { Invoke-QStudyCompose @('ps') }
+                'stack-status' {
+                    $running = @(Invoke-QStudyCompose @('ps', '--status', 'running', '--services') -Capture)
+                    Save-QStudyManagerReport 'host-stack-status.json' @{ backend_running = $running -contains 'backend'; frontend_running = $running -contains 'frontend'; caddy_running = $running -contains 'caddy'; images_ready = (Test-QStudyHostImages) }
+                }
+                'account-status' {
+                    $text = @(Invoke-QStudyCompose @('exec', '-T', 'backend', 'python', 'production_runtime.py', 'account-status') -Capture) -join ''
+                    try { $report = $text | ConvertFrom-Json }
+                    catch { throw 'Account status is not valid JSON; private command output is hidden.' }
+                    if ($null -eq $report.PSObject.Properties['active_admin_exists'] -or $report.active_admin_exists -isnot [bool] -or
+                        $null -eq $report.PSObject.Properties['account_count'] -or $report.account_count -isnot [int] -or $report.account_count -lt 0 -or
+                        ($report.active_admin_exists -and $report.account_count -lt 1)) { throw 'Account status has an invalid format; private command output is hidden.' }
+                    Save-QStudyManagerReport 'host-account-status.json' @{ active_admin_exists = $report.active_admin_exists; account_count = $report.account_count }
+                }
+                'first-admin' {
+                    $arguments = @('exec', 'backend', 'python', 'production_runtime.py', 'first-admin', $Email)
+                    if ($Name) { $arguments += @('--name', $Name) }
+                    Invoke-QStudyCompose $arguments
+                }
                 'admin' {
                     $arguments = @('exec', 'backend', 'python', '-m', 'app.bootstrap_admin', $Email)
                     if ($Name) { $arguments += @('--name', $Name) }
