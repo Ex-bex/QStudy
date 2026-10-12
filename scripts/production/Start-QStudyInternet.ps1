@@ -49,6 +49,7 @@ try {
     $url = 'http://' + $PublicIP + ':' + $Port
     Write-Host ('Адрес этой установки: ' + $url)
     Write-Host 'HTTP передаёт данные без шифрования. Домен и сертификат не используются.'
+    $networkAction = Get-QStudyInternetNetworkAction -Root $root -ManualRequested:$ManualForwarding
     $oldDatabase = Assert-QStudyHostPath $root (Join-Path $root 'backend\studyhub.db')
     $newDatabase = Assert-QStudyHostPath $root (Join-Path $root 'deployment\data\backend\studyhub.db')
     if ((Test-Path -LiteralPath $oldDatabase -PathType Leaf) -and -not (Test-Path -LiteralPath $newDatabase -PathType Leaf) -and -not $Archive -and -not $NewInstallation) {
@@ -87,8 +88,7 @@ try {
     $networkPath = Assert-QStudyHostPath $root (Join-Path $root '.local\home-network-report.json')
     $network = [IO.File]::ReadAllText($networkPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
     Assert-QStudyHostIpNetworkForStart $network $PublicIP
-    $action = if ($ManualForwarding) { 'manual' } else { 'enable' }
-    & (Join-Path $PSScriptRoot 'Manage-QStudyPublicAccess.ps1') -Action $action -NoPause
+    & (Join-Path $PSScriptRoot 'Manage-QStudyPublicAccess.ps1') -Action $networkAction -NoPause
     if ($LASTEXITCODE -ne 0) { throw ('Автоматическая настройка порта не завершилась. В роутере нужен TCP ' + $Port + ' → LAN-IP этого Windows-компьютера:' + $Port + '. После ручного проброса повторите Start-QStudy-Internet.cmd -ManualForwarding. CGNAT решается у провайдера.') }
     $stage = 'запуск сайта'
     Invoke-QStudyInternetManager 'launch' @{ NoBrowser = $NoBrowser }

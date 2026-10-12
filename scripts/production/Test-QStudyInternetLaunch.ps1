@@ -24,7 +24,7 @@ function Invoke-FixtureLaunch {
     [IO.File]::WriteAllText($callLog, '', $encoding)
     [IO.File]::WriteAllText($promptLog, '', $encoding)
     if (-not $KeepInstallation) {
-        foreach ($relative in @('deployment\.env', '.local\internet-launch\build.json', '.local\host-stack-status.json', '.local\host-account-status.json', '.local\home-network-report.json', 'backend\studyhub.db', 'deployment\data\backend\studyhub.db', 'fixture-admin', 'fixture-caddy')) {
+        foreach ($relative in @('deployment\.env', '.local\internet-launch\build.json', '.local\public-access\state.json', '.local\host-stack-status.json', '.local\host-account-status.json', '.local\home-network-report.json', 'backend\studyhub.db', 'deployment\data\backend\studyhub.db', 'fixture-admin', 'fixture-caddy')) {
             $path = Join-Path $fixture $relative
             if (Test-Path -LiteralPath $path -PathType Leaf) { Remove-Item -LiteralPath $path -Force }
         }
@@ -57,7 +57,7 @@ try {
     foreach ($relative in @('scripts\production', 'deployment\data\backend', '.local', 'backend\app', 'frontend\app', 'frontend\components', 'frontend\lib', 'frontend\public', 'frontend\types')) {
         [IO.Directory]::CreateDirectory((Join-Path $fixture $relative)) | Out-Null
     }
-    foreach ($name in @('Start-QStudyInternet.ps1', 'QStudy.InternetLaunch.ps1', 'QStudy.HostSetup.ps1', 'QStudy.WindowsHost.ps1', 'QStudy.PublicPortOwner.ps1')) {
+    foreach ($name in @('Start-QStudyInternet.ps1', 'QStudy.InternetLaunch.ps1', 'QStudy.HostSetup.ps1', 'QStudy.WindowsHost.ps1', 'QStudy.PublicPortOwner.ps1', 'QStudy.PublicAccess.ps1', 'QStudy.PortMapping.ps1')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $fixtureScripts
     }
     Copy-Item -LiteralPath (Join-Path $workspace 'scripts\QStudy.HomeNetwork.ps1') -Destination (Join-Path $fixture 'scripts')
@@ -177,6 +177,13 @@ $fixtureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 [IO.File]::AppendAllText((Join-Path $fixtureRoot 'launch-calls.jsonl'), (ConvertTo-Json -InputObject @{ source = 'public-access'; action = $Action; noPause = [bool]$NoPause } -Compress) + [Environment]::NewLine)
 if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'port-mapping-unsupported') { Write-Host 'Disposable router requires manual forwarding'; exit 2 }
 if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'public-access-error') { Write-Host 'Disposable public access failure'; exit 1 }
+$text = [IO.File]::ReadAllText((Join-Path $fixtureRoot 'deployment\.env'))
+$public = [regex]::Match($text, "(?m)^QSTUDY_PUBLIC_IP='([^']*)'").Groups[1].Value
+$port = [int][regex]::Match($text, "(?m)^QSTUDY_HTTP_PORT='([^']*)'").Groups[1].Value
+$state = @{ version = 1; owner = ('QStudy public access: ' + $fixtureRoot); owner_sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; enabled = $true; public_ip = $public; port = $port; client_ip = '192.168.1.10'; gateway = '192.168.1.1'; method = $(if ($Action -eq 'manual') { 'manual' } else { 'upnp' }); record = $null; status = 'configured'; checked_utc = [DateTime]::UtcNow.ToString('o'); external_reachability_proven = $false }
+$directory = Join-Path $fixtureRoot '.local\public-access'
+[IO.Directory]::CreateDirectory($directory) | Out-Null
+[IO.File]::WriteAllText((Join-Path $directory 'state.json'), ($state | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 exit 0
 '@
     [IO.File]::WriteAllText((Join-Path $fixtureScripts 'Manage-QStudyPublicAccess.ps1'), $fakePublicAccess, $encoding)
@@ -234,6 +241,38 @@ exit $launcherExitCode
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -ceq 'manual' }).Count -eq 1) 'ManualForwarding calls only the manual public-access action'
     Assert-Launch ($result.output -match 'http://94.125.99.135:3000' -and @($calls | Where-Object { $_.source -in @('ipify', 'port') }).Count -eq 0) 'explicit address is displayed without IP/port discovery'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'install-autostart' }).Count -eq 0) 'autostart is opt-in'
+
+    $statePath = Join-Path $fixture '.local\public-access\state.json'
+    $savedManualState = [IO.File]::ReadAllText($statePath)
+    Assert-Launch (($savedManualState | ConvertFrom-Json).method -ceq 'manual') 'manual configuration saves its selected forwarding method'
+    $result = Invoke-FixtureLaunch -KeepInstallation
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0 -and (Get-LaunchManagerActions $calls) -ceq 'check,stack-status,resume-private,account-status,launch') 'repeat of a manual installation uses the current images and existing administrator'
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -ceq 'manual' }).Count -eq 1 -and @($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -ceq 'enable' }).Count -eq 0) 'repeat automatically preserves the owned enabled manual forwarding method without another flag'
+    Assert-Launch ([IO.File]::ReadAllText($promptLog).Length -eq 0) 'manual repeat never requests administrator credentials again'
+
+    $disabledManualState = $savedManualState | ConvertFrom-Json
+    $disabledManualState.enabled = $false
+    [IO.File]::WriteAllText($statePath, ($disabledManualState | ConvertTo-Json -Depth 5), $encoding)
+    $result = Invoke-FixtureLaunch -KeepInstallation
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0 -and @($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -ceq 'enable' }).Count -eq 1) 'disabled manual state does not silently reuse forwarding as already enabled'
+
+    foreach ($variant in @('other-owner', 'other-root', 'invalid-state', 'other-owner-explicit-manual')) {
+        $state = $savedManualState | ConvertFrom-Json
+        if ($variant -in @('other-owner', 'other-owner-explicit-manual')) { $state.owner_sid = 'S-1-5-21-0-0-0-1234' }
+        if ($variant -eq 'other-root') { $state.owner = 'QStudy public access: ' + $workspace }
+        $stateText = if ($variant -eq 'invalid-state') { '{invalid-json' } else { $state | ConvertTo-Json -Depth 5 }
+        [IO.File]::WriteAllText($statePath, $stateText, $encoding)
+        $arguments = if ($variant -eq 'other-owner-explicit-manual') { @('-ManualForwarding') } else { @() }
+        $result = Invoke-FixtureLaunch -KeepInstallation -Arguments $arguments
+        $calls = @(Read-LaunchCalls)
+        Assert-Launch ($result.code -ne 0) ($variant + ' public-access state refuses reuse')
+        Assert-Launch (@($calls | Where-Object source -eq 'public-access').Count -eq 0) ($variant + ' cannot execute firewall/router configuration')
+        Assert-NoPublish $calls ($variant + ' cannot publish or install autostart')
+        Assert-Launch ([IO.File]::ReadAllText($statePath) -ceq $stateText) ($variant + ' state is not replaced by a guessed network mode')
+    }
+    [IO.File]::WriteAllText($statePath, $savedManualState, $encoding)
 
     $savedEnvironment = [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env'))
     foreach ($arguments in @(@('-PublicIP', '8.8.8.8'), @('-Port', '8080'))) {

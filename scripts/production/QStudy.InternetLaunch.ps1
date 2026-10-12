@@ -11,6 +11,24 @@ function Get-QStudyInternetObservedIP {
     return $value
 }
 
+function Get-QStudyInternetNetworkAction([string]$Root, [switch]$ManualRequested) {
+    $path = Assert-QStudyHostPath $Root (Join-Path $Root '.local\public-access\state.json')
+    $manualSaved = $false
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        if ((Get-Item -LiteralPath $path).Length -gt 65536) { throw 'Сохранённое состояние сети слишком большое; запуск остановлен.' }
+        try { $state = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json }
+        catch { throw 'Повреждено состояние сетевого доступа. Проверьте .local/public-access/state.json приватно.' }
+        if ($state.version -ne 1 -or $state.owner -cne ('QStudy public access: ' + [IO.Path]::GetFullPath($Root)) -or
+            $state.owner_sid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or $state.enabled -isnot [bool] -or
+            $state.method -notin @('none', 'manual', 'direct', 'upnp', 'nat-pmp')) {
+            throw 'Сохранённая настройка сети принадлежит другой установке или Windows-пользователю; запуск остановлен.'
+        }
+        $manualSaved = $state.enabled -and $state.method -ceq 'manual'
+    }
+    if ($ManualRequested -or $manualSaved) { return 'manual' }
+    return 'enable'
+}
+
 function Ensure-QStudyInternetDocker([ValidateRange(10, 600)][int]$TimeoutSeconds = 180) {
     $installation = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'Docker\Docker'
     if (-not (Get-Command docker.exe -CommandType Application -ErrorAction SilentlyContinue)) {
