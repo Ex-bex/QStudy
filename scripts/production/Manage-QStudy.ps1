@@ -57,7 +57,10 @@ HTTP has no domain/certificate and no transport encryption for passwords/data.
 HTTPS domain mode remains available with init -Domain ... -Email ... .
 Privately edit deployment/.env after init/init-http. Desktop installation/license,
 public IP and router forwarding are one-time setup.
-This manager never changes firewall rules, router settings or power settings.
+Manage-QStudy-PublicAccess.cmd -Action enable configures the saved HTTP TCP port
+in Windows firewall and tries owned UPnP/NAT-PMP forwarding. -Action manual,
+status and disable are also available. Setup-QStudy-Host.cmd -Start calls enable.
+This container manager does not change firewall, router or power settings itself.
 Autostart runs at this user's sign-in; enable Docker Desktop sign-in startup.
 Backend 8000 and frontend 3000 remain private container ports.
 prepare builds images, validates Caddy and starts only private backend/frontend;

@@ -7,6 +7,7 @@
     [switch]$Prepare,
     [switch]$Start,
     [switch]$EnableAutostart,
+    [switch]$ManualForwarding,
     [switch]$SkipPrivateSettings,
     [switch]$NoPause
 )
@@ -90,7 +91,12 @@ try {
     if ($Start) {
         $reportPath = Assert-QStudyHostPath $root (Join-Path $root '.local\home-network-report.json')
         $report = [IO.File]::ReadAllText($reportPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
-        if ($httpMode) { Assert-QStudyHostIpNetworkForStart $report $PublicIP }
+        if ($httpMode) {
+            Assert-QStudyHostIpNetworkForStart $report $PublicIP
+            $networkAction = if ($ManualForwarding) { 'manual' } else { 'enable' }
+            & (Join-Path $PSScriptRoot 'Manage-QStudyPublicAccess.ps1') -Action $networkAction -NoPause
+            if ($LASTEXITCODE -ne 0) { throw 'Автоматическая настройка сети не завершилась. Настройте указанный TCP-порт на роутере и повторите с -ManualForwarding; сайт пока не запущен.' }
+        }
         else {
             Assert-QStudyHostNetworkForStart $report $Domain
             if (@($report.dnsIPv6).Count) { Write-Warning 'Есть AAAA-запись. Убедитесь, что IPv6 тоже обслуживает этот сайт; неподключённый IPv6 уберите в DNS.' }
@@ -103,9 +109,9 @@ try {
         Write-Host 'Конфигурация подготовлена. Следующие действия:'
         Write-Host '1. Manage-QStudy-Internet.cmd prepare — собрать и запустить приватные контейнеры.'
         Write-Host '2. Восстановить штатный архив: restore -Archive ИМЯ.zip -NoPublish; либо создать первого admin.'
-        if ($httpMode) { Write-Host ('3. Закрепить LAN-адрес хоста, пробросить TCP ' + $Port + ' на такой же порт хоста и разрешить его в firewall.') }
+        if ($httpMode) { Write-Host ('3. Закрепить LAN-адрес хоста. Manage-QStudy-PublicAccess.cmd -Action enable настроит firewall и попробует автоматически пробросить TCP ' + $Port + '; -Action manual — после ручной настройки роутера.') }
         else { Write-Host '3. Настроить DNS A, закрепить LAN-адрес, пробросить TCP 80/443 и разрешить их в firewall.' }
-        Write-Host '4. Manage-QStudy-Internet.cmd start; проверить сайт с мобильного интернета.'
+        Write-Host '4. Setup-QStudy-Host.cmd -Start -SkipPrivateSettings настроит сеть и запустит сайт; проверьте с мобильного интернета.'
         Write-Host '5. Manage-QStudy-Internet.cmd install-autostart; включить входной автозапуск Docker Desktop и отключить сон.'
         Write-Host ('Ссылка для пользователей после запуска: ' + $publicUrl)
     }

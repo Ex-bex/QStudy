@@ -1,5 +1,5 @@
 ﻿# Runs the real handover wizard with disposable settings and fake manager/network.
-# No real private configuration, DNS, Docker, browser, mail or scheduled tasks.
+# No real private configuration, DNS, Docker, browser, mail, firewall, router or scheduled tasks.
 param()
 $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
@@ -119,8 +119,19 @@ exit 0
 '@
     [IO.File]::WriteAllText((Join-Path $fixture 'scripts\Test-QStudyHomeNetwork.ps1'), $fakeNetwork, $encoding)
 
+    $fakePublicAccess = @'
+param([string]$Action, [switch]$NoPause)
+$fixtureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$callPath = Join-Path $fixtureRoot 'wizard-calls.jsonl'
+[IO.File]::AppendAllText($callPath, (ConvertTo-Json -InputObject @{ source = 'public-access'; action = $Action; noPause = [bool]$NoPause } -Compress) + [Environment]::NewLine)
+if ($env:QSTUDY_WIZARD_TEST_SCENARIO -eq 'public-access-error') { Write-Host 'Disposable public access failure'; exit 1 }
+if ($env:QSTUDY_WIZARD_TEST_SCENARIO -eq 'public-access-manual-required') { Write-Host 'Disposable router requires manual forwarding'; exit 2 }
+exit 0
+'@
+    [IO.File]::WriteAllText((Join-Path $fixtureScripts 'Manage-QStudyPublicAccess.ps1'), $fakePublicAccess, $encoding)
+
     $wrapperProgram = @'
-param([string]$Domain = '', [string]$Email = '', [string]$PublicIP = '', [int]$Port = 0, [string]$RouterWanIPv4 = '', [switch]$Prepare, [switch]$Start, [switch]$EnableAutostart, [switch]$SkipPrivateSettings, [switch]$NoPause)
+param([string]$Domain = '', [string]$Email = '', [string]$PublicIP = '', [int]$Port = 0, [string]$RouterWanIPv4 = '', [switch]$Prepare, [switch]$Start, [switch]$EnableAutostart, [switch]$ManualForwarding, [switch]$SkipPrivateSettings, [switch]$NoPause)
 $fixtureRoot = $PSScriptRoot
 function global:Read-Host {
     param([string]$Prompt, [switch]$AsSecureString)
@@ -146,7 +157,7 @@ function global:Invoke-RestMethod {
     [IO.File]::AppendAllText((Join-Path $fixtureRoot 'wizard-calls.jsonl'), (ConvertTo-Json -InputObject @{ source = 'ipify'; mocked = $true } -Compress) + [Environment]::NewLine)
     return [PSCustomObject]@{ ip = '8.8.8.8' }
 }
-$options = @{ Domain = $Domain; Email = $Email; PublicIP = $PublicIP; Port = $Port; RouterWanIPv4 = $RouterWanIPv4; Prepare = $Prepare; Start = $Start; EnableAutostart = $EnableAutostart; SkipPrivateSettings = $SkipPrivateSettings; NoPause = $NoPause }
+$options = @{ Domain = $Domain; Email = $Email; PublicIP = $PublicIP; Port = $Port; RouterWanIPv4 = $RouterWanIPv4; Prepare = $Prepare; Start = $Start; EnableAutostart = $EnableAutostart; ManualForwarding = $ManualForwarding; SkipPrivateSettings = $SkipPrivateSettings; NoPause = $NoPause }
 & (Join-Path $fixtureRoot 'scripts\production\Setup-QStudyHost.ps1') @options
 $wizardExitCode = $LASTEXITCODE
 [IO.File]::AppendAllText((Join-Path $fixtureRoot 'wizard-calls.jsonl'), (ConvertTo-Json -InputObject @{ source = 'wrapper'; returnedAfterNestedExit = $true; code = $wizardExitCode } -Compress) + [Environment]::NewLine)
@@ -158,6 +169,7 @@ exit $wizardExitCode
     $calls = @(Read-WizardCalls)
     Assert-Wizard ($result.code -eq 0) ('default wizard succeeds: ' + $result.output)
     Assert-Wizard ((Get-ManagerActions $calls) -ceq 'init,check') 'default wizard initializes/checks but never prepares, publishes or schedules'
+    Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 0) 'default HTTPS setup never changes firewall or router forwarding'
     Assert-Wizard (@($calls | Where-Object { $_.source -eq 'wrapper' -and $_.returnedAfterNestedExit -and $_.code -eq 0 }).Count -eq 1) 'wizard and nested manager/network exit return to the same PowerShell process'
     Assert-Wizard (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'check' -and $_.offline }).Count -eq 1) 'wizard initially validates configuration with offline check'
     Assert-Wizard (@($calls | Where-Object { $_.source -eq 'network' -and $_.noPause -and $_.domain -eq 'qstudy-fixture.example.org' }).Count -eq 1) 'default diagnostic receives the domain and cannot pause'
@@ -167,6 +179,7 @@ exit $wizardExitCode
     $result = Invoke-FixtureWizard @('-Prepare', '-RouterWanIPv4', '8.8.8.8')
     $calls = @(Read-WizardCalls)
     Assert-Wizard ($result.code -eq 0 -and (Get-ManagerActions $calls) -ceq 'init,check,prepare') 'Prepare initializes and checks then prepares without public startup'
+    Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 0) 'HTTPS preparation never changes firewall or router forwarding'
     Assert-Wizard (@($calls | Where-Object { $_.source -eq 'network' -and $_.routerWanIPv4 -eq '8.8.8.8' }).Count -eq 1) 'explicit router WAN is forwarded only to diagnostics'
     Assert-Wizard (@($calls | Where-Object source -eq 'wrapper').Count -eq 1 -and [IO.File]::ReadAllText($promptLog).Length -eq 0) 'private preparation exits normally without prompts'
 
@@ -183,6 +196,7 @@ exit $wizardExitCode
     $calls = @(Read-WizardCalls)
     Assert-Wizard ($result.code -eq 0 -and (Get-ManagerActions $calls) -ceq 'init,check,start,install-autostart') 'valid Start publishes then installs autostart only after successful startup'
     Assert-Wizard (($calls | ForEach-Object source) -join ',' -ceq 'manager,manager,network,manager,manager,wrapper') 'live report checks occur before startup and autostart'
+    Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 0) 'HTTPS Start uses its existing deployment flow without the HTTP mapping helper'
     Assert-Wizard ($result.output -match 'с выключенным Wi-Fi' -and $result.output -notmatch 'внешний доступ подтверждён') 'successful local HTTPS still requires an independent external test'
     $result = Invoke-FixtureWizard @('-Start')
     Assert-Wizard ($result.code -eq 0 -and (Get-ManagerActions @(Read-WizardCalls)) -ceq 'init,check,start') 'autostart remains opt-in'
@@ -216,6 +230,7 @@ exit $wizardExitCode
     $calls = @(Read-WizardCalls)
     Assert-Wizard ($result.code -eq 0) ('HTTP wizard succeeds without domain/email: ' + $result.output)
     Assert-Wizard ((Get-ManagerActions $calls) -ceq 'init-http,check') 'HTTP default configures privately without publication or autostart'
+    Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 0) 'default HTTP setup never opens firewall or router ports'
     Assert-Wizard (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'init-http' -and $_.publicIP -eq '8.8.8.8' -and $_.port -eq 18080 -and -not $_.domain -and -not $_.email }).Count -eq 1) 'HTTP initialization receives public IP and port without domain/email arguments'
     Assert-Wizard (@($calls | Where-Object { $_.source -eq 'network' -and $_.httpPort -eq 18080 -and -not $_.domain -and $_.noPause }).Count -eq 1) 'HTTP diagnostics receive only the selected public port'
     Assert-Wizard (@($calls | Where-Object source -eq 'ipify').Count -eq 0 -and [IO.File]::ReadAllText($promptLog).Length -eq 0) 'explicit HTTP IP needs no discovery, SMTP or domain/email prompts'
@@ -225,20 +240,45 @@ exit $wizardExitCode
     $result = Invoke-FixtureWizard @('-Prepare', '-RouterWanIPv4', '8.8.8.8') 'valid' 'http'
     $calls = @(Read-WizardCalls)
     Assert-Wizard ($result.code -eq 0 -and (Get-ManagerActions $calls) -ceq 'init-http,check,prepare') 'HTTP Prepare launches only the private preparation action'
+    Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 0) 'HTTP Prepare does not open public firewall or router access'
     Assert-Wizard (@($calls | Where-Object { $_.source -eq 'network' -and $_.httpPort -eq 18080 -and $_.routerWanIPv4 -eq '8.8.8.8' }).Count -eq 1) 'HTTP preparation forwards explicit WAN and selected public port'
     $result = Invoke-FixtureWizard @('-Start', '-EnableAutostart') 'valid' 'http'
     $calls = @(Read-WizardCalls)
     Assert-Wizard ($result.code -eq 0 -and (Get-ManagerActions $calls) -ceq 'init-http,check,start,install-autostart') 'valid HTTP Start publishes and then installs autostart'
-    Assert-Wizard (($calls | ForEach-Object source) -join ',' -ceq 'manager,manager,network,manager,manager,wrapper') 'HTTP live network report precedes startup and autostart'
+    Assert-Wizard (($calls | ForEach-Object source) -join ',' -ceq 'manager,manager,network,public-access,manager,manager,wrapper') 'HTTP live network report precedes automatic public access, startup and autostart'
+    Assert-Wizard (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'enable' -and $_.noPause }).Count -eq 1) 'HTTP Start automatically configures owned public access once without interactive pause'
     Assert-Wizard ($result.output -match 'Адрес проверен с этого компьютера: http://8.8.8.8:18080' -and $result.output -match 'с выключенным Wi-Fi') 'HTTP success identifies the configured IP endpoint and still requires an external check'
     $result = Invoke-FixtureWizard @('-Start') 'valid' 'http'
-    Assert-Wizard ($result.code -eq 0 -and (Get-ManagerActions @(Read-WizardCalls)) -ceq 'init-http,check,start') 'HTTP autostart remains opt-in'
+    $calls = @(Read-WizardCalls)
+    Assert-Wizard ($result.code -eq 0 -and (Get-ManagerActions $calls) -ceq 'init-http,check,start') 'HTTP autostart remains opt-in'
+    Assert-Wizard (($calls | ForEach-Object source) -join ',' -ceq 'manager,manager,network,public-access,manager,wrapper') 'HTTP Start configures public access before publication without requiring application autostart'
+
+    $result = Invoke-FixtureWizard @('-Start', '-ManualForwarding', '-EnableAutostart') 'valid' 'http'
+    $calls = @(Read-WizardCalls)
+    Assert-Wizard ($result.code -eq 0 -and (Get-ManagerActions $calls) -ceq 'init-http,check,start,install-autostart') 'explicit manual forwarding permits normal HTTP publication after host setup'
+    Assert-Wizard (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'manual' -and $_.noPause }).Count -eq 1) 'manual forwarding is explicitly passed as the public access manual action without pause'
+    Assert-Wizard (($calls | ForEach-Object source) -join ',' -ceq 'manager,manager,network,public-access,manager,manager,wrapper') 'manual forwarding still prepares host public access before startup or autostart'
+
+    $result = Invoke-FixtureWizard @('-Start', '-ManualForwarding', '-EnableAutostart') 'cgnat' 'http'
+    $calls = @(Read-WizardCalls)
+    Assert-Wizard ($result.code -ne 0 -and (Get-ManagerActions $calls) -ceq 'init-http,check') 'manual forwarding cannot bypass known CGNAT diagnostics'
+    Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 0) 'known CGNAT refuses manual firewall access before any host/network changes'
+
+    foreach ($scenario in @('public-access-error', 'public-access-manual-required')) {
+        $result = Invoke-FixtureWizard @('-Start', '-EnableAutostart') $scenario 'http'
+        $calls = @(Read-WizardCalls)
+        Assert-Wizard ($result.code -ne 0) ('HTTP ' + $scenario + ' blocks publication')
+        Assert-Wizard ((Get-ManagerActions $calls) -ceq 'init-http,check') ($scenario + ' cannot start the public proxy or install application autostart')
+        Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 1) ($scenario + ' is handled after exactly one public access attempt')
+        Assert-Wizard ($result.output -notmatch 'Адрес проверен с этого компьютера') ($scenario + ' never claims a successful public start')
+    }
 
     foreach ($scenario in @('ip-mismatch', 'external-unobserved', 'cgnat', 'private-wan', 'stale', 'offline-report', 'missing-report', 'network-error')) {
         $result = Invoke-FixtureWizard @('-Start', '-EnableAutostart') $scenario 'http'
         $calls = @(Read-WizardCalls)
         Assert-Wizard ($result.code -ne 0) ('HTTP Start refuses ' + $scenario)
         Assert-Wizard ((Get-ManagerActions $calls) -ceq 'init-http,check') ('HTTP ' + $scenario + ' cannot publish or schedule autostart')
+        Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 0) ('HTTP ' + $scenario + ' is refused before firewall/router access changes')
         Assert-Wizard ($result.output -notmatch 'Адрес проверен с этого компьютера') ('HTTP ' + $scenario + ' cannot print startup success')
     }
     foreach ($scenario in @('missing-docker', 'config-check-error', 'init-error', 'start-error')) {
@@ -246,6 +286,9 @@ exit $wizardExitCode
         $calls = @(Read-WizardCalls)
         Assert-Wizard ($result.code -ne 0) ('HTTP ' + $scenario + ' propagates failure')
         Assert-Wizard (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'install-autostart' }).Count -eq 0) ('HTTP ' + $scenario + ' cannot install autostart')
+        if ($scenario -ne 'start-error') {
+            Assert-Wizard (@($calls | Where-Object source -eq 'public-access').Count -eq 0) ('HTTP ' + $scenario + ' stops before host firewall/router configuration')
+        }
     }
 
     $result = Invoke-FixtureWizard @() 'valid' 'http-auto'
@@ -270,7 +313,7 @@ exit $wizardExitCode
     Assert-Wizard ($fixtureEnvironment -match "(?m)^SMTP_PORT='465'\s*$" -and $fixtureEnvironment -match "(?m)^QSTUDY_HTTP_PORT='18080'\s*$") 'SMTP port is saved independently of the public HTTP port'
     Assert-Wizard (@($calls | Where-Object { $_.source -eq 'network' -and $_.httpPort -eq 18080 }).Count -eq 1 -and $result.output -match 'http://8.8.8.8:18080') 'SMTP input cannot change the displayed/public diagnostic port'
     Assert-Wizard ($result.output -notmatch 'FixtureSmtpSecret' -and [IO.File]::ReadAllText($promptLog) -notmatch 'FixtureSmtpSecret') 'private SMTP input remains absent from wizard output and prompt logs'
-    Write-Host ('Host wizard checks passed (' + $checks + ' assertions). Disposable manager/network only; no real services or private settings were touched.')
+    Write-Host ('Host wizard checks passed (' + $checks + ' assertions). Disposable manager/network/public-access only; no real services, firewall/router rules or private settings were touched.')
 } finally {
     $env:QSTUDY_WIZARD_TEST_SCENARIO = $oldScenario
     $resolved = [IO.Path]::GetFullPath($fixture)
