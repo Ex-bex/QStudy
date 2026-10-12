@@ -44,6 +44,13 @@ compose() {
         docker compose --project-name qstudy --project-directory "$task_root/deployment" --env-file "$task_env_file" -f "$task_compose_file" "$@"
 }
 docker_ready() {
+    # This legacy Linux manager owns only the HTTPS stack. A shared HTTP dotenv
+    # must never accidentally launch the domain/certificate Compose file.
+    task_host_mode="$(python3 "$task_config" check --offline | python3 -c 'import json,sys; print(json.load(sys.stdin)["host_mode"])')"
+    if [[ "$task_host_mode" != https ]]; then
+        printf '%s\n' 'HTTP IP:port is managed by Manage-QStudy-Internet.cmd on Windows. This Linux HTTPS manager refused to launch a different Compose profile; no Docker commands were run.' >&2
+        return 1
+    fi
     command -v docker >/dev/null || { printf '%s\n' 'Run Install-Docker.sh first.' >&2; exit 1; }
     docker compose version >/dev/null
     docker info --format '{{.OSType}}' >/dev/null

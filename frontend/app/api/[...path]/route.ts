@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sameSiteMutation, trustedClientIp } from "@/lib/proxy-security";
+import { sameSiteMutation, sessionCookieOptions, trustedClientIp } from "@/lib/proxy-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +47,8 @@ async function proxy(
     request.headers.get("host"),
     request.nextUrl.protocol,
     process.env.PUBLIC_BASE_URL,
+    process.env.ALLOW_PUBLIC_HTTP,
+    process.env.NODE_ENV,
   );
   if (mutation && !originMatches) {
     return NextResponse.json(
@@ -115,6 +117,18 @@ async function proxy(
   if (brandingAsset && request.headers.get("if-none-match"))
     headers.set("If-None-Match", request.headers.get("if-none-match")!);
   const endpoint = path.join("/");
+  const cookieOptions = sessionCookieOptions(
+    request.headers.get("host"),
+    request.nextUrl.protocol,
+    process.env.NODE_ENV,
+    process.env.PUBLIC_BASE_URL,
+    process.env.ALLOW_PUBLIC_HTTP,
+  );
+  const clearSession = (response: NextResponse) => response.cookies.set(COOKIE, "", {
+    ...cookieOptions,
+    maxAge: 0,
+    expires: new Date(0),
+  });
   try {
     const upstream = await fetch(
       `${backend}/api/${endpoint}${request.nextUrl.search}`,
@@ -139,12 +153,7 @@ async function proxy(
       response = NextResponse.json(data, { status: upstream.status });
       if (session)
         response.cookies.set(COOKIE, session, {
-          httpOnly: true,
-          secure:
-            process.env.NODE_ENV === "production" ||
-            request.nextUrl.protocol === "https:",
-          sameSite: "strict",
-          path: "/",
+          ...cookieOptions,
           maxAge: 60 * 60 * 8,
         });
     } else {
@@ -177,7 +186,7 @@ async function proxy(
       (endpoint === "auth/reset-password" && upstream.ok) ||
       (upstream.status === 401 && !isAuth && !brandingAsset)
     )
-      response.cookies.delete(COOKIE);
+      clearSession(response);
     return response;
   } catch {
     const response = NextResponse.json(
@@ -187,7 +196,7 @@ async function proxy(
       },
       { status: 502 },
     );
-    if (endpoint === "auth/logout") response.cookies.delete(COOKIE);
+    if (endpoint === "auth/logout") clearSession(response);
     return response;
   }
 }

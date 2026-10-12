@@ -102,6 +102,83 @@ jobs:
           docker compose --env-file deployment/.env -f deployment/compose.yml restart backend
           docker compose --env-file deployment/.env -f deployment/compose.yml up -d --wait --wait-timeout 300 backend frontend
           docker compose --env-file deployment/.env -f deployment/compose.yml exec -T frontend node --input-type=module - --existing < scripts/production/smoke.mjs
+      - name: Verify direct HTTP IP and port hosting
+        run: |
+          # Only the disposable CI project changes mode; existing database/uploads
+          # remain in place to verify that account data survives that transition.
+          docker compose --env-file deployment/.env -f deployment/compose.yml stop
+          mv deployment/.env deployment/.env.ci-https
+          python3 scripts/production/configure.py init-http 8.8.8.8 18080
+          python3 scripts/production/configure.py check --offline
+          sudo python3 scripts/production/configure.py permissions
+          if sudo bash scripts/production/Manage-QStudy.sh check --offline; then
+            echo 'Legacy Linux HTTPS manager must refuse HTTP mode'
+            exit 1
+          fi
+          docker compose --env-file deployment/.env -f deployment/compose.http.yml config --quiet
+          docker compose --env-file deployment/.env -f deployment/compose.http.yml run --rm --no-deps -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose --env-file deployment/.env -f deployment/compose.http.yml up -d --no-build --force-recreate --wait --wait-timeout 300 backend frontend caddy
+          docker compose --env-file deployment/.env -f deployment/compose.http.yml exec -T frontend node --input-type=module - --existing < scripts/production/smoke.mjs
+          # 8.8.8.8 is only a synthetic configured Host/Origin. All connections
+          # below use loopback; no test ever contacts that public IPv4.
+          python3 - <<'PY'
+          import http.client
+          import json
+          import subprocess
+          import urllib.parse
+
+          authority = "8.8.8.8:18080"
+          origin = "http://" + authority
+          compose = ["docker", "compose", "--env-file", "deployment/.env", "-f", "deployment/compose.http.yml"]
+          for service in ("backend", "frontend", "caddy"):
+              container = subprocess.check_output(compose + ["ps", "-q", service], text=True).strip()
+              assert container, f"{service} is running"
+              ports = json.loads(subprocess.check_output(["docker", "inspect", "--format", "{{json .NetworkSettings.Ports}}", container], text=True))
+              published = {port: bindings for port, bindings in (ports or {}).items() if bindings}
+              if service == "caddy":
+                  assert set(published) == {"80/tcp"}, "HTTP mode publishes neither HTTPS nor unrelated ports"
+                  assert all(binding["HostPort"] == "18080" for binding in published["80/tcp"])
+              else:
+                  assert not published, f"{service} stays on private container networks"
+
+          def request(path, host=authority, method="GET", body=None, extra=None):
+              headers = {"Host": host, **(extra or {})}
+              connection = http.client.HTTPConnection("127.0.0.1", 18080, timeout=30)
+              try:
+                  connection.request(method, path, body=body, headers=headers)
+                  response = connection.getresponse()
+                  data = response.read(2 * 1024 * 1024 + 1)
+                  assert len(data) <= 2 * 1024 * 1024, "Proxy response remains bounded"
+                  return response.status, dict(response.getheaders()), data
+              finally:
+                  connection.close()
+
+          for path in ("/api/health", "/"):
+              status, headers, data = request(path)
+              assert status == 200, f"HTTP proxy serves {path}"
+              assert not any(key.lower() == "strict-transport-security" for key in headers), "HTTP mode has no HTTPS-only HSTS policy"
+              if path == "/api/health":
+                  assert json.loads(data)["service"] == "QStudy"
+              else:
+                  assert b"QStudy" in data
+          for host in ("8.8.8.8", "8.8.8.8:18081", "other.example.org:18080", "127.0.0.1:18080"):
+              assert request("/api/health", host=host)[0] == 421, "Proxy rejects unconfigured authorities, including a wrong port"
+          payload = urllib.parse.urlencode({"username": "deployment-ci@example.org", "password": "QStudyDisposableCi2026!"})
+          status, headers, data = request("/api/auth/login", method="POST", body=payload, extra={"Origin": origin, "Content-Type": "application/x-www-form-urlencoded"})
+          assert status == 200, "Existing student account works through the public HTTP proxy"
+          cookie = next(value for key, value in headers.items() if key.lower() == "set-cookie")
+          assert "HttpOnly" in cookie and "SameSite=Strict" in cookie and "Secure" not in cookie, "HTTP session retains script/CSRF protections with the explicit HTTP cookie mode"
+          assert request("/api/auth/me", extra={"Cookie": cookie.split(";", 1)[0]})[0] == 200
+          assert request("/api/auth/login", method="POST", body=payload, extra={"Origin": "https://evil.example", "Content-Type": "application/x-www-form-urlencoded"})[0] == 403
+          print("Direct HTTP proxy, exact Host/port, private ports, cookie and persisted-account checks passed.")
+          PY
       - name: Stop disposable services
         if: always()
-        run: docker compose --env-file deployment/.env -f deployment/compose.yml stop
+        run: |
+          if test -f deployment/.env; then
+            if grep -q "^QSTUDY_HOST_MODE='http'$" deployment/.env; then
+              docker compose --env-file deployment/.env -f deployment/compose.http.yml stop
+            else
+              docker compose --env-file deployment/.env -f deployment/compose.yml stop
+            fi
+          fi

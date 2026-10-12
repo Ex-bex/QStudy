@@ -1,6 +1,7 @@
 ﻿param(
     [string]$RouterWanIPv4 = '',
     [string]$Domain = '',
+    [ValidateRange(0, 65535)][int]$HttpPort = 0,
     [switch]$Offline,
     [switch]$NoPause
 )
@@ -20,7 +21,8 @@ try {
         [PSCustomObject]@{ interface = $_.InterfaceAlias; ipv4 = @($_.IPv4Address.IPAddress); gateway = @($_.IPv4DefaultGateway.NextHop) }
     })
     $listeners = @()
-    foreach ($port in @(80, 443)) {
+    $checkedPorts = if ($HttpPort) { @($HttpPort) } else { @(80, 443) }
+    foreach ($port in $checkedPorts) {
         $listeners += @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object {
             [PSCustomObject]@{ port = $port; address = $_.LocalAddress; processId = $_.OwningProcess }
         })
@@ -57,6 +59,7 @@ try {
         routerWanIPv4 = $RouterWanIPv4; wanAssessment = $wan; domain = $Domain
         dnsIPv4 = $dnsV4; dnsIPv6 = $dnsV6; dnsAssessment = $dnsState; httpsAssessment = $httpsState
         externalReachabilityProven = $false
+        publicHttpPort = $HttpPort
     }
     $reportPath = Assert-QStudyHomePath $root '.local\home-network-report.json'
     [IO.Directory]::CreateDirectory((Split-Path -Parent $reportPath)) | Out-Null
@@ -69,15 +72,23 @@ try {
         'wan_unknown' { Write-Warning 'WAN-адрес неизвестен. Внешний IP сам по себе не подтверждает белый IP. Посмотрите Internet/WAN в роутере и повторите с -RouterWanIPv4.' }
         'cgnat' { Write-Warning 'WAN находится в 100.64.0.0/10: CGNAT. Запросите публичный IPv4 у провайдера. DDNS и проброс портов сами это не исправят.' }
         'private_wan' { Write-Warning 'WAN роутера приватный: возможен второй роутер или NAT провайдера. Нужна настройка обоих роутеров либо публичный IP провайдера.' }
-        'public_wan_matches' { Write-Host 'WAN совпадает с внешним IPv4. Настройте проброс TCP 80/443 и подтвердите доступ с мобильного интернета.' }
+        'public_wan_matches' {
+            $portHint = if ($HttpPort) { [string]$HttpPort } else { '80/443' }
+            Write-Host ('WAN совпадает с внешним IPv4. Настройте проброс TCP ' + $portHint + ' и подтвердите доступ с мобильного интернета.')
+        }
         'wan_mismatch' { Write-Warning 'WAN не совпадает с внешним IPv4. Отключите VPN для проверки и уточните NAT у провайдера; доступ ещё не подтверждён.' }
         'public_wan_unconfirmed' { Write-Warning 'WAN выглядит публичным, но внешний адрес не проверен. Подтвердите условия у провайдера.' }
         default { Write-Warning 'WAN-адрес не является обычным публичным IPv4. Проверьте адрес в роутере.' }
     }
     if ($Domain) { Write-Host ('DNS: ' + $dnsState + '; HTTPS: ' + $httpsState) }
     if ($dnsV6.Count -gt 0) { Write-Warning 'Есть AAAA. Проверьте доступность IPv6; ошибочная запись может помешать HTTPS. IPv4-проверка не проверяет IPv6.' }
-    Write-Host 'Роутер и firewall не изменены. Открывайте наружу только TCP 80 и 443.'
-    Write-Host 'Обязательная внешняя проверка: телефон с выключенным Wi-Fi, https://ВАШ-ДОМЕН/.'
+    if ($HttpPort) {
+        Write-Host ('Для HTTP IP:port нужен проброс и firewall только TCP ' + $HttpPort + '. Роутер и firewall не изменены.')
+        Write-Host ('Внешняя проверка: телефон с выключенным Wi-Fi, http://БЕЛЫЙ_IP:' + $HttpPort + '/.')
+    } else {
+        Write-Host 'Роутер и firewall не изменены. Для HTTPS открывайте наружу только TCP 80 и 443.'
+        Write-Host 'Обязательная внешняя проверка: телефон с выключенным Wi-Fi, https://ВАШ-ДОМЕН/.'
+    }
     Write-Host ('Отчёт: ' + $reportPath)
 } catch {
     $failed = $true

@@ -168,6 +168,10 @@ export default function ChatPage() {
     }
     setError("");
     try {
+      if (!window.isSecureContext)
+        throw new Error(
+          "Запись с микрофона недоступна при подключении по HTTP. Используйте текстовый ввод или загрузите аудиофайл в разделе файлов.",
+        );
       if (
         !navigator.mediaDevices?.getUserMedia ||
         typeof MediaRecorder === "undefined"

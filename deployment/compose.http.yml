@@ -1,0 +1,53 @@
+# Standalone IP:port mode. Backend/frontend inherit the HTTPS stack's private
+# networks, storage, health checks and container restrictions without its proxy.
+name: qstudy
+
+services:
+  backend:
+    extends:
+      file: compose.yml
+      service: backend
+
+  frontend:
+    extends:
+      file: compose.yml
+      service: frontend
+    environment:
+      ALLOW_PUBLIC_HTTP: ${ALLOW_PUBLIC_HTTP:?Explicitly opt in with init-http}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Run init-http first}
+      QSTUDY_PUBLIC_IP: ${QSTUDY_PUBLIC_IP:?Set the host public IPv4 with init-http}
+      QSTUDY_HTTP_PORT: ${QSTUDY_HTTP_PORT:-8080}
+    ports:
+      - "${QSTUDY_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./Caddyfile.http:/etc/caddy/Caddyfile:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /data:size=16m,mode=1777
+      - /config:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+networks:
+  edge:
+  api:

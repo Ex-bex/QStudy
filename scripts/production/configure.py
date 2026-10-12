@@ -54,6 +54,41 @@ def normalized_domain(value: str) -> str:
     raise ConfigurationError("Automatic public HTTPS requires a DNS domain, rather than an IP address.")
 
 
+def normalized_public_ipv4(value: str) -> str:
+    try:
+        address = ipaddress.IPv4Address(value)
+    except (ipaddress.AddressValueError, TypeError) as error:
+        raise ConfigurationError("Use one canonical public IPv4 address, without a URL, port or path.") from error
+    if (str(address) != value or not address.is_global or address.is_multicast or address.is_reserved
+            or address in ipaddress.IPv4Network("192.88.99.0/24")):
+        raise ConfigurationError("HTTP hosting requires a canonical public IPv4; private, CGNAT and reserved addresses are unsupported.")
+    return str(address)
+
+
+def normalized_http_port(value: str | int) -> int:
+    text = str(value)
+    if not re.fullmatch(r"[0-9]{1,5}", text) or not 1 <= int(text) <= 65535 or text != str(int(text)):
+        raise ConfigurationError("Use an HTTP port from 1 through 65535, without spaces or leading zeroes.")
+    return int(text)
+
+
+def create_environment(base: Path, replacements: dict[str, str]) -> dict:
+    path = safe_path(base, ".env")
+    template = (base / ".env.example").read_text(encoding="utf-8")
+    for key, value in replacements.items():
+        template, count = re.subn(r"^" + re.escape(key) + r"=.*$", lambda _: key + "='" + value + "'", template, flags=re.MULTILINE)
+        if count != 1:
+            raise ConfigurationError("Production configuration template is incomplete.")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as target:
+        target.write(template)
+        target.flush()
+        os.fsync(target.fileno())
+    for relative in ("data/backend/uploads", "data/backups"):
+        safe_path(base, relative).mkdir(parents=True, exist_ok=True)
+    return {"status": "created", "configuration": "deployment/.env", "credentials_printed": False}
+
+
 def read_environment(path: Path) -> dict[str, str]:
     values = {}
     for line in path.read_text(encoding="utf-8-sig").splitlines():
@@ -94,41 +129,73 @@ def initialize(base: Path, domain: str, email: str) -> dict:
     path = safe_path(base, ".env")
     base.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        if read_environment(path).get("QSTUDY_DOMAIN") != domain:
+        existing = read_environment(path)
+        if existing.get("QSTUDY_HOST_MODE", "https") != "https" or existing.get("QSTUDY_DOMAIN") != domain:
             raise ConfigurationError("An existing deployment/.env was preserved. Edit its domain settings explicitly.")
         for relative in ("data/backend/uploads", "data/backups"):
             safe_path(base, relative).mkdir(parents=True, exist_ok=True)
         return {"status": "preserved", "configuration": "deployment/.env", "secrets_overwritten": False}
-    template = (base / ".env.example").read_text(encoding="utf-8")
     replacements = {"QSTUDY_DOMAIN": domain, "ACME_EMAIL": email,
+                    "QSTUDY_HOST_MODE": "https", "ALLOW_PUBLIC_HTTP": "false",
                     "PUBLIC_BASE_URL": "https://" + domain,
                     "SECRET_KEY": secrets.token_hex(32), "BFF_PROXY_SECRET": secrets.token_hex(32)}
-    for key, value in replacements.items():
-        template, count = re.subn(r"^" + re.escape(key) + r"=.*$", lambda _: key + "='" + value + "'", template, flags=re.MULTILINE)
-        if count != 1:
-            raise ConfigurationError("Production configuration template is incomplete.")
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as target:
-        target.write(template)
-        target.flush()
-        os.fsync(target.fileno())
-    for relative in ("data/backend/uploads", "data/backups"):
-        safe_path(base, relative).mkdir(parents=True, exist_ok=True)
-    return {"status": "created", "configuration": "deployment/.env", "credentials_printed": False}
+    return create_environment(base, replacements)
+
+
+def initialize_http(base: Path, public_ip: str, port: str | int = 8080) -> dict:
+    public_ip = normalized_public_ipv4(public_ip)
+    port = normalized_http_port(port)
+    origin = f"http://{public_ip}:{port}"
+    path = safe_path(base, ".env")
+    base.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        existing = read_environment(path)
+        if (existing.get("QSTUDY_HOST_MODE", "https") != "http"
+                or existing.get("QSTUDY_PUBLIC_IP") != public_ip
+                or existing.get("QSTUDY_HTTP_PORT") != str(port)
+                or existing.get("PUBLIC_BASE_URL") != origin):
+            raise ConfigurationError("An existing deployment/.env was preserved. HTTP init cannot change its host mode, IP, port or public origin.")
+        for relative in ("data/backend/uploads", "data/backups"):
+            safe_path(base, relative).mkdir(parents=True, exist_ok=True)
+        return {"status": "preserved", "configuration": "deployment/.env", "secrets_overwritten": False}
+    return create_environment(base, {
+        "QSTUDY_HOST_MODE": "http", "QSTUDY_PUBLIC_IP": public_ip,
+        "QSTUDY_HTTP_PORT": str(port), "ALLOW_PUBLIC_HTTP": "true", "PUBLIC_BASE_URL": origin,
+        "SECRET_KEY": secrets.token_hex(32), "BFF_PROXY_SECRET": secrets.token_hex(32),
+    })
 
 
 def check(base: Path, offline: bool = False) -> dict:
     path = safe_path(base, ".env")
     if not path.is_file():
-        raise ConfigurationError("Run Manage-QStudy.sh init DOMAIN CONTACT_EMAIL first.")
+        raise ConfigurationError("Initialize HTTPS with init DOMAIN CONTACT_EMAIL or HTTP with init-http PUBLIC_IP PORT first.")
     if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ConfigurationError("deployment/.env must be private: chmod 600 deployment/.env.")
     values = read_environment(path)
-    domain = normalized_domain(values.get("QSTUDY_DOMAIN", ""))
-    if values.get("PUBLIC_BASE_URL") != "https://" + domain:
-        raise ConfigurationError("PUBLIC_BASE_URL must equal https:// followed by QSTUDY_DOMAIN, without a trailing slash.")
-    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", values.get("ACME_EMAIL", "")):
-        raise ConfigurationError("Set ACME_EMAIL for certificate notifications.")
+    mode = values.get("QSTUDY_HOST_MODE", "https")
+    public_ip = ""
+    if mode == "http":
+        public_ip = normalized_public_ipv4(values.get("QSTUDY_PUBLIC_IP", ""))
+        public_port = normalized_http_port(values.get("QSTUDY_HTTP_PORT", ""))
+        origin = f"http://{public_ip}:{public_port}"
+        if values.get("ALLOW_PUBLIC_HTTP") != "true":
+            raise ConfigurationError("HTTP mode requires explicit ALLOW_PUBLIC_HTTP='true'.")
+        if values.get("PUBLIC_BASE_URL") != origin:
+            raise ConfigurationError("HTTP PUBLIC_BASE_URL must exactly equal http:// followed by the configured public IPv4 and :port, without a trailing slash.")
+        if not values.get("QSTUDY_DOMAIN", "").strip() or not values.get("ACME_EMAIL", "").strip():
+            raise ConfigurationError("HTTP mode needs the unused QSTUDY_DOMAIN and ACME_EMAIL template placeholders for base Compose interpolation; no real domain or certificate email is needed.")
+    elif mode == "https":
+        domain = normalized_domain(values.get("QSTUDY_DOMAIN", ""))
+        public_port = 443
+        origin = "https://" + domain
+        if values.get("ALLOW_PUBLIC_HTTP", "false") != "false":
+            raise ConfigurationError("HTTPS mode must keep ALLOW_PUBLIC_HTTP='false'.")
+        if values.get("PUBLIC_BASE_URL") != origin:
+            raise ConfigurationError("PUBLIC_BASE_URL must equal https:// followed by QSTUDY_DOMAIN, without a trailing slash.")
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", values.get("ACME_EMAIL", "")):
+            raise ConfigurationError("Set ACME_EMAIL for certificate notifications.")
+    else:
+        raise ConfigurationError("QSTUDY_HOST_MODE must be 'https' or explicit 'http'.")
     for key in ("SECRET_KEY", "BFF_PROXY_SECRET"):
         secret = values.get(key, "")
         if len(secret) < 32 or secret.lower().startswith(("change", "replace", "your_")):
@@ -144,15 +211,17 @@ def check(base: Path, offline: bool = False) -> dict:
         directory = safe_path(base, relative)
         if not directory.is_dir():
             raise ConfigurationError("Persistent data folders are missing; run init again and permissions.")
-    if not offline:
+    if not offline and mode == "https":
         try:
             addresses = socket.getaddrinfo(domain, 443, type=socket.SOCK_STREAM)
         except socket.gaierror as error:
             raise ConfigurationError("The domain does not resolve. Create its DNS A/AAAA records first.") from error
         if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
             raise ConfigurationError("The production domain must resolve to public server addresses.")
-    return {"status": "configuration_valid", "public_url": "https://" + domain,
-            "dns_checked": not offline, "mail_enabled": recovery == "smtp"}
+    return {"status": "configuration_valid", "host_mode": mode, "public_url": origin,
+            "compose_file": "compose.http.yml" if mode == "http" else "compose.yml",
+            "public_port": public_port, "public_ip": public_ip,
+            "dns_checked": not offline and mode == "https", "mail_enabled": recovery == "smtp"}
 
 
 def permissions(base: Path) -> dict:
@@ -181,30 +250,33 @@ def permissions(base: Path) -> dict:
 class ProbeRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
         # Never follow another site or print an untrusted Location header.
-        raise ConfigurationError("The public HTTPS probe refused a redirect. Check the configured domain and proxy.")
+        raise ConfigurationError("The public site probe refused a redirect. Check the configured address and proxy.")
 
 
 def assert_probe_origin(response_url: str, origin: str) -> None:
     try:
         actual = urllib.parse.urlsplit(response_url)
         expected = urllib.parse.urlsplit(origin)
-        actual_port = 443 if actual.port is None else actual.port
+        default_ports = {"https": 443, "http": 80}
+        actual_port = default_ports.get(actual.scheme) if actual.port is None else actual.port
+        expected_port = default_ports.get(expected.scheme) if expected.port is None else expected.port
         same_origin = (
             response_url == response_url.strip()
             and actual.username is None and actual.password is None
-            and actual.scheme == "https" and actual.hostname == expected.hostname
-            and actual_port == 443
+            and expected.scheme in default_ports and actual.scheme == expected.scheme
+            and actual.hostname == expected.hostname and actual_port == expected_port
         )
     except (TypeError, ValueError):
         same_origin = False
     if not same_origin:
-        raise ConfigurationError("The public HTTPS probe received a response from another origin.")
+        raise ConfigurationError("The public site probe received a response from another origin.")
 
 
 def probe(base: Path) -> dict:
     # Validate secrets, recovery mode, storage and the exact public URL before
     # any requests. This probe verifies access from this host, not another network.
-    origin = check(base, offline=True)["public_url"]
+    configuration = check(base, offline=True)
+    origin = configuration["public_url"]
     opener = urllib.request.build_opener(ProbeRedirectHandler())
     with opener.open(origin + "/api/health", timeout=25) as response:
         assert_probe_origin(response.geturl(), origin)
@@ -218,10 +290,12 @@ def probe(base: Path) -> dict:
         assert_probe_origin(response.geturl(), origin)
         if response.status != 200:
             raise ConfigurationError("The public homepage is unavailable.")
-        hsts = re.search(r"(?:^|;)\s*max-age\s*=\s*(\d+)\s*(?:;|$)", response.headers.get("Strict-Transport-Security", ""), re.IGNORECASE)
-        if not hsts or int(hsts.group(1)) <= 0:
-            raise ConfigurationError("The public proxy is missing a valid HTTPS security header.")
-    return {"status": "public_https_verified", "public_url": origin,
+        if configuration["host_mode"] == "https":
+            hsts = re.search(r"(?:^|;)\s*max-age\s*=\s*(\d+)\s*(?:;|$)", response.headers.get("Strict-Transport-Security", ""), re.IGNORECASE)
+            if not hsts or int(hsts.group(1)) <= 0:
+                raise ConfigurationError("The public proxy is missing a valid HTTPS security header.")
+    return {"status": "public_" + configuration["host_mode"] + "_verified", "public_url": origin,
+            "host_mode": configuration["host_mode"],
             "verified_from_this_host": True, "external_reachability_proven": False}
 
 
@@ -231,6 +305,9 @@ def main() -> int:
     init = subparsers.add_parser("init")
     init.add_argument("domain")
     init.add_argument("email")
+    init_http = subparsers.add_parser("init-http")
+    init_http.add_argument("public_ip")
+    init_http.add_argument("port", nargs="?", default="8080")
     validation = subparsers.add_parser("check")
     validation.add_argument("--offline", action="store_true")
     subparsers.add_parser("permissions")
@@ -240,6 +317,8 @@ def main() -> int:
     try:
         if arguments.command == "init":
             result = initialize(base, arguments.domain, arguments.email)
+        elif arguments.command == "init-http":
+            result = initialize_http(base, arguments.public_ip, arguments.port)
         elif arguments.command == "check":
             result = check(base, arguments.offline)
         elif arguments.command == "permissions":
@@ -250,7 +329,7 @@ def main() -> int:
         print("QStudy: " + str(error), file=sys.stderr)
         return 1
     except Exception as error:
-        print("QStudy production preflight failed (" + type(error).__name__ + "). Check file access, DNS and HTTPS. Credentials were not printed.", file=sys.stderr)
+        print("QStudy production preflight failed (" + type(error).__name__ + "). Check file access, network and the public address. Credentials were not printed.", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=True))
     return 0

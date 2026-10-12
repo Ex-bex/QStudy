@@ -1,0 +1,28 @@
+{
+    auto_https off
+    admin off
+}
+
+:80 {
+    encode zstd gzip
+    request_body {
+        max_size 27MB
+    }
+    header -Server
+
+    # Compare the complete authority, including the external port. A Caddy host
+    # matcher alone does not enforce that requests use the configured origin.
+    # Browsers may omit the default :80 while the setup stores an explicit port.
+    @public_origin expression `"http://" + {hostport} == "{$PUBLIC_BASE_URL}" || ("{$QSTUDY_HTTP_PORT}" == "80" && {hostport} == "{$QSTUDY_PUBLIC_IP}")`
+    handle @public_origin {
+        reverse_proxy frontend:3000 {
+            header_up X-Real-IP {remote_host}
+            header_up -X-QStudy-Proxy-Key
+            header_up -X-QStudy-Client-IP
+            flush_interval -1
+        }
+    }
+    handle {
+        respond "Unexpected host" 421
+    }
+}

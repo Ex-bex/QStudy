@@ -1,8 +1,10 @@
 ﻿param(
-    [ValidateSet('help', 'init', 'check', 'prepare', 'start', 'update', 'resume', 'stop', 'status', 'admin', 'mail-check', 'backup', 'verify', 'restore', 'install-autostart', 'remove-autostart')]
+    [ValidateSet('help', 'init', 'init-http', 'check', 'prepare', 'start', 'update', 'resume', 'stop', 'status', 'admin', 'mail-check', 'backup', 'verify', 'restore', 'install-autostart', 'remove-autostart')]
     [string]$Action = 'help',
     [string]$Domain = '',
     [string]$Email = '',
+    [string]$PublicIP = '',
+    [ValidateRange(1, 65535)][int]$Port = 8080,
     [string]$Name = '',
     [string]$Archive = '',
     [switch]$Offline,
@@ -15,6 +17,9 @@ $Action = $Action.ToLowerInvariant()
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $taskDeployment = Join-Path $taskRoot 'deployment'
 $taskCompose = Join-Path $taskDeployment 'compose.yml'
+$taskHostMode = 'https'
+$taskPublicUrl = ''
+$taskPublicPort = 443
 $taskEnvironment = Join-Path $taskDeployment '.env'
 $taskDocker = $null
 $taskDockerEndpoint = ''
@@ -24,7 +29,7 @@ $taskLock = $null
 $taskSavedEnvironment = @{}
 # Docker Compose gives the calling shell precedence over --env-file. Production
 # settings must come from the validated deployment/.env, not stale local exports.
-foreach ($key in @('QSTUDY_DOMAIN', 'ACME_EMAIL', 'PUBLIC_BASE_URL', 'SECRET_KEY', 'BFF_PROXY_SECRET', 'RECOVERY_DELIVERY')) {
+foreach ($key in @('QSTUDY_DOMAIN', 'ACME_EMAIL', 'PUBLIC_BASE_URL', 'SECRET_KEY', 'BFF_PROXY_SECRET', 'RECOVERY_DELIVERY', 'QSTUDY_HOST_MODE', 'QSTUDY_PUBLIC_IP', 'QSTUDY_HTTP_PORT', 'ALLOW_PUBLIC_HTTP')) {
     $taskSavedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
     [Environment]::SetEnvironmentVariable($key, $null, 'Process')
 }
@@ -32,6 +37,7 @@ foreach ($key in @('QSTUDY_DOMAIN', 'ACME_EMAIL', 'PUBLIC_BASE_URL', 'SECRET_KEY
 function Write-QStudyHostHelp {
     Write-Host @'
 QStudy Internet host on Windows (Docker Desktop, Linux containers, Caddy HTTPS)
+  Manage-QStudy-Internet.cmd init-http -PublicIP YOUR-PUBLIC-IP [-Port 8080]
   Manage-QStudy-Internet.cmd init -Domain YOUR-DOMAIN -Email YOUR-EMAIL
   Manage-QStudy-Internet.cmd check [-Offline]
   Manage-QStudy-Internet.cmd prepare
@@ -46,8 +52,11 @@ QStudy Internet host on Windows (Docker Desktop, Linux containers, Caddy HTTPS)
   Manage-QStudy-Internet.cmd restore -Archive BACKUP-BASENAME [-NoPublish]
   Manage-QStudy-Internet.cmd install-autostart
   Manage-QStudy-Internet.cmd remove-autostart
-Privately edit deployment/.env after init. Desktop installation/license,
-router port forwarding TCP 80/443, public IP and DNS/DDNS are one-time setup.
+HTTP IP:port needs only that TCP port forwarded and allowed by the firewall.
+HTTP has no domain/certificate and no transport encryption for passwords/data.
+HTTPS domain mode remains available with init -Domain ... -Email ... .
+Privately edit deployment/.env after init/init-http. Desktop installation/license,
+public IP and router forwarding are one-time setup.
 This manager never changes firewall rules, router settings or power settings.
 Autostart runs at this user's sign-in; enable Docker Desktop sign-in startup.
 Backend 8000 and frontend 3000 remain private container ports.
@@ -75,7 +84,25 @@ function Get-QStudyHostPython {
 
 function Invoke-QStudyConfiguration([string[]]$Arguments) {
     $python = Get-QStudyHostPython
-    & $python -I (Join-Path $PSScriptRoot 'configure.py') @Arguments
+    if ($Arguments[0] -eq 'check') {
+        $reportText = @(& $python -I (Join-Path $PSScriptRoot 'configure.py') @Arguments) -join ''
+        if ($LASTEXITCODE -ne 0) { throw 'Production configuration check failed. See the safe message above; credentials were not printed.' }
+        try { $report = $reportText | ConvertFrom-Json }
+        catch { throw 'Production configuration returned an invalid report; private values were not printed.' }
+        $modeProperty = $report.PSObject.Properties['host_mode']
+        $mode = if ($null -eq $modeProperty) { 'https' } else { [string]$modeProperty.Value }
+        if ($mode -notin @('https', 'http')) { throw 'Unsupported production host mode.' }
+        $filename = if ($mode -eq 'http') { 'compose.http.yml' } else { 'compose.yml' }
+        $composeProperty = $report.PSObject.Properties['compose_file']
+        if ($null -ne $composeProperty -and $composeProperty.Value -cne $filename) { throw 'Production host mode and Compose file do not match.' }
+        $script:taskCompose = Assert-QStudyHostPath $taskRoot (Join-Path $taskDeployment $filename)
+        $script:taskHostMode = $mode
+        $script:taskPublicUrl = [string]$report.public_url
+        $portProperty = $report.PSObject.Properties['public_port']
+        $script:taskPublicPort = if ($null -eq $portProperty) { 443 } else { [int]$portProperty.Value }
+        Write-Host $reportText
+        if ($mode -eq 'http') { Write-Warning 'HTTP IP:port mode is explicitly enabled: passwords, sessions and documents have no transport encryption.' }
+    } else { & $python -I (Join-Path $PSScriptRoot 'configure.py') @Arguments }
     if ($LASTEXITCODE -ne 0) { throw 'Production configuration check failed. See the safe message above; credentials were not printed.' }
 }
 
@@ -175,10 +202,10 @@ function Start-QStudyPublicProbe {
             Invoke-QStudyConfiguration @('probe')
             return $true
         } catch {
-            if ($attempt -lt 6) { Write-Host 'Waiting for DNS and the Caddy HTTPS certificate...'; Start-Sleep -Seconds 10 }
+            if ($attempt -lt 6) { Write-Host 'Waiting for the configured public endpoint...'; Start-Sleep -Seconds 10 }
         }
     }
-    Write-Warning 'PUBLIC_HTTPS_NOT_VERIFIED: healthy containers remain running. Check DNS/DDNS and TCP 80/443 forwarding. If the router has no NAT loopback, test the HTTPS site from a phone with Wi-Fi disabled. See docs/home-hosting.md.'
+    Write-Warning ('PUBLIC_ENDPOINT_NOT_VERIFIED: healthy containers remain running. Check TCP forwarding/firewall for the configured port ' + $taskPublicPort + '. If the router has no NAT loopback, test ' + $taskPublicUrl + ' from a phone with Wi-Fi disabled. See docs/friend-hosting.md.')
     return $false
 }
 
@@ -206,11 +233,14 @@ try {
     if ($NoPublish -and $Action -ne 'restore') { throw '-NoPublish is supported only with restore.' }
     if ($Action -eq 'help') { Write-QStudyHostHelp; exit 0 }
     if ($Domain -and $Action -ne 'init') { throw '-Domain is supported only with init. Edit both production domain settings explicitly for a later change.' }
+    if ($PublicIP -and $Action -ne 'init-http') { throw '-PublicIP is supported only with init-http.' }
+    if ($PSBoundParameters.ContainsKey('Port') -and $Action -ne 'init-http') { throw '-Port is supported only with init-http.' }
     if ($Email -and $Action -notin @('init', 'admin')) { throw '-Email is supported only with init or admin.' }
     if ($Name -and $Action -ne 'admin') { throw '-Name is supported only with admin.' }
     if ($Archive -and $Action -notin @('verify', 'restore')) { throw '-Archive is supported only with verify or restore.' }
     if ($Action -in @('verify', 'restore')) { Assert-QStudyBackupBasename $Archive }
     if ($Action -eq 'init' -and (-not $Domain -or -not $Email)) { throw 'Use init -Domain YOUR-DOMAIN -Email YOUR-EMAIL.' }
+    if ($Action -eq 'init-http' -and (-not $PublicIP)) { throw 'Use init-http -PublicIP YOUR-PUBLIC-IP -Port 8080.' }
     if ($Action -eq 'admin' -and (-not $Email -or $Email.StartsWith('-'))) { throw 'Use admin -Email ACCOUNT-EMAIL.' }
     if ($Offline -and $Action -in @('start', 'update')) { throw 'start/update require live DNS checks. Use check -Offline to prepare configuration before DNS is ready.' }
     if ($Offline -and $Action -eq 'prepare') { throw 'prepare requires Internet access to download/build images. Public DNS is not required. Use check -Offline for configuration validation without downloads.' }
@@ -226,6 +256,12 @@ try {
             Protect-QStudyHostStorage $taskRoot
             Write-Host 'Next: privately edit deployment/.env; configure public IP, DNS/DDNS and router TCP 80/443; then run check and start.'
         }
+        'init-http' {
+            Protect-QStudyHostStorage $taskRoot
+            Invoke-QStudyConfiguration @('init-http', $PublicIP, [string]$Port)
+            Protect-QStudyHostStorage $taskRoot
+            Write-Host ('Next: prepare data/accounts privately, forward and allow TCP ' + $Port + ', then start. The address is http://' + $PublicIP + ':' + $Port + '; no domain or certificate is needed.')
+        }
         { $_ -in @('install-autostart', 'remove-autostart') } {
             if ($Action -eq 'install-autostart') { Invoke-QStudyConfiguration @('check', '--offline') }
             Set-QStudyHostAutostart ($Action -eq 'install-autostart')
@@ -234,7 +270,7 @@ try {
             $options = @('check'); if ($Offline) { $options += '--offline' }
             Invoke-QStudyConfiguration $options
             Assert-QStudyDockerReady
-            Write-Host 'Configuration and Linux Docker engine are ready. A build, HTTPS certificate and an external Internet test are still required.'
+            Write-Host ('Configuration and Linux Docker engine are ready: ' + $taskPublicUrl + '. A build and an external Internet test are still required.')
         }
         { $_ -in @('prepare', 'start', 'update', 'resume') } {
             Protect-QStudyHostStorage $taskRoot
@@ -258,12 +294,9 @@ try {
             if ($Action -eq 'prepare') { Write-Host 'Preparation complete: production backend/frontend are healthy on private container networks; SMTP was checked if enabled. Caddy was not started, no public ports were published, and public DNS/HTTPS were not tested. Configure accounts and DNS/router access, then run start to publish.' }
             elseif ($Action -eq 'resume') { Write-Host 'Existing production containers resumed. Public Internet availability was not tested at sign-in.' }
             else {
-                if (-not (Start-QStudyPublicProbe)) { throw 'The public HTTPS probe did not pass. Containers remain running for diagnosis; publication was not declared successful.' }
+                if (-not (Start-QStudyPublicProbe)) { throw 'The public endpoint probe did not pass. Containers remain running for diagnosis; publication was not declared successful.' }
                 if (-not $NoBrowser) {
-                    # configure.py exposes only this safe public URL, never secrets.
-                    $python = Get-QStudyHostPython
-                    $reportText = @(& $python -I (Join-Path $PSScriptRoot 'configure.py') check --offline) -join ''
-                    if ($LASTEXITCODE -eq 0) { Start-Process -FilePath ([string]($reportText | ConvertFrom-Json).public_url) | Out-Null }
+                    Start-Process -FilePath $taskPublicUrl | Out-Null
                 }
             }
         }

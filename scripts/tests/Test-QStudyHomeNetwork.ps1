@@ -12,6 +12,7 @@ foreach ($case in @(
     @('10.20.30.40', 'private'), @('172.16.0.1', 'private'), @('172.31.255.254', 'private'), @('172.32.0.1', 'public'),
     @('192.168.1.1', 'private'), @('127.0.0.1', 'loopback'), @('169.254.1.2', 'link_local'),
     @('203.0.113.10', 'reserved'), @('224.0.0.1', 'reserved'), @('8.8.8.8', 'public'),
+    @('192.0.0.9', 'public'), @('192.0.0.10', 'public'), @('192.0.0.8', 'reserved'),
     @('8.8.8.8:443', 'invalid'), @('localhost', 'invalid'), @('::1', 'invalid'), @('127.1', 'invalid')
 )) { Assert-Test ((Get-QStudyIPv4Kind $case[0]) -eq $case[1]) ('IPv4 classification: ' + $case[0]) }
 Assert-Test ((Get-QStudyWanAssessment '' '8.8.8.8') -eq 'wan_unknown') 'An external echo cannot prove router WAN or public reachability'

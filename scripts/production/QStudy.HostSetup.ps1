@@ -88,3 +88,22 @@ function Assert-QStudyHostNetworkForStart($Report, [string]$Domain) {
     if ([Math]::Abs(([DateTimeOffset]::UtcNow - $checked).TotalMinutes) -gt 10) { throw 'Отчёт сети устарел. Повторите диагностику перед запуском.' }
     # A successful local HTTPS request is not an independent Internet test.
 }
+
+function Assert-QStudyHostIpNetworkForStart($Report, [string]$PublicIP) {
+    if ($Report.version -ne 1 -or $Report.offline -or $Report.externalIpStatus -ne 'observed' -or $Report.externalIPv4 -cne $PublicIP) {
+        throw 'Указанный публичный IPv4 должен совпадать с адресом этого подключения. Проверьте VPN, IP и отчёт сети.'
+    }
+    if ($Report.wanAssessment -in @('cgnat', 'private_wan', 'invalid_wan', 'wan_mismatch')) { throw 'Прямой доступ не подтверждён: проверьте WAN и публичный IPv4 у провайдера.' }
+    $checked = [DateTimeOffset]::Parse($Report.checkedUtc)
+    if ([Math]::Abs(([DateTimeOffset]::UtcNow - $checked).TotalMinutes) -gt 10) { throw 'Отчёт сети устарел. Повторите диагностику перед запуском.' }
+}
+
+function Get-QStudyAvailableHttpPort([int]$Preferred = 8080) {
+    foreach ($candidate in $Preferred..([Math]::Min($Preferred + 99, 65535))) {
+        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Any, $candidate)
+        try { $listener.Start(); return $candidate }
+        catch [Net.Sockets.SocketException] { }
+        finally { $listener.Stop() }
+    }
+    throw 'Не найден свободный порт. Укажите -Port вручную; чужие процессы не останавливаются.'
+}

@@ -86,6 +86,28 @@ try {
     Assert-SetupThrows { Assert-QStudyHostNetworkForStart $report 'qstudy.example.org' } 'old reports cannot authorize startup'
     $report.checkedUtc = [DateTime]::UtcNow.ToString('o'); $report.offline = $true
     Assert-SetupThrows { Assert-QStudyHostNetworkForStart $report 'qstudy.example.org' } 'offline reports cannot pass live startup checks'
+    $ipReport = [PSCustomObject]@{
+        version = 1; offline = $false; checkedUtc = [DateTime]::UtcNow.ToString('o')
+        externalIpStatus = 'observed'; externalIPv4 = '8.8.8.8'; wanAssessment = 'public_wan_matches'
+        externalReachabilityProven = $false
+    }
+    Assert-QStudyHostIpNetworkForStart $ipReport '8.8.8.8'
+    Assert-Setup (-not $ipReport.externalReachabilityProven) 'an IP echo never proves external HTTP port reachability'
+    Assert-SetupThrows { Assert-QStudyHostIpNetworkForStart $ipReport '1.1.1.1' } 'HTTP startup rejects an IP belonging to another connection'
+    $ipReport.wanAssessment = 'cgnat'
+    Assert-SetupThrows { Assert-QStudyHostIpNetworkForStart $ipReport '8.8.8.8' } 'HTTP port forwarding cannot override CGNAT'
+    $ipReport.wanAssessment = 'public_wan_matches'; $ipReport.checkedUtc = [DateTime]::UtcNow.AddHours(-1).ToString('o')
+    Assert-SetupThrows { Assert-QStudyHostIpNetworkForStart $ipReport '8.8.8.8' } 'stale HTTP diagnostic reports cannot pass'
+    $portBlocker = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Any, 0)
+    $portBlocker.Start()
+    try {
+        $busyPort = ([Net.IPEndPoint]$portBlocker.LocalEndpoint).Port
+        if ($busyPort -lt 65535) {
+            $selectedPort = Get-QStudyAvailableHttpPort $busyPort
+            Assert-Setup ($selectedPort -gt $busyPort -and $selectedPort -le [Math]::Min($busyPort + 99, 65535)) 'initial HTTP port selection skips occupied ports without stopping their listener'
+            Assert-Setup ($portBlocker.Server.IsBound) 'automatic port selection preserves another listener'
+        }
+    } finally { $portBlocker.Stop() }
     Write-Host ('Host setup checks passed (' + $checks + ' assertions). Disposable private settings only.')
 } finally {
     if (Test-Path -LiteralPath $junction) { Remove-Item -LiteralPath $junction -Force }

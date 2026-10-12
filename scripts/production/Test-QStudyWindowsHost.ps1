@@ -24,6 +24,7 @@ $oldTestEndpoint = $env:QSTUDY_TEST_DOCKER_ENDPOINT
 $oldBuilder = $env:BUILDX_BUILDER
 $oldSelectedBuilder = $env:QSTUDY_TEST_BUILDX_SELECTED
 $oldBuildxConfig = $env:BUILDX_CONFIG
+$oldHttpMode = $env:QSTUDY_TEST_HOST_MODE
 $fixtureDeployment = Join-Path $fixture 'deployment'
 $fixtureScripts = Join-Path $fixture 'scripts\production'
 $manager = Join-Path $fixtureScripts 'Manage-QStudy.ps1'
@@ -91,7 +92,7 @@ function global:Start-Process {
     [IO.File]::WriteAllText((Join-Path $fixture 'scripts\QStudy.Install.ps1'), $installer.Replace('PYTHON_PATH', $escapedPython).Replace('DOCKER_PATH', $escapedDocker).Replace('BROWSER_LOG_PATH', $escapedBrowserLog))
     $fakeProgram = @'
 $callPath = Join-Path $PSScriptRoot 'docker-calls.jsonl'
-$inheritedSettings = @('QSTUDY_DOMAIN', 'ACME_EMAIL', 'PUBLIC_BASE_URL', 'SECRET_KEY', 'BFF_PROXY_SECRET', 'RECOVERY_DELIVERY') | Where-Object { [Environment]::GetEnvironmentVariable($_, 'Process') }
+    $inheritedSettings = @('QSTUDY_DOMAIN', 'ACME_EMAIL', 'PUBLIC_BASE_URL', 'SECRET_KEY', 'BFF_PROXY_SECRET', 'RECOVERY_DELIVERY', 'QSTUDY_HOST_MODE', 'QSTUDY_PUBLIC_IP', 'QSTUDY_HTTP_PORT', 'ALLOW_PUBLIC_HTTP') | Where-Object { [Environment]::GetEnvironmentVariable($_, 'Process') }
 [IO.File]::AppendAllText($callPath, (ConvertTo-Json -InputObject @{ arguments = [string[]]$args; inheritedProductionSettings = @($inheritedSettings).Count -gt 0; defaultBuilder = $env:BUILDX_BUILDER -eq 'default'; privateBuildxStore = $env:BUILDX_CONFIG -eq (Join-Path $PSScriptRoot '.local\buildx') } -Compress) + [Environment]::NewLine)
 $commandArgs = [string[]]$args
 if ($commandArgs[0] -eq '--host') { $commandArgs = $commandArgs[2..($commandArgs.Count - 1)] }
@@ -192,15 +193,33 @@ if ($commandArgs -contains 'up' -and $commandArgs -notcontains '--no-build') { $
     Assert-HostCheck ($result.code -eq 0) 'containers from the exact checkout are accepted'
     $env:QSTUDY_TEST_DOCKER_OWNER = ''
 
+    $result = Invoke-FixtureManager @('init-http', '-PublicIP', '8.8.8.8', '-Port', '19080')
+    Assert-HostCheck ($result.code -ne 0) 'HTTP initialization preserves a differently configured HTTPS installation'
+    Assert-HostCheck ([Convert]::ToBase64String($before) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($privateEnvironment))) 'refused HTTP reconfiguration never changes existing secrets'
+    Remove-Item -LiteralPath $privateEnvironment -Force
+    [IO.File]::WriteAllText((Join-Path $fixtureDeployment 'compose.http.yml'), 'name: qstudy')
+    $result = Invoke-FixtureManager @('init-http', '-PublicIP', '8.8.8.8', '-Port', '19080')
+    Assert-HostCheck ($result.code -eq 0 -and $result.output -match 'http://8.8.8.8:19080') 'HTTP IP initialization requires no domain or certificate email'
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('check', '-Offline')
+    $httpCalls = @(Read-DockerCalls | Where-Object { $_ -contains 'config' })
+    Assert-HostCheck ($result.code -eq 0 -and $httpCalls.Count -eq 1 -and $httpCalls[0] -contains (Join-Path $fixtureDeployment 'compose.http.yml')) 'validated HTTP mode selects only the HTTP Compose file'
+    [IO.File]::WriteAllBytes($privateEnvironment, $before)
+
     # Public probes in manager tests are synthetic. Never contact a domain,
     # launch an actual application, change a real account, or send mail.
     $fakeConfiguration = @'
 import json
+import os
 import sys
 from pathlib import Path
 with (Path(__file__).resolve().parents[2] / "configuration-calls.jsonl").open("a", encoding="utf-8") as call_log:
     call_log.write(json.dumps({"arguments": sys.argv[1:]}) + "\n")
-print(json.dumps({"status": "disposable", "public_url": "https://qstudy-ci.example.org"}))
+mode = os.environ.get("QSTUDY_TEST_HOST_MODE", "https")
+print(json.dumps({"status": "disposable", "host_mode": mode,
+    "compose_file": "compose.http.yml" if mode == "http" else "compose.yml",
+    "public_url": "http://8.8.8.8:19080" if mode == "http" else "https://qstudy-ci.example.org",
+    "public_port": 19080 if mode == "http" else 443}))
 '@
     [IO.File]::WriteAllText((Join-Path $fixtureScripts 'configure.py'), $fakeConfiguration)
     $env:PUBLIC_BASE_URL = 'http://127.0.0.1:3333'
@@ -349,6 +368,21 @@ print(json.dumps({"status": "disposable", "public_url": "https://qstudy-ci.examp
     $result = Invoke-FixtureManager @('BACKUP')
     Assert-HostCheck ($result.code -eq 0 -and @((Read-DockerCalls) | Where-Object { $_ -contains 'production_runtime.py' -and $_ -ccontains 'backup' }).Count -eq 1) 'Windows command names normalize before Python operational arguments'
 
+    $env:QSTUDY_TEST_HOST_MODE = 'http'
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('start', '-NoBrowser')
+    $httpCalls = @((Read-DockerCalls) | Where-Object { $_ -contains '--project-name' })
+    Assert-HostCheck ($result.code -eq 0) 'HTTP startup runs the production stack with synthetic public probe'
+    Assert-HostCheck (@($httpCalls | Where-Object { $_ -notcontains (Join-Path $fixtureDeployment 'compose.http.yml') }).Count -eq 0) 'every HTTP Compose operation uses its validated profile'
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('resume', '-Offline', '-NoBrowser')
+    Assert-HostCheck ($result.code -eq 0 -and @((Read-DockerCalls) | Where-Object { $_ -contains 'up' -and $_ -contains (Join-Path $fixtureDeployment 'compose.http.yml') }).Count -eq 1) 'HTTP sign-in resume keeps the selected IP/port profile'
+    $env:QSTUDY_TEST_HOST_MODE = 'untrusted'
+    Reset-DockerCalls
+    $result = Invoke-FixtureManager @('start', '-NoBrowser')
+    Assert-HostCheck ($result.code -ne 0 -and @(Read-DockerCalls).Count -eq 0) 'unsupported configuration mode fails before Docker contact'
+    $env:QSTUDY_TEST_HOST_MODE = ''
+
     $spec = Get-QStudyHostTaskSpec $fixture
     $ownedTask = [PSCustomObject]@{ Description = $spec.description; Principal = [PSCustomObject]@{ UserId = $spec.userSid }; Actions = @([PSCustomObject]@{ Execute = $spec.executable; Arguments = $spec.arguments }) }
     Assert-HostCheck (Test-QStudyHostTaskOwned $ownedTask $spec) 'owned sign-in task matches exact script and arguments'
@@ -389,6 +423,7 @@ print(json.dumps({"status": "disposable", "public_url": "https://qstudy-ci.examp
     $env:BUILDX_BUILDER = $oldBuilder
     $env:QSTUDY_TEST_BUILDX_SELECTED = $oldSelectedBuilder
     $env:BUILDX_CONFIG = $oldBuildxConfig
+    $env:QSTUDY_TEST_HOST_MODE = $oldHttpMode
     if (Test-Path -LiteralPath $junction) { Remove-Item -LiteralPath $junction -Force }
     $resolvedFixture = [IO.Path]::GetFullPath($fixture)
     $allowedPrefix = [IO.Path]::GetFullPath((Join-Path $workspace '.local\windows-host-tests')) + [IO.Path]::DirectorySeparatorChar

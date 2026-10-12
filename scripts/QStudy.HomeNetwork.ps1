@@ -12,7 +12,7 @@ function Get-QStudyIPv4Kind([string]$Value) {
     if ($b[0] -eq 127) { return 'loopback' }
     if ($b[0] -eq 169 -and $b[1] -eq 254) { return 'link_local' }
     if ($b[0] -eq 0 -or $b[0] -ge 224 -or
-        ($b[0] -eq 192 -and $b[1] -eq 0 -and $b[2] -in @(0, 2)) -or
+        ($b[0] -eq 192 -and $b[1] -eq 0 -and ($b[2] -eq 2 -or ($b[2] -eq 0 -and $b[3] -notin @(9, 10)))) -or
         ($b[0] -eq 192 -and $b[1] -eq 88 -and $b[2] -eq 99) -or
         ($b[0] -eq 198 -and $b[1] -in @(18, 19)) -or
         ($b[0] -eq 198 -and $b[1] -eq 51 -and $b[2] -eq 100) -or

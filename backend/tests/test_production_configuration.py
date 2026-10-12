@@ -76,6 +76,95 @@ class ProductionConfigurationTests(unittest.TestCase):
         with self.assertRaises(configuration.ConfigurationError):
             configuration.check(self.base, offline=True)
 
+    def test_http_initialization_needs_only_public_ipv4_and_port(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = configuration.initialize_http(self.base, "8.8.8.8")
+        values = configuration.read_environment(self.base / ".env")
+        self.assertEqual(result["status"], "created")
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(values["QSTUDY_HOST_MODE"], "http")
+        self.assertEqual(values["ALLOW_PUBLIC_HTTP"], "true")
+        self.assertEqual(values["PUBLIC_BASE_URL"], "http://8.8.8.8:8080")
+        self.assertEqual(values["REGISTRATION_ENABLED"], "false")
+        self.assertEqual(len(values["SECRET_KEY"]), 64)
+        self.assertNotEqual(values["SECRET_KEY"], values["BFF_PROXY_SECRET"])
+        with patch.object(configuration.socket, "getaddrinfo", side_effect=AssertionError("Literal IPv4 requires no DNS lookup")):
+            report = configuration.check(self.base)
+        self.assertEqual(report["host_mode"], "http")
+        self.assertEqual(report["compose_file"], "compose.http.yml")
+        self.assertEqual(report["public_port"], 8080)
+        self.assertEqual(report["public_ip"], "8.8.8.8")
+        self.assertFalse(report["dns_checked"])
+        # Placeholders satisfy base Compose interpolation; certificate/domain
+        # validation must not require real inputs for the HTTP service.
+        self.replace("QSTUDY_DOMAIN", "unused-placeholder")
+        self.replace("ACME_EMAIL", "unused-placeholder")
+        self.assertEqual(configuration.check(self.base, offline=True)["public_url"], "http://8.8.8.8:8080")
+
+    def test_http_reinitialization_preserves_secrets_and_refuses_host_changes(self):
+        configuration.initialize_http(self.base, "8.8.8.8", 8080)
+        self.replace("SMTP_PASSWORD", "PRIVATE_VALUE_WITH$LITERAL")
+        before = (self.base / ".env").read_bytes()
+        self.assertEqual(configuration.initialize_http(self.base, "8.8.8.8", "8080")["status"], "preserved")
+        self.assertEqual((self.base / ".env").read_bytes(), before)
+        for public_ip, port in (("9.9.9.9", 8080), ("8.8.8.8", 8081)):
+            with self.subTest(ip=public_ip, port=port), self.assertRaises(configuration.ConfigurationError):
+                configuration.initialize_http(self.base, public_ip, port)
+            self.assertEqual((self.base / ".env").read_bytes(), before)
+        with self.assertRaises(configuration.ConfigurationError):
+            configuration.initialize(self.base, "qstudy.example.org", "owner@example.org")
+        self.assertEqual((self.base / ".env").read_bytes(), before)
+
+    def test_http_init_cannot_overwrite_an_existing_https_installation(self):
+        self.initialize()
+        before = (self.base / ".env").read_bytes()
+        with self.assertRaises(configuration.ConfigurationError):
+            configuration.initialize_http(self.base, "8.8.8.8", 8080)
+        self.assertEqual((self.base / ".env").read_bytes(), before)
+
+    def test_http_rejects_nonpublic_noncanonical_addresses_and_invalid_ports(self):
+        for address in ("localhost", "https://8.8.8.8", "8.8.8.8:8080", "8.8.8.8/path", " 8.8.8.8",
+                        "008.8.8.8", "10.0.0.1", "127.0.0.1", "100.64.1.1", "192.0.2.1",
+                        "169.254.1.1", "192.88.99.2", "198.18.0.1", "224.0.0.1", "255.255.255.255", "2606:4700:4700::1111"):
+            with self.subTest(address=address), self.assertRaises(configuration.ConfigurationError):
+                configuration.initialize_http(self.base, address, 8080)
+        for port in (0, 65536, -1, True, "08080", "8080 ", "+8080", "8e3", "８０８０"):
+            with self.subTest(port=port), self.assertRaises(configuration.ConfigurationError):
+                configuration.initialize_http(self.base, "8.8.8.8", port)
+        self.assertFalse((self.base / ".env").exists())
+
+    def test_http_check_requires_explicit_opt_in_and_exact_origin(self):
+        configuration.initialize_http(self.base, "8.8.8.8", 8080)
+        original = configuration.read_environment(self.base / ".env")
+        invalid = (("ALLOW_PUBLIC_HTTP", "false"), ("QSTUDY_HOST_MODE", "automatic"),
+                   ("PUBLIC_BASE_URL", "http://8.8.8.8:8081"), ("PUBLIC_BASE_URL", "http://example.org:8080"),
+                   ("PUBLIC_BASE_URL", "http://user:secret@8.8.8.8:8080"), ("PUBLIC_BASE_URL", "http://8.8.8.8:8080/"),
+                   ("PUBLIC_BASE_URL", "http://8.8.8.8:8080/path"), ("QSTUDY_PUBLIC_IP", "10.0.0.1"),
+                   ("QSTUDY_HTTP_PORT", "65536"), ("QSTUDY_DOMAIN", ""), ("ACME_EMAIL", ""),
+                   ("RECOVERY_DELIVERY", "local"))
+        for key, value in invalid:
+            with self.subTest(key=key, value=value):
+                self.replace(key, value)
+                with self.assertRaises(configuration.ConfigurationError):
+                    configuration.check(self.base, offline=True)
+                self.replace(key, original[key])
+
+    def test_https_stays_default_and_cannot_silently_enable_http(self):
+        self.initialize()
+        report = configuration.check(self.base, offline=True)
+        self.assertEqual(report["host_mode"], "https")
+        self.assertEqual(report["compose_file"], "compose.yml")
+        self.assertEqual(report["public_port"], 443)
+        self.replace("ALLOW_PUBLIC_HTTP", "true")
+        with self.assertRaises(configuration.ConfigurationError):
+            configuration.check(self.base, offline=True)
+        # Existing HTTPS files from before host-mode support remain compatible.
+        path = self.base / ".env"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        path.write_text("\n".join(line for line in lines if not line.startswith(("QSTUDY_HOST_MODE=", "ALLOW_PUBLIC_HTTP="))) + "\n", encoding="utf-8")
+        self.assertEqual(configuration.check(self.base, offline=True)["host_mode"], "https")
+
     def test_recovery_requires_complete_smtp_and_never_uses_local_outbox(self):
         self.initialize()
         self.replace("RECOVERY_DELIVERY", "local")
@@ -155,6 +244,61 @@ class ProductionConfigurationTests(unittest.TestCase):
         self.assertTrue(all(call.kwargs == {"timeout": 25} for call in opener.open.call_args_list))
         health.read.assert_called_once_with(10_000)
         dns.assert_not_called()
+
+    def test_http_probe_checks_ip_port_without_hsts_or_external_access_claim(self):
+        configuration.initialize_http(self.base, "8.8.8.8", 80)
+        self.assertEqual(configuration.check(self.base, offline=True)["public_url"], "http://8.8.8.8:80")
+        opener = MagicMock()
+        # HTTP's default port may disappear when a URL is normalized.
+        opener.open.side_effect = [self.response("http://8.8.8.8/api/health", hsts=""),
+                                   self.response("http://8.8.8.8/", hsts="")]
+        with patch.object(configuration.urllib.request, "build_opener", return_value=opener):
+            report = configuration.probe(self.base)
+        self.assertEqual(report["status"], "public_http_verified")
+        self.assertEqual(report["host_mode"], "http")
+        self.assertTrue(report["verified_from_this_host"])
+        self.assertFalse(report["external_reachability_proven"])
+        self.assertEqual(report["public_url"], "http://8.8.8.8:80")
+
+    def test_http_probe_rejects_changed_scheme_ip_or_port(self):
+        configuration.initialize_http(self.base, "8.8.8.8", 8080)
+        for bad_url in ("http://8.8.8.8/api/health", "http://8.8.8.8:8081/api/health",
+                        "http://9.9.9.9:8080/api/health", "https://8.8.8.8:8080/api/health"):
+            with self.subTest(url=bad_url):
+                opener = MagicMock()
+                opener.open.return_value = self.response(bad_url, hsts="")
+                with patch.object(configuration.urllib.request, "build_opener", return_value=opener):
+                    with self.assertRaises(configuration.ConfigurationError):
+                        configuration.probe(self.base)
+                self.assertEqual(opener.open.call_count, 1)
+
+    def test_http_probe_refuses_redirect_before_contacting_another_address(self):
+        configuration.initialize_http(self.base, "8.8.8.8", 8080)
+        requested = []
+
+        class RedirectTransport(urllib.request.HTTPHandler):
+            def http_open(self, request):
+                requested.append(request.full_url)
+                headers = Message()
+                headers["Location"] = "http://9.9.9.9:8080/PRIVATE_VALUE"
+                response = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, 302)
+                response.msg = "Redirect"
+                return response
+
+        opener = urllib.request.build_opener(configuration.ProbeRedirectHandler(), RedirectTransport())
+        with patch.object(configuration.urllib.request, "build_opener", return_value=opener), patch.object(configuration.socket, "create_connection", side_effect=AssertionError("Tests must not open network connections")):
+            with self.assertRaises(configuration.ConfigurationError) as raised:
+                configuration.probe(self.base)
+        self.assertEqual(requested, ["http://8.8.8.8:8080/api/health"])
+        self.assertNotIn("PRIVATE_VALUE", str(raised.exception))
+
+    def test_cli_http_init_does_not_require_a_domain_or_email(self):
+        output = io.StringIO()
+        with patch.object(configuration.sys, "argv", ["configure.py", "init-http", "8.8.8.8", "8080"]), patch.object(configuration, "deployment_directory", return_value=self.base), contextlib.redirect_stdout(output):
+            self.assertEqual(configuration.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())["status"], "created")
+        self.assertNotIn("SECRET_KEY", output.getvalue())
+        self.assertEqual(configuration.check(self.base, offline=True)["public_url"], "http://8.8.8.8:8080")
 
     def test_probe_refuses_http_redirects_without_following_the_location(self):
         self.initialize()

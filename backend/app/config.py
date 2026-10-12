@@ -1,4 +1,4 @@
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path, PureWindowsPath
 from sqlalchemy.engine import make_url
@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     JOB_LEASE_SECONDS: int = Field(default=90, ge=15, le=600)
     JOB_TIMEOUT_SECONDS: int = Field(default=600, ge=30, le=1800)
     JOB_MAX_ATTEMPTS: int = Field(default=3, ge=1, le=5)
+    # Explicit opt-in for direct public IPv4 hosting; HTTPS remains the default.
+    ALLOW_PUBLIC_HTTP: bool = False
     PUBLIC_BASE_URL: str = "http://127.0.0.1:3000"
     RECOVERY_DELIVERY: Literal["auto", "smtp", "local", "disabled"] = "auto"
     PASSWORD_RESET_MINUTES: int = Field(default=30, ge=5, le=60)
@@ -62,18 +64,31 @@ class Settings(BaseSettings):
 
     @field_validator("PUBLIC_BASE_URL")
     @classmethod
-    def valid_site_origin(cls, value: str) -> str:
+    def valid_site_origin(cls, value: str, info: ValidationInfo) -> str:
         parsed = urlsplit(value)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ("", "/"):
+        if (any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
+                or parsed.scheme not in ("http", "https") or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or parsed.query or parsed.fragment or parsed.path not in ("", "/")):
             raise ValueError("PUBLIC_BASE_URL must be a site origin without a path or credentials")
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError("PUBLIC_BASE_URL port must be from 1 through 65535")
         if parsed.scheme == "http" and parsed.hostname != "localhost":
             try:
-                local = ipaddress.ip_address(parsed.hostname).is_private or ipaddress.ip_address(parsed.hostname).is_loopback
+                address = ipaddress.ip_address(parsed.hostname)
             except ValueError:
-                local = False
+                address = None
+            # Preserve development on actual local networks, without treating
+            # documentation/reserved addresses as private host addresses.
+            local_networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10")
+            local = address is not None and (address.is_loopback or any(address in ipaddress.ip_network(network) for network in local_networks))
             if not local:
-                raise ValueError("Public PUBLIC_BASE_URL requires HTTPS")
-        _ = parsed.port
+                public_ipv4 = (isinstance(address, ipaddress.IPv4Address) and str(address) == parsed.hostname
+                               and address.is_global and not address.is_multicast and not address.is_reserved
+                               and address not in ipaddress.IPv4Network("192.88.99.0/24"))
+                if (not info.data.get("ALLOW_PUBLIC_HTTP", False) or not public_ipv4
+                        or parsed.port is None or parsed.netloc != f"{address}:{parsed.port}"):
+                    raise ValueError("Public PUBLIC_BASE_URL requires HTTPS, or explicit ALLOW_PUBLIC_HTTP with a canonical public IPv4 and port")
         return value.rstrip("/")
 
     @field_validator("DATABASE_URL")
