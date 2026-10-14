@@ -6,8 +6,8 @@
 function Get-QStudyInternetObservedIP {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     try { $value = [string](Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 12).ip }
-    catch { throw 'Не удалось определить внешний IPv4. Проверьте интернет или укажите -PublicIP.' }
-    if ((Get-QStudyIPv4Kind $value) -ne 'public') { throw 'Внешний IPv4 не подходит для прямой публикации.' }
+    catch { throw 'QStudy: Не удалось определить внешний IPv4. Проверьте интернет и VPN, затем повторите эту же кнопку.' }
+    if ((Get-QStudyIPv4Kind $value) -ne 'public') { throw 'QStudy: Внешний IPv4 не подходит для прямой публикации.' }
     return $value
 }
 
@@ -15,13 +15,13 @@ function Get-QStudyInternetNetworkAction([string]$Root, [switch]$ManualRequested
     $path = Assert-QStudyHostPath $Root (Join-Path $Root '.local\public-access\state.json')
     $manualSaved = $false
     if (Test-Path -LiteralPath $path -PathType Leaf) {
-        if ((Get-Item -LiteralPath $path).Length -gt 65536) { throw 'Сохранённое состояние сети слишком большое; запуск остановлен.' }
+        if ((Get-Item -LiteralPath $path).Length -gt 65536) { throw 'QStudy: Сохранённое состояние сети слишком большое; запуск остановлен.' }
         try { $state = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json }
-        catch { throw 'Повреждено состояние сетевого доступа. Проверьте .local/public-access/state.json приватно.' }
+        catch { throw 'QStudy: Повреждено состояние сетевого доступа. Проверьте .local/public-access/state.json приватно.' }
         if ($state.version -ne 1 -or $state.owner -cne ('QStudy public access: ' + [IO.Path]::GetFullPath($Root)) -or
             $state.owner_sid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or $state.enabled -isnot [bool] -or
             $state.method -notin @('none', 'manual', 'direct', 'upnp', 'nat-pmp')) {
-            throw 'Сохранённая настройка сети принадлежит другой установке или Windows-пользователю; запуск остановлен.'
+            throw 'QStudy: Сохранённая настройка сети принадлежит другой установке или Windows-пользователю; запуск остановлен.'
         }
         $manualSaved = $state.enabled -and $state.method -ceq 'manual'
     }
@@ -36,12 +36,12 @@ function Ensure-QStudyInternetDocker([ValidateRange(10, 600)][int]$TimeoutSecond
         if (Test-Path -LiteralPath (Join-Path $bin 'docker.exe') -PathType Leaf) { $env:PATH = $bin + ';' + $env:PATH }
     }
     $command = Get-Command docker.exe -CommandType Application -ErrorAction SilentlyContinue
-    if ($null -eq $command) { throw 'Установите Docker Desktop для Windows: https://docs.docker.com/desktop/setup/install/windows-install/ . Завершите первичную настройку и повторите эту же кнопку.' }
-    if ($env:DOCKER_HOST -and -not (Test-QStudyLocalDockerEndpoint $env:DOCKER_HOST)) { throw 'Выбран удалённый Docker. Переключите Docker Desktop на локальные Linux-контейнеры; настройки других серверов не менялись.' }
+    if ($null -eq $command) { throw 'QStudy: Установите Docker Desktop для Windows: https://docs.docker.com/desktop/setup/install/windows-install/ . Завершите первичную настройку и повторите эту же кнопку.' }
+    if ($env:DOCKER_HOST -and -not (Test-QStudyLocalDockerEndpoint $env:DOCKER_HOST)) { throw 'QStudy: Выбран удалённый Docker. Переключите Docker Desktop на локальные Linux-контейнеры; настройки других серверов не менялись.' }
     $context = (Invoke-QStudyPublicPortDocker $command.Source @('context', 'show')).Trim()
     try { $endpoint = (Invoke-QStudyPublicPortDocker $command.Source @('context', 'inspect', '--format', '{{json .Endpoints.docker.Host}}', '--', $context)) | ConvertFrom-Json }
-    catch { throw 'Не удалось безопасно проверить выбранный Docker. Выберите локальный Docker Desktop.' }
-    if ($endpoint -isnot [string] -or -not (Test-QStudyLocalDockerEndpoint $endpoint)) { throw 'Выберите локальный Docker Desktop с Linux-контейнерами. Удалённый Docker не используется.' }
+    catch { throw 'QStudy: Не удалось безопасно проверить выбранный Docker. Выберите локальный Docker Desktop.' }
+    if ($endpoint -isnot [string] -or -not (Test-QStudyLocalDockerEndpoint $endpoint)) { throw 'QStudy: Выберите локальный Docker Desktop с Linux-контейнерами. Удалённый Docker не используется.' }
     if ($env:DOCKER_HOST -and -not $env:DOCKER_CONTEXT) { $endpoint = $env:DOCKER_HOST }
     $arguments = @('--host', $endpoint, 'info', '--format', '{{.OSType}}')
     try { $ready = (Invoke-QStudyPublicPortDocker $command.Source $arguments -Pinned).Trim() -ceq 'linux' }
@@ -55,17 +55,17 @@ function Ensure-QStudyInternetDocker([ValidateRange(10, 600)][int]$TimeoutSecond
         try { $engine = (Invoke-QStudyPublicPortDocker $command.Source $arguments -Pinned -TimeoutMs 3000).Trim() }
         catch { $engine = '' }
         if ($engine -ceq 'linux') { return }
-        if ($engine -ceq 'windows') { throw 'В Docker Desktop переключитесь на Linux containers и повторите кнопку запуска.' }
+        if ($engine -ceq 'windows') { throw 'QStudy: В Docker Desktop переключитесь на Linux containers и повторите кнопку запуска.' }
         Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'Docker Desktop не готов. Проверьте WSL 2, виртуализацию и сообщения Docker, затем повторите кнопку запуска.'
+    throw 'QStudy: Docker Desktop не готов. Проверьте WSL 2, виртуализацию и сообщения Docker, затем повторите кнопку запуска.'
 }
 
 function Get-QStudyInternetBuildFingerprint([string]$Root) {
     $paths = [Collections.Generic.List[string]]::new()
     foreach ($relative in @('backend\app', 'frontend\app', 'frontend\components', 'frontend\lib', 'frontend\public', 'frontend\types')) {
         $folder = Assert-QStudyHostPath $Root (Join-Path $Root $relative)
-        if (-not (Test-Path -LiteralPath $folder -PathType Container)) { throw 'Скопируйте проект полностью: не хватает исходников приложения.' }
+        if (-not (Test-Path -LiteralPath $folder -PathType Container)) { throw 'QStudy: Скопируйте проект полностью: не хватает исходников приложения.' }
         $queue = [Collections.Generic.Queue[string]]::new(); $queue.Enqueue($folder)
         while ($queue.Count) {
             $directory = Assert-QStudyHostPath $Root $queue.Dequeue()
@@ -96,13 +96,13 @@ function Get-QStudyInternetBuildFingerprint([string]$Root) {
 function Read-QStudyInternetReport([string]$Root, [ValidateSet('host-stack-status.json', 'host-account-status.json')][string]$Filename) {
     $path = Assert-QStudyHostPath $Root (Join-Path $Root ('.local\' + $Filename))
     try { $report = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json }
-    catch { throw 'Не удалось прочитать результат проверки контейнеров/аккаунтов. Публичный запуск остановлен.' }
+    catch { throw 'QStudy: Не удалось прочитать результат проверки контейнеров/аккаунтов. Публичный запуск остановлен.' }
     $checked = [DateTimeOffset]::MinValue
-    if (-not [DateTimeOffset]::TryParse([string]$report.checked_utc, [ref]$checked) -or [Math]::Abs(($checked - [DateTimeOffset]::UtcNow).TotalMinutes) -gt 2) { throw 'Результат проверки хоста устарел; повторите запуск.' }
+    if (-not [DateTimeOffset]::TryParse([string]$report.checked_utc, [ref]$checked) -or [Math]::Abs(($checked - [DateTimeOffset]::UtcNow).TotalMinutes) -gt 2) { throw 'QStudy: Результат проверки хоста устарел; повторите запуск.' }
     if ($Filename -eq 'host-account-status.json') {
-        if ($report.active_admin_exists -isnot [bool] -or $report.account_count -isnot [int] -or $report.account_count -lt 0) { throw 'Некорректный результат проверки аккаунтов; запуск остановлен.' }
+        if ($report.active_admin_exists -isnot [bool] -or $report.account_count -isnot [int] -or $report.account_count -lt 0) { throw 'QStudy: Некорректный результат проверки аккаунтов; запуск остановлен.' }
     } else {
-        foreach ($key in @('backend_running', 'frontend_running', 'caddy_running', 'images_ready')) { if ($report.$key -isnot [bool]) { throw 'Некорректный результат проверки контейнеров; запуск остановлен.' } }
+        foreach ($key in @('backend_running', 'frontend_running', 'caddy_running', 'images_ready')) { if ($report.$key -isnot [bool]) { throw 'QStudy: Некорректный результат проверки контейнеров; запуск остановлен.' } }
     }
     return $report
 }

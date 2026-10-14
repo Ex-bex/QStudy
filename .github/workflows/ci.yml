@@ -59,6 +59,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QStudyPublicPortOwner.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QStudyNetworkOperation.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QStudyNetworkGuide.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/production/Test-QStudyInternetConfiguration.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/production/Test-QStudyInternetDataChoice.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/production/Test-QStudyInternetLaunch.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Backend tests

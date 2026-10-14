@@ -24,7 +24,7 @@ function Invoke-FixtureLaunch {
     [IO.File]::WriteAllText($callLog, '', $encoding)
     [IO.File]::WriteAllText($promptLog, '', $encoding)
     if (-not $KeepInstallation) {
-        foreach ($relative in @('deployment\.env', '.local\internet-launch\build.json', '.local\public-access\state.json', '.local\host-stack-status.json', '.local\host-account-status.json', '.local\home-network-report.json', 'backend\studyhub.db', 'deployment\data\backend\studyhub.db', 'fixture-admin', 'fixture-caddy')) {
+        foreach ($relative in @('deployment\.env', '.local\internet-launch\build.json', '.local\internet-launch\last-run.json', '.local\internet-launch\router-instructions.txt', '.local\public-access\state.json', '.local\public-access\last-operation.json', '.local\host-stack-status.json', '.local\host-account-status.json', '.local\home-network-report.json', 'backend\studyhub.db', 'deployment\data\backend\studyhub.db', 'fixture-admin', 'fixture-caddy')) {
             $path = Join-Path $fixture $relative
             if (Test-Path -LiteralPath $path -PathType Leaf) { Remove-Item -LiteralPath $path -Force }
         }
@@ -54,24 +54,27 @@ function Assert-NoPublish($Calls, [string]$Message) {
 }
 
 try {
-    foreach ($relative in @('scripts\production', 'deployment\data\backend', '.local', 'backend\app', 'frontend\app', 'frontend\components', 'frontend\lib', 'frontend\public', 'frontend\types')) {
+    foreach ($relative in @('scripts\production', 'deployment\data\backend', 'deployment\data\backups', '.local', 'backend\app', 'frontend\app', 'frontend\components', 'frontend\lib', 'frontend\public', 'frontend\types')) {
         [IO.Directory]::CreateDirectory((Join-Path $fixture $relative)) | Out-Null
     }
-    foreach ($name in @('Start-QStudyInternet.ps1', 'QStudy.InternetLaunch.ps1', 'QStudy.HostSetup.ps1', 'QStudy.WindowsHost.ps1', 'QStudy.PublicPortOwner.ps1', 'QStudy.PublicAccess.ps1', 'QStudy.PortMapping.ps1')) {
+    foreach ($name in @('Start-QStudyInternet.ps1', 'QStudy.InternetLaunch.ps1', 'QStudy.InternetConfiguration.ps1', 'QStudy.InternetDataChoice.ps1', 'QStudy.NetworkGuide.ps1', 'QStudy.NetworkOperation.ps1', 'QStudy.HostSetup.ps1', 'QStudy.WindowsHost.ps1', 'QStudy.PublicPortOwner.ps1', 'QStudy.PublicAccess.ps1', 'QStudy.PortMapping.ps1')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $fixtureScripts
     }
     Copy-Item -LiteralPath (Join-Path $workspace 'scripts\QStudy.HomeNetwork.ps1') -Destination (Join-Path $fixture 'scripts')
     Copy-Item -LiteralPath (Join-Path $workspace 'deployment\.env.example') -Destination (Join-Path $fixture 'deployment')
     [IO.File]::WriteAllText((Join-Path $fixture 'frontend\app\fixture.ts'), 'disposable-source', $encoding)
     [IO.File]::WriteAllText((Join-Path $fixture 'deployment\compose.http.yml'), 'disposable-compose', $encoding)
+    [IO.File]::WriteAllText((Join-Path $fixture 'deployment\data\backups\qstudy-20261014-120000-abcdef01.zip'), 'disposable-backup-verified-by-fake-manager', $encoding)
+    [IO.File]::WriteAllText((Join-Path $fixture 'selected-backup.zip'), 'disposable-dialog-backup-verified-by-fake-manager', $encoding)
 
-    # Append only the three external/local-port discovery stubs. The real .env
+    # Replace external/local-port discovery only. The real .env
     # parser, path protections, reports, fingerprint and cache functions remain.
     $helperStubs = @'
 function Get-QStudyInternetObservedIP {
     $fixtureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
     [IO.File]::AppendAllText((Join-Path $fixtureRoot 'launch-calls.jsonl'), '{"source":"ipify","action":"detect","mocked":true}' + [Environment]::NewLine)
     if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'ip-detection-error') { throw 'Disposable external-IP detection failure.' }
+    if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'detected-ip-change') { return '8.8.8.8' }
     return '94.125.99.135'
 }
 function Get-QStudyAvailableHttpPort {
@@ -84,8 +87,34 @@ function Ensure-QStudyInternetDocker {
     [IO.File]::AppendAllText((Join-Path $fixtureRoot 'launch-calls.jsonl'), '{"source":"docker","action":"ready","mocked":true}' + [Environment]::NewLine)
     if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'docker-error') { throw 'Disposable Docker readiness failure.' }
 }
+function Get-QStudyPublicAccessRoute {
+    return [PSCustomObject]@{ client_ip = '192.168.1.10'; gateway = '192.168.1.1'; metric = 1 }
+}
 '@
     [IO.File]::AppendAllText((Join-Path $fixtureScripts 'QStudy.InternetLaunch.ps1'), [Environment]::NewLine + $helperStubs, $encoding)
+    $routeStub = @'
+function Get-QStudyPublicAccessRoute {
+    return [PSCustomObject]@{ client_ip = '192.168.1.10'; gateway = '192.168.1.1'; metric = 1 }
+}
+'@
+    [IO.File]::AppendAllText((Join-Path $fixtureScripts 'QStudy.PublicAccess.ps1'), [Environment]::NewLine + $routeStub, $encoding)
+    $ownerStub = @'
+function Assert-QStudyPublicPortOwner {
+    param([string]$Root, [int]$Port)
+    [IO.File]::AppendAllText((Join-Path $Root 'launch-calls.jsonl'), (ConvertTo-Json -InputObject @{ source = 'port-owner'; action = 'check'; port = $Port; mocked = $true } -Compress) + [Environment]::NewLine)
+    if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'port-occupied') { throw 'QStudy: disposable port occupied by another application.' }
+}
+'@
+    [IO.File]::AppendAllText((Join-Path $fixtureScripts 'QStudy.PublicPortOwner.ps1'), [Environment]::NewLine + $ownerStub, $encoding)
+    $dialogStub = @'
+function Select-QStudyInternetBackupFile {
+    $fixtureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+    [IO.File]::AppendAllText((Join-Path $fixtureRoot 'launch-calls.jsonl'), '{"source":"data-dialog","action":"select","mocked":true}' + [Environment]::NewLine)
+    if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'data-dialog-cancelled') { return '' }
+    return (Join-Path $fixtureRoot 'selected-backup.zip')
+}
+'@
+    [IO.File]::AppendAllText((Join-Path $fixtureScripts 'QStudy.InternetDataChoice.ps1'), [Environment]::NewLine + $dialogStub, $encoding)
 
     $fakeManager = @'
 param([string]$Action, [string]$PublicIP = '', [int]$Port = 0, [string]$Email = '', [string]$Archive = '', [switch]$Offline, [switch]$NoPublish, [switch]$NoBrowser)
@@ -105,9 +134,12 @@ if ($Action -eq 'init-http') {
     $text = $text.Replace("QSTUDY_HTTP_PORT='8080'", ("QSTUDY_HTTP_PORT='" + $Port + "'"))
     $text = $text.Replace("ALLOW_PUBLIC_HTTP='false'", "ALLOW_PUBLIC_HTTP='true'")
     $text = $text.Replace("PUBLIC_BASE_URL='https://qstudy.example.org'", ("PUBLIC_BASE_URL='http://" + $PublicIP + ':' + $Port + "'"))
+    $text = $text.Replace("SECRET_KEY=''", "SECRET_KEY='synthetic-private-secret-keep-exactly'")
+    $text = $text.Replace("SMTP_PASSWORD=''", "SMTP_PASSWORD='synthetic-smtp-secret-keep-exactly'")
     [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
 }
 if ($Action -eq 'check' -and $scenario -eq 'check-error') { Write-Host 'Disposable configuration check failure'; exit 1 }
+if ($Action -eq 'verify' -and $scenario -eq 'verify-error') { Write-Host 'Disposable backup verification failure'; exit 1 }
 if ($Action -eq 'stack-status') {
     $report = @{ checked_utc = [DateTime]::UtcNow.ToString('o'); backend_running = $true; frontend_running = $true; caddy_running = [bool](Test-Path -LiteralPath $caddy); images_ready = ($scenario -ne 'missing-images') }
     if ($scenario -eq 'stale-stack') { $report.checked_utc = [DateTime]::UtcNow.AddHours(-1).ToString('o') }
@@ -172,31 +204,64 @@ exit 0
     [IO.File]::WriteAllText((Join-Path $fixture 'scripts\Test-QStudyHomeNetwork.ps1'), $fakeNetwork, $encoding)
 
     $fakePublicAccess = @'
-param([string]$Action, [switch]$NoPause)
+param([string]$Action, [switch]$NoPause, [switch]$RouterCleanupConfirmed)
+. (Join-Path $PSScriptRoot 'QStudy.WindowsHost.ps1')
+. (Join-Path $PSScriptRoot 'QStudy.NetworkOperation.ps1')
 $fixtureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Initialize-QStudyNetworkOperationStore $fixtureRoot $userSid
 [IO.File]::AppendAllText((Join-Path $fixtureRoot 'launch-calls.jsonl'), (ConvertTo-Json -InputObject @{ source = 'public-access'; action = $Action; noPause = [bool]$NoPause } -Compress) + [Environment]::NewLine)
-if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'port-mapping-unsupported') { Write-Host 'Disposable router requires manual forwarding'; exit 2 }
-if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'public-access-error') { Write-Host 'Disposable public access failure'; exit 1 }
+$scenario = $env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO
+if ($scenario -eq 'public-access-error') {
+    Save-QStudyNetworkOperation -Root $fixtureRoot -Action $Action -Code 1 -Message 'QStudy: disposable public access failure.' -TargetUserSid $userSid
+    Write-Host 'Disposable public access failure'; exit 1
+}
 $text = [IO.File]::ReadAllText((Join-Path $fixtureRoot 'deployment\.env'))
 $public = [regex]::Match($text, "(?m)^QSTUDY_PUBLIC_IP='([^']*)'").Groups[1].Value
 $port = [int][regex]::Match($text, "(?m)^QSTUDY_HTTP_PORT='([^']*)'").Groups[1].Value
-$state = @{ version = 1; owner = ('QStudy public access: ' + $fixtureRoot); owner_sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; enabled = $true; public_ip = $public; port = $port; client_ip = '192.168.1.10'; gateway = '192.168.1.1'; method = $(if ($Action -eq 'manual') { 'manual' } else { 'upnp' }); record = $null; status = 'configured'; checked_utc = [DateTime]::UtcNow.ToString('o'); external_reachability_proven = $false }
+$state = @{ version = 1; owner = ('QStudy public access: ' + $fixtureRoot); owner_sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; enabled = $true; public_ip = $public; public_url = ('http://' + $public + ':' + $port); port = $port; client_ip = '192.168.1.10'; gateway = '192.168.1.1'; method = $(if ($Action -eq 'manual') { 'manual' } else { 'upnp' }); record = $null; status = 'mapping_configured'; checked_utc = [DateTime]::UtcNow.ToString('o'); external_reachability_proven = $false; mapping_status = 'ready'; provider_action_required = $false; router_public_ip = $public }
+$code = 0
+if ($Action -eq 'disable') {
+    $state.enabled = $false; $state.method = 'none'; $state.status = 'disabled'
+    if ($scenario -in @('cleanup-cancelled', 'cleanup-confirmed') -and -not $RouterCleanupConfirmed) {
+        $state.method = 'upnp'; $state.status = 'router_cleanup_pending'; $state.record = @{ method = 'upnp'; marker = 'original-fixture-rule' }; $code = 2
+    }
+} elseif ($Action -eq 'enable' -and $scenario -in @('port-mapping-unsupported', 'port-mapping-manual-confirmed', 'port-mapping-conflict', 'port-mapping-conflict-confirmed', 'port-mapping-conflict-enter', 'router-wan-private')) {
+    $state.method = 'none'; $state.status = 'manual_required'; $state.mapping_status = 'unsupported'; $code = 2
+    if ($scenario -in @('port-mapping-conflict', 'port-mapping-conflict-confirmed', 'port-mapping-conflict-enter')) { $state.mapping_status = 'conflict' }
+    if ($scenario -eq 'router-wan-private') { $state.status = 'provider_action_required'; $state.mapping_status = 'wan_mismatch'; $state.provider_action_required = $true; $state.router_public_ip = '100.64.1.1' }
+} elseif ($Action -eq 'manual') { $state.status = 'manual_forwarding_selected' }
 $directory = Join-Path $fixtureRoot '.local\public-access'
 [IO.Directory]::CreateDirectory($directory) | Out-Null
 [IO.File]::WriteAllText((Join-Path $directory 'state.json'), ($state | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
-exit 0
+Save-QStudyNetworkOperation -Root $fixtureRoot -Action $Action -Code $code -Message 'QStudy: disposable network operation report.' -TargetUserSid $userSid
+exit $code
 '@
     [IO.File]::WriteAllText((Join-Path $fixtureScripts 'Manage-QStudyPublicAccess.ps1'), $fakePublicAccess, $encoding)
 
     $wrapperProgram = @'
 param([string]$PublicIP = '', [int]$Port = 0, [string]$RouterWanIPv4 = '', [string]$AdminEmail = '', [string]$Archive = '', [switch]$ManualForwarding, [switch]$NewInstallation, [switch]$Rebuild, [switch]$EnableAutostart, [switch]$NoBrowser, [switch]$NoPause)
 $fixtureRoot = $PSScriptRoot
+function global:Start-Process {
+    param([string]$FilePath, [object]$ArgumentList, [string]$WindowStyle, [switch]$PassThru, [switch]$Wait, [object]$ErrorAction)
+    [IO.File]::AppendAllText((Join-Path $fixtureRoot 'launch-calls.jsonl'), (ConvertTo-Json -InputObject @{ source = 'browser'; action = 'open'; target = $FilePath; mocked = $true } -Compress) + [Environment]::NewLine)
+}
 function global:Read-Host {
     param([string]$Prompt, [switch]$AsSecureString)
     [IO.File]::AppendAllText((Join-Path $fixtureRoot 'launch-prompts.txt'), $Prompt + [Environment]::NewLine)
     if ($Prompt -like 'Email нового первого администратора*') {
         if ($env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO -eq 'admin-email-cancelled') { return '' }
         return 'first-admin@example.org'
+    }
+    $scenario = $env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO
+    if ($Prompt -match '0|1|2|Enter|проброс|правил|копи|данн|архив') {
+        if ($scenario -eq 'data-new-isolated') { return '2' }
+        if ($scenario -in @('data-archive', 'data-dialog-cancelled')) { return '1' }
+        if ($scenario -eq 'port-mapping-manual-confirmed') { return '' }
+        if ($scenario -eq 'port-mapping-conflict-confirmed') { return '1' }
+        if ($scenario -eq 'port-mapping-conflict-enter') { return '' }
+        if ($scenario -eq 'cleanup-confirmed') { return '' }
+        return '0'
     }
     throw 'Unexpected interactive prompt in a disposable Internet launcher test.'
 }
@@ -212,10 +277,10 @@ exit $launcherExitCode
     $calls = @(Read-LaunchCalls)
     Assert-Launch ($result.code -eq 0) ('fresh automatic launch succeeds: ' + $result.output)
     Assert-Launch ((Get-LaunchManagerActions $calls) -ceq 'init-http,check,stack-status,prepare,account-status,first-admin,account-status,launch,install-autostart') 'fresh installation initializes, prepares and creates only the first administrator before launch/autostart'
-    Assert-Launch ((Get-LaunchActions $calls) -ceq 'manager:init-http,docker:ready,manager:check,manager:stack-status,manager:prepare,manager:account-status,manager:first-admin,manager:account-status,network:check,public-access:enable,manager:launch,manager:install-autostart') 'account and network gates precede every public launch and scheduled task'
-    Assert-Launch (@($calls | Where-Object source -eq 'ipify').Count -eq 1 -and @($calls | Where-Object source -eq 'port').Count -eq 1) 'fresh launch uses mocked automatic IPv4 and free port discovery once'
+    Assert-Launch ((Get-LaunchActions $calls) -ceq 'docker:ready,manager:init-http,manager:check,manager:stack-status,manager:prepare,manager:account-status,manager:first-admin,manager:account-status,network:check,public-access:enable,manager:launch,manager:install-autostart') 'engine, account and network gates precede every public launch and scheduled task'
+    Assert-Launch (@($calls | Where-Object source -eq 'ipify').Count -eq 1 -and @($calls | Where-Object source -eq 'port').Count -eq 0) 'fresh launch discovers IPv4 once and keeps fixed 8080 without selecting another port'
     $initialized = @($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'init-http' })[0]
-    Assert-Launch ($initialized.publicIP -ceq '94.125.99.135' -and $initialized.port -eq 8080) 'automatic IP and free port reach the initializer'
+    Assert-Launch ($initialized.publicIP -ceq '94.125.99.135' -and $initialized.port -eq 8080) 'automatic IP and fixed requested 8080 reach the initializer'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'network' -and $_.httpPort -eq 8080 -and $_.noPause }).Count -eq 1) 'network diagnostic receives the saved port without pausing'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'check' -and $_.offline }).Count -eq 1) 'offline configuration validation precedes stack work'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'launch' -and $_.noBrowser }).Count -eq 1) 'NoBrowser reaches the real launch contract'
@@ -223,15 +288,44 @@ exit $launcherExitCode
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'first-admin' -and $_.email -ceq 'first-admin@example.org' }).Count -eq 1) 'first-admin receives the chosen email'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'wrapper' -and $_.returnedAfterNestedExit -and $_.code -eq 0 }).Count -eq 1) 'nested launcher exits return to the fixture wrapper'
     Assert-Launch ($result.output -match 'http://94.125.99.135:8080' -and $result.output -match 'выключенным Wi-Fi') 'completion displays the configured URL and requires an independent Internet check'
+    $runPath = Join-Path $fixture '.local\internet-launch\last-run.json'
+    $run = [IO.File]::ReadAllText($runPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Launch ($run.version -eq 1 -and $run.status -ceq 'complete' -and $run.public_url -ceq 'http://94.125.99.135:8080' -and -not $run.external_reachability_proven) 'successful run saves exact origin without claiming external reachability'
+    Assert-Launch ((Get-Acl -LiteralPath $runPath).AreAccessRulesProtected) 'saved launcher outcome uses private Windows ACL'
+    Assert-Launch ([IO.File]::ReadAllText($runPath) -notmatch 'synthetic-private-secret|synthetic-smtp-secret') 'saved launcher outcome contains no credentials'
 
     $savedEnvironment = [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env'))
     $result = Invoke-FixtureLaunch -KeepInstallation
     $calls = @(Read-LaunchCalls)
     Assert-Launch ($result.code -eq 0) ('unchanged repeat succeeds: ' + $result.output)
     Assert-Launch ((Get-LaunchManagerActions $calls) -ceq 'check,stack-status,resume-private,account-status,launch') 'unchanged repeat skips initialization and rebuilding'
-    Assert-Launch (@($calls | Where-Object { $_.source -in @('ipify', 'port') }).Count -eq 0) 'saved installation never rediscovers a replacement IP/port'
+    Assert-Launch (@($calls | Where-Object source -eq 'ipify').Count -eq 1 -and @($calls | Where-Object source -eq 'port').Count -eq 0) 'repeat redetects IPv4 without assigning a different port'
     Assert-Launch ([IO.File]::ReadAllText($promptLog).Length -eq 0 -and @($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'first-admin' }).Count -eq 0) 'repeat preserves the first administrator without requesting or resetting a password'
     Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env')) -ceq $savedEnvironment) 'repeat leaves saved configuration byte-for-byte unchanged'
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'port-owner' -and $_.port -eq 8080 }).Count -ge 1) 'repeat verifies ownership of the same public port'
+
+    $result = Invoke-FixtureLaunch -KeepInstallation -Scenario 'detected-ip-change'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0) ('changed detected IPv4 is refreshed without commands: ' + $result.output)
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'disable' }).Count -eq 1) 'changed IPv4 first disables the owned old network setup'
+    Assert-Launch ((Get-LaunchActions $calls).IndexOf('public-access:disable') -lt (Get-LaunchActions $calls).IndexOf('public-access:enable')) 'old forwarding cleanup precedes new forwarding'
+    $updated = [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env'))
+    Assert-Launch ($updated.Contains("QSTUDY_PUBLIC_IP='8.8.8.8'") -and $updated.Contains("QSTUDY_HTTP_PORT='8080'") -and $updated.Contains("PUBLIC_BASE_URL='http://8.8.8.8:8080'")) 'all three origin settings follow the actual detected IPv4'
+    Assert-Launch ($updated.Contains("SECRET_KEY='synthetic-private-secret-keep-exactly'") -and $updated.Contains("SMTP_PASSWORD='synthetic-smtp-secret-keep-exactly'")) 'address refresh preserves passwords and signing secrets'
+    Assert-Launch ($result.output -notmatch 'synthetic-private-secret|synthetic-smtp-secret') 'address refresh does not print credentials'
+    Assert-Launch ([IO.File]::ReadAllText($promptLog).Length -eq 0) 'address-only refresh asks for no IP, port, email or password'
+
+    $result = Invoke-FixtureLaunch -Arguments @('-PublicIP', '8.8.8.8')
+    Assert-Launch ($result.code -eq 0) 'create old owned state before already-correct environment repair test'
+    $alreadyCorrect = [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env'))
+    $alreadyCorrect = $alreadyCorrect.Replace("QSTUDY_PUBLIC_IP='8.8.8.8'", "QSTUDY_PUBLIC_IP='94.125.99.135'").Replace("PUBLIC_BASE_URL='http://8.8.8.8:8080'", "PUBLIC_BASE_URL='http://94.125.99.135:8080'")
+    [IO.File]::WriteAllText((Join-Path $fixture 'deployment\.env'), $alreadyCorrect, [Text.UTF8Encoding]::new($false))
+    $result = Invoke-FixtureLaunch -KeepInstallation
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0) ('stale state cleans up even when env already points at detectedIP: ' + $result.output)
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'disable' }).Count -eq 1 -and @($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'enable' }).Count -eq 1) 'state address mismatch independently triggers old ownership cleanup'
+    Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env')) -ceq $alreadyCorrect) 'already correct environment remains byte-for-byte unchanged while stale mapping is cleaned'
+    Assert-Launch ($result.output -notmatch 'synthetic-private-secret|synthetic-smtp-secret') 'stale mapping cleanup reveals no credentials'
 
     $result = Invoke-FixtureLaunch -Arguments @('-PublicIP', '94.125.99.135', '-Port', '3000', '-RouterWanIPv4', '94.125.99.135', '-ManualForwarding')
     $calls = @(Read-LaunchCalls)
@@ -243,6 +337,16 @@ exit $launcherExitCode
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'install-autostart' }).Count -eq 0) 'autostart is opt-in'
 
     $statePath = Join-Path $fixture '.local\public-access\state.json'
+    $result = Invoke-FixtureLaunch -KeepInstallation -Arguments @('-Port', '3000')
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0 -and @($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'manual' }).Count -eq 1) 'explicit same port can reuse the enabled manual setup'
+    $result = Invoke-FixtureLaunch -KeepInstallation
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0) ('old 3000 installation automatically follows requested 8080: ' + $result.output)
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'disable' }).Count -eq 1) 'old 3000 forwarding is disabled before switching port'
+    Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env')).Contains("QSTUDY_HTTP_PORT='8080'") -and $result.output -match 'http://94.125.99.135:8080') 'default double click fixes earlier port3000 settings to8080'
+    $result = Invoke-FixtureLaunch -KeepInstallation -Arguments @('-ManualForwarding')
+    Assert-Launch ($result.code -eq 0) 'select existing manually configured8080 forwarding for repeat tests'
     $savedManualState = [IO.File]::ReadAllText($statePath)
     Assert-Launch (($savedManualState | ConvertFrom-Json).method -ceq 'manual') 'manual configuration saves its selected forwarding method'
     $result = Invoke-FixtureLaunch -KeepInstallation
@@ -275,24 +379,24 @@ exit $launcherExitCode
     [IO.File]::WriteAllText($statePath, $savedManualState, $encoding)
 
     $savedEnvironment = [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env'))
-    foreach ($arguments in @(@('-PublicIP', '8.8.8.8'), @('-Port', '8080'))) {
+    foreach ($arguments in @(@('-PublicIP', '8.8.8.8'), @('-Port', '3000'))) {
         $result = Invoke-FixtureLaunch -KeepInstallation -Arguments $arguments
         $calls = @(Read-LaunchCalls)
-        Assert-Launch ($result.code -ne 0 -and $result.output -match 'IP/порт не заменены') 'conflicting explicit IP or port is rejected without overwriting the installation'
-        Assert-Launch ((Get-LaunchManagerActions $calls) -ceq '' -and @($calls | Where-Object source -eq 'docker').Count -eq 0) 'address replacement is rejected before Docker/manager actions'
+        Assert-Launch ($result.code -ne 0 -and $result.output -match 'явные параметры не совпадают') 'conflicting explicit IP or port is rejected without overwriting the installation'
+        Assert-Launch ((Get-LaunchManagerActions $calls) -ceq '') 'conflicting explicit address is rejected before configuration or manager mutations'
         Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env')) -ceq $savedEnvironment) 'conflicting IP/port cannot change saved values'
     }
     $httpsEnvironment = $savedEnvironment.Replace("QSTUDY_HOST_MODE='http'", "QSTUDY_HOST_MODE='https'")
     [IO.File]::WriteAllText((Join-Path $fixture 'deployment\.env'), $httpsEnvironment, $encoding)
     $result = Invoke-FixtureLaunch -KeepInstallation
     $calls = @(Read-LaunchCalls)
-    Assert-Launch ($result.code -ne 0 -and $result.output -match 'Сохранён HTTPS') 'HTTP button refuses a saved HTTPS configuration'
+    Assert-Launch ($result.code -ne 0 -and $result.output -match 'сохранена установка HTTPS') 'HTTP button refuses a saved HTTPS configuration'
     Assert-Launch ((Get-LaunchManagerActions $calls) -ceq '' -and [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env')) -ceq $httpsEnvironment) 'HTTPS configuration and host are untouched'
 
     $result = Invoke-FixtureLaunch -LegacyDatabase
     $calls = @(Read-LaunchCalls)
-    Assert-Launch ($result.code -ne 0 -and $result.output -match 'Обнаружена база локального режима') 'copied local data blocks creation of an unrelated empty production installation'
-    Assert-Launch ((Get-LaunchManagerActions $calls) -ceq 'init-http' -and @($calls | Where-Object source -eq 'docker').Count -eq 0) 'legacy database guard runs before Docker/preparation'
+    Assert-Launch ($result.code -ne 0 -and [IO.File]::ReadAllText($promptLog) -match '0|1|2') 'copied local data offers a command-free choice and cancellation blocks empty production'
+    Assert-Launch ((Get-LaunchManagerActions $calls) -ceq '' -and @($calls | Where-Object source -eq 'docker').Count -eq 0) 'legacy data cancellation runs before initialization, Docker or preparation'
     Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'backend\studyhub.db')) -ceq 'disposable-local-accounts' -and -not (Test-Path -LiteralPath (Join-Path $fixture 'deployment\data\backend\studyhub.db'))) 'legacy guard preserves original accounts and avoids an empty production database'
 
     $result = Invoke-FixtureLaunch -LegacyDatabase -Arguments @('-NewInstallation')
@@ -300,13 +404,28 @@ exit $launcherExitCode
     Assert-Launch ($result.code -eq 0 -and (Get-LaunchManagerActions $calls) -match 'prepare,account-status,launch') 'NewInstallation explicitly permits a separate production installation'
     Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'backend\studyhub.db')) -ceq 'disposable-local-accounts') 'NewInstallation never deletes or modifies copied local data'
 
-    $result = Invoke-FixtureLaunch -LegacyDatabase -WithoutAdmin -Arguments @('-Archive', 'qstudy-fixture.zip')
+    $result = Invoke-FixtureLaunch -LegacyDatabase -Scenario 'data-new-isolated'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0 -and (Get-LaunchManagerActions $calls) -match 'prepare,account-status,launch') 'numeric option2 selects isolated new installation with no command flags'
+    Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'backend\studyhub.db')) -ceq 'disposable-local-accounts') 'numeric isolated setup preserves local database'
+    $result = Invoke-FixtureLaunch -LegacyDatabase -WithoutAdmin -Scenario 'data-archive'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0) ('numeric archive dialog migration succeeds: ' + $result.output)
+    Assert-Launch (@($calls | Where-Object source -eq 'data-dialog').Count -eq 1 -and (Get-LaunchManagerActions $calls) -match 'verify,restore,account-status,launch') 'numeric option1 selects a file, verifies and restores before launch'
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'restore' -and $_.noPublish -and $_.archive -match '^qstudy-[a-zA-Z0-9-]+\.zip$' }).Count -eq 1) 'selected external archive is imported under safe basename and privately restored'
+    Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'backend\studyhub.db')) -ceq 'disposable-local-accounts') 'dialog import leaves local accounts untouched'
+    $result = Invoke-FixtureLaunch -LegacyDatabase -Scenario 'data-dialog-cancelled'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -ne 0 -and @($calls | Where-Object source -eq 'data-dialog').Count -eq 1) 'cancelled backup dialog stops publication without requiring command arguments'
+    Assert-NoPublish $calls 'cancelled data dialog cannot publish'
+
+    $result = Invoke-FixtureLaunch -LegacyDatabase -WithoutAdmin -Arguments @('-Archive', 'qstudy-20261014-120000-abcdef01.zip')
     $calls = @(Read-LaunchCalls)
     Assert-Launch ($result.code -eq 0) ('valid archive migration succeeds: ' + $result.output)
-    Assert-Launch ((Get-LaunchManagerActions $calls) -ceq 'init-http,check,stack-status,prepare,restore,account-status,launch') 'archive is restored after private preparation and before account checks/publication'
-    Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'restore' -and $_.archive -ceq 'qstudy-fixture.zip' -and $_.noPublish }).Count -eq 1) 'archive restore explicitly uses NoPublish'
+    Assert-Launch ((Get-LaunchManagerActions $calls) -ceq 'init-http,check,stack-status,prepare,verify,restore,account-status,launch') 'archive is verified/restored after private preparation and before account checks/publication'
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'restore' -and $_.archive -ceq 'qstudy-20261014-120000-abcdef01.zip' -and $_.noPublish }).Count -eq 1) 'archive restore explicitly uses NoPublish'
     Assert-Launch ([IO.File]::ReadAllText($promptLog).Length -eq 0 -and [IO.File]::ReadAllText((Join-Path $fixture 'fixture-admin')) -ceq 'restored-admin') 'restored administrator is preserved without first-admin prompts'
-    foreach ($arguments in @(@('-Archive', '..\outside.zip'), @('-Archive', 'C:\outside.zip'), @('-Archive', '-archive.zip'), @('-Archive', 'qstudy-fixture.zip', '-NewInstallation'))) {
+    foreach ($arguments in @(@('-Archive', '..\outside.zip'), @('-Archive', 'C:\outside.zip'), @('-Archive', '-archive.zip'), @('-Archive', 'qstudy-20261014-120000-abcdef01.zip', '-NewInstallation'))) {
         $result = Invoke-FixtureLaunch -Arguments $arguments
         $calls = @(Read-LaunchCalls)
         Assert-Launch ($result.code -ne 0) ('invalid/traversing/conflicting archive is rejected: ' + ($arguments -join ' '))
@@ -338,21 +457,58 @@ exit $launcherExitCode
         Assert-Launch ($result.code -eq 0 -and (Get-LaunchManagerActions $calls) -match 'stop,prepare') ($variant + ' cache cannot skip the build on a copied/different host')
     }
 
-    foreach ($scenario in @('docker-error', 'check-error', 'prepare-error', 'restore-error', 'stale-stack', 'invalid-stack', 'stale-account', 'invalid-account', 'negative-account-count', 'network-error', 'cgnat', 'private-wan', 'invalid-wan', 'wan-mismatch', 'ip-mismatch', 'external-unavailable', 'stale-network', 'offline-network', 'port-mapping-unsupported', 'public-access-error')) {
+    foreach ($scenario in @('docker-error', 'check-error', 'prepare-error', 'verify-error', 'restore-error', 'stale-stack', 'invalid-stack', 'stale-account', 'invalid-account', 'negative-account-count', 'network-error', 'cgnat', 'private-wan', 'invalid-wan', 'wan-mismatch', 'ip-mismatch', 'external-unavailable', 'stale-network', 'offline-network', 'port-mapping-unsupported', 'port-mapping-conflict', 'port-mapping-conflict-enter', 'router-wan-private', 'public-access-error', 'port-occupied')) {
         $arguments = @('-EnableAutostart')
-        if ($scenario -eq 'restore-error') { $arguments += @('-Archive', 'qstudy-fixture.zip') }
+        if ($scenario -in @('verify-error', 'restore-error')) { $arguments += @('-Archive', 'qstudy-20261014-120000-abcdef01.zip') }
         $result = Invoke-FixtureLaunch -Arguments $arguments -Scenario $scenario
         $calls = @(Read-LaunchCalls)
         Assert-Launch ($result.code -ne 0) ($scenario + ' propagates a failed launch')
         Assert-NoPublish $calls ($scenario + ' cannot publish or install autostart')
         Assert-Launch ($result.output -notmatch 'QStudy работает на хосте') ($scenario + ' cannot print startup success')
-        if ($scenario -in @('docker-error', 'check-error', 'prepare-error', 'restore-error', 'stale-stack', 'invalid-stack', 'stale-account', 'invalid-account', 'negative-account-count', 'network-error', 'cgnat', 'private-wan', 'invalid-wan', 'wan-mismatch', 'ip-mismatch', 'external-unavailable', 'stale-network', 'offline-network')) {
+        $run = [IO.File]::ReadAllText((Join-Path $fixture '.local\internet-launch\last-run.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
+        Assert-Launch ($run.status -ceq 'failed' -and [string]$run.stage -and -not $run.external_reachability_proven) ($scenario + ' saves a meaningful failed-stage report')
+        Assert-Launch (($run | ConvertTo-Json -Compress) -notmatch 'synthetic-private-secret|synthetic-smtp-secret') ($scenario + ' report never includes private settings')
+        if ($scenario -in @('docker-error', 'check-error', 'prepare-error', 'verify-error', 'restore-error', 'stale-stack', 'invalid-stack', 'stale-account', 'invalid-account', 'negative-account-count', 'network-error', 'cgnat', 'private-wan', 'invalid-wan', 'wan-mismatch', 'ip-mismatch', 'external-unavailable', 'stale-network', 'offline-network', 'port-occupied')) {
             Assert-Launch (@($calls | Where-Object source -eq 'public-access').Count -eq 0) ($scenario + ' cannot change firewall/router forwarding')
         }
-        if ($scenario -eq 'docker-error') { Assert-Launch ((Get-LaunchManagerActions $calls) -ceq 'init-http') 'Docker failure performs no later manager actions' }
+        if ($scenario -eq 'docker-error') { Assert-Launch ((Get-LaunchManagerActions $calls) -ceq '') 'Docker failure performs no initialization or later manager actions' }
         if ($scenario -eq 'prepare-error') { Assert-Launch (-not (Test-Path -LiteralPath (Join-Path $fixture '.local\internet-launch\build.json'))) 'failed preparation never marks source as successfully built' }
-        if ($scenario -eq 'port-mapping-unsupported') { Assert-Launch ($result.output -match 'ManualForwarding' -and $result.output -match 'TCP 8080') 'unsupported router reports the exact manual fallback command and port' }
+        if ($scenario -eq 'verify-error') { Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'restore' }).Count -eq 0) 'invalid archive is never restored' }
+        if ($scenario -eq 'port-occupied') { Assert-Launch (@($calls | Where-Object source -eq 'port').Count -eq 0 -and (Get-LaunchManagerActions $calls) -ceq '') 'busy8080 never selects another port or initializes an unrelated configuration' }
+        if ($scenario -eq 'port-mapping-unsupported') {
+            Assert-Launch ($result.output -notmatch '\-ManualForwarding' -and $result.output -match '8080' -and $result.output -match '192.168.1.10') 'unsupported router shows actual TCP target and no fallback command'
+            $guide = [IO.File]::ReadAllText((Join-Path $fixture '.local\internet-launch\router-instructions.txt'))
+            Assert-Launch ($guide.Contains('External / WAN port: 8080') -and $guide.Contains('Server IP: 192.168.1.10') -and $guide.Contains('http://192.168.1.1')) 'manual guide persists exact external/internal port and router address'
+        }
+        if ($scenario -in @('router-wan-private', 'port-mapping-conflict', 'port-mapping-conflict-enter')) { Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'manual' }).Count -eq 0) 'known WAN/conflict cannot be bypassed as manual success without deliberate proof of own rule' }
     }
+
+    $result = Invoke-FixtureLaunch -Scenario 'port-mapping-manual-confirmed'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0) ('manual rule Enter-confirmation continues in same window: ' + $result.output)
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'enable' }).Count -eq 1 -and @($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'manual' }).Count -eq 1) 'unavailable automatic mapping transitions to deliberate manual action once'
+    Assert-Launch ([IO.File]::ReadAllText($promptLog) -match 'Enter|0') 'manual transition needs only Enter after router instructions'
+    $result = Invoke-FixtureLaunch -KeepInstallation
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0 -and @($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'manual' }).Count -eq 1) 'next double-click retains manually confirmed forwarding without flags'
+    Assert-Launch ([IO.File]::ReadAllText($promptLog).Length -eq 0) 'saved manual forwarding adds no repeat prompt'
+    $result = Invoke-FixtureLaunch -Scenario 'port-mapping-conflict-confirmed'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0) ('own existing forwarding rule can be deliberately confirmed with1: ' + $result.output)
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'manual' }).Count -eq 1 -and [IO.File]::ReadAllText($promptLog) -match '1') 'only explicit numeric ownership confirmation permits readonly manual mode'
+
+    $result = Invoke-FixtureLaunch -Arguments @('-PublicIP', '8.8.8.8')
+    Assert-Launch ($result.code -eq 0) 'create owned old IPv4 setup for cleanup UI tests'
+    $oldAddressEnvironment = [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env'))
+    $result = Invoke-FixtureLaunch -KeepInstallation -Scenario 'cleanup-cancelled'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -ne 0 -and @($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'disable' }).Count -eq 1) 'uncertain old mapping cleanup prompts and can be cancelled'
+    Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env')) -ceq $oldAddressEnvironment) 'cancelled cleanup keeps old environment and credentials intact'
+    Assert-NoPublish $calls 'cancelled old mapping cleanup cannot publish'
+    $result = Invoke-FixtureLaunch -KeepInstallation -Scenario 'cleanup-confirmed'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0) ('explicit UI confirmation of manual old-rule cleanup succeeds: ' + $result.output)
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'public-access' -and $_.action -eq 'disable' }).Count -ge 1 -and [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env')).Contains("QSTUDY_PUBLIC_IP='94.125.99.135'")) 'confirmed old cleanup allows actual detected address refresh'
 
     foreach ($scenario in @('admin-email-cancelled', 'first-admin-error', 'first-admin-inactive')) {
         $result = Invoke-FixtureLaunch -WithoutAdmin -Scenario $scenario -Arguments @('-EnableAutostart')
@@ -373,7 +529,9 @@ exit $launcherExitCode
     foreach ($scenario in @('init-error', 'ip-detection-error')) {
         $result = Invoke-FixtureLaunch -Scenario $scenario
         $calls = @(Read-LaunchCalls)
-        Assert-Launch ($result.code -ne 0 -and @($calls | Where-Object source -eq 'docker').Count -eq 0) ($scenario + ' stops before Docker')
+        Assert-Launch ($result.code -ne 0) ($scenario + ' stops startup')
+        if ($scenario -eq 'ip-detection-error') { Assert-Launch (@($calls | Where-Object source -eq 'docker').Count -eq 0 -and (Get-LaunchManagerActions $calls) -ceq '') 'IP detection failure stops before Docker or initialization' }
+        else { Assert-Launch ((Get-LaunchManagerActions $calls) -ceq 'init-http') 'initialization failure prevents every later manager action' }
         Assert-NoPublish $calls ($scenario + ' cannot publish')
     }
     $result = Invoke-FixtureLaunch -Arguments @('-PublicIP', '100.64.1.2')

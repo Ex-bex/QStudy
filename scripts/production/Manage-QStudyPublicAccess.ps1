@@ -5,13 +5,19 @@
     [switch]$NoPause
 )
 . (Join-Path $PSScriptRoot 'QStudy.PublicAccess.ps1')
+. (Join-Path $PSScriptRoot 'QStudy.NetworkOperation.ps1')
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $code = 1
+$operationMessage = ''
+$targetSid = ''
+$result = $null
 try {
-    if ($RouterCleanupConfirmed -and $Action -ne 'disable') { throw 'QStudy: -RouterCleanupConfirmed is supported only with disable, after manual router cleanup.' }
     $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $targetSid = if ($ExpectedUserSid) { $ExpectedUserSid } else { $currentSid }
+    if (-not $ExpectedUserSid) { Initialize-QStudyNetworkOperationStore $root $targetSid }
+    if ($RouterCleanupConfirmed -and $Action -ne 'disable') { throw 'QStudy: подтверждение очистки роутера применяется только при отключении доступа.' }
     if ($ExpectedUserSid -and $ExpectedUserSid -cne $currentSid) {
-        throw 'QStudy: use the same Windows administrator account before and after UAC. A different account cannot own this installation renewal task.'
+        throw 'QStudy: в запросе Windows использован другой аккаунт администратора. Войдите в Windows под нужным администратором и повторите эту же кнопку; запуск и подтверждение UAC должны выполняться одним аккаунтом.'
     }
     if ($Action -in @('enable', 'manual', 'disable')) {
         # Validate the installation before UAC. No secret values are arguments.
@@ -20,27 +26,46 @@ try {
         try { $administrator = ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
         finally { $identity.Dispose() }
         if (-not $administrator) {
-            Write-Host 'QStudy needs Windows permission to change its single TCP firewall rule. Confirm the Windows UAC prompt.'
+            Write-Host 'Windows запросит разрешение открыть выбранный TCP-порт QStudy. Подтвердите UAC под тем же аккаунтом Windows.'
             $arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Action ' + $Action + ' -ExpectedUserSid ' + $currentSid + ' -NoPause'
             if ($RouterCleanupConfirmed) { $arguments += ' -RouterCleanupConfirmed' }
+            $childStarted = [DateTimeOffset]::UtcNow
             $process = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Verb RunAs -WindowStyle Hidden -ArgumentList $arguments -Wait -PassThru
             $code = $process.ExitCode
-            # The elevated console is hidden; show the safe saved report here.
-            $result = Invoke-QStudyPublicAccess $root 'status'
+            $childReport = Read-QStudyNetworkOperation -Root $root -Action $Action -TargetUserSid $targetSid -MinimumUtc $childStarted
+            if ($null -eq $childReport -or $childReport.code -ne $code) {
+                $code = 1
+                $operationMessage = 'QStudy: Windows не вернула подтверждённый результат настройки сети. Подтвердите разрешение под тем же аккаунтом и повторите эту же кнопку. Старый отчёт не использовался.'
+            } else { $operationMessage = $childReport.message }
+            # State is useful for the manual-forwarding guide; it is not proof
+            # that the hidden elevated operation completed successfully.
+            try { $result = Invoke-QStudyPublicAccess $root 'status' } catch { $result = $null }
         } else { $result = Invoke-QStudyPublicAccess $root $Action -RouterCleanupConfirmed:$RouterCleanupConfirmed; $code = $result.code }
     } else { $result = Invoke-QStudyPublicAccess $root $Action; $code = $result.code }
-    Write-Host ($result.report | ConvertTo-Json -Depth 10)
-    if ($null -ne $result.report.PSObject.Properties['client_ip'] -and $result.report.client_ip) {
-        Write-Host ('Router rule: TCP ' + $result.report.port + ' -> ' + $result.report.client_ip + ':' + $result.report.port)
+    if ($null -ne $result) {
+        if ($null -ne $result.report.PSObject.Properties['status']) { Write-Host ('Состояние сети: ' + $result.report.status) }
+        if ($null -ne $result.report.PSObject.Properties['client_ip'] -and $result.report.client_ip) {
+            Write-Host ('Правило роутера: TCP ' + $result.report.port + ' -> ' + $result.report.client_ip + ':' + $result.report.port)
+        }
     }
-    if ($code -eq 2) { Write-Warning 'Automatic access/cleanup is incomplete. Check the saved status, reserve the LAN address and configure only this TCP port manually. The script cannot bypass CGNAT.' }
-    if ($code -eq 1) { Write-Warning 'Elevated network setup failed. Use the same Windows administrator account, check permission and existing QStudy rule/task ownership, then retry. Saved status is not proof of completion.' }
-    if ($code -eq 0 -and $Action -in @('enable', 'manual')) { Write-Host 'Start QStudy after preparing accounts/data. Then test http://IP:PORT from a phone with Wi-Fi disabled; external availability has not been proved.' }
+    if (-not $operationMessage) {
+        $operationMessage = switch ($code) {
+            0 { 'QStudy: операция настройки сети завершилась. Доступ из интернета проверьте с телефона при выключенном Wi-Fi.' }
+            2 { 'QStudy: автоматическая настройка или очистка порта не завершилась. Следуйте подсказке ручного проброса; CGNAT требует помощи провайдера.' }
+            default { 'QStudy: настройка сети не завершилась. Проверьте разрешение Windows и повторите эту же кнопку.' }
+        }
+    }
+    if ($code -eq 1) { Write-Host $operationMessage -ForegroundColor Red }
+    elseif ($code -eq 2) { Write-Warning $operationMessage }
+    else { Write-Host $operationMessage }
 } catch {
-    $message = $_.Exception.Message
-    if ($message.StartsWith('QStudy:')) { Write-Host $message -ForegroundColor Red }
-    else { Write-Host ('QStudy: network setup failed (' + $_.Exception.GetType().Name + '). Check Windows permission and .local/public-access/state.json; credentials are hidden.') -ForegroundColor Red }
+    $operationMessage = ConvertTo-QStudyNetworkOperationMessage $_.Exception.Message $_.Exception.GetType().Name
+    Write-Host $operationMessage -ForegroundColor Red
     $code = 1
 }
-if (-not $NoPause -and $Action -ne 'renew') { [void](Read-Host 'Press Enter to close') }
+if ($targetSid) {
+    try { Save-QStudyNetworkOperation -Root $root -Action $Action -Code $code -Message $operationMessage -TargetUserSid $targetSid }
+    catch { Write-Host 'QStudy: не удалось сохранить закрытый результат настройки сети. Проверьте права этой папки и повторите кнопку.' -ForegroundColor Red; $code = 1 }
+}
+if (-not $NoPause -and $Action -ne 'renew') { [void](Read-Host 'Нажмите Enter, чтобы закрыть окно') }
 exit $code
