@@ -110,24 +110,32 @@ function Resolve-QStudyInternetDataChoice {
         if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) { throw 'QStudy: выбранная резервная копия отсутствует в deployment/data/backups. Данные не изменены.' }
         return [PSCustomObject]@{ archive = $Archive; new_installation = $false; legacy_detected = $legacyDetected }
     }
-    if ($NewInstallation -or -not $legacyDetected -or (Test-Path -LiteralPath $productionPath -PathType Leaf)) {
+    if ($NewInstallation -or (Test-Path -LiteralPath $productionPath -PathType Leaf)) {
         return [PSCustomObject]@{ archive = ''; new_installation = [bool]$NewInstallation; legacy_detected = $legacyDetected }
     }
-    Write-Host 'Найдены данные локального QStudy. Интернет-версия использует отдельную базу.'
+    if ($legacyDetected) {
+        Write-Host 'Найдены данные локального QStudy. Интернет-версия использует отдельную базу.'
+    } else {
+        Write-Host 'Первый запуск интернет-версии QStudy. Выберите резервную копию, чтобы восстановить существующий QStudy с аккаунтами и материалами.'
+    }
     Write-Host '1 — Выбрать ZIP резервной копии и восстановить аккаунты и материалы.'
-    Write-Host '2 — Создать отдельную новую интернет-версию. Локальные данные сохранятся.'
+    if ($legacyDetected) {
+        Write-Host '2 — Создать отдельную новую интернет-версию. Локальные данные сохранятся.'
+    } else {
+        Write-Host '2 — Создать отдельную новую интернет-версию с пустой базой.'
+    }
     Write-Host '0 — Остановить запуск.'
     while ($true) {
         $answer = Read-Host 'Выберите 1, 2 или 0'
-        if ($answer -eq '0' -or [string]::IsNullOrWhiteSpace($answer)) { throw 'QStudy: запуск отменён. Локальные данные не изменены.' }
-        if ($answer -eq '2') { return [PSCustomObject]@{ archive = ''; new_installation = $true; legacy_detected = $true } }
+        if ($answer -eq '0' -or [string]::IsNullOrWhiteSpace($answer)) { throw 'QStudy: запуск отменён. Данные не изменены.' }
+        if ($answer -eq '2') { return [PSCustomObject]@{ archive = ''; new_installation = $true; legacy_detected = $legacyDetected } }
         if ($answer -eq '1') {
             try { $selected = Select-QStudyInternetBackupFile }
             catch { throw 'QStudy: окно выбора резервной копии недоступно. Запуск остановлен; данные не изменены.' }
-            if (-not $selected) { throw 'QStudy: выбор резервной копии отменён. Запуск остановлен; локальные данные не изменены.' }
+            if (-not $selected) { throw 'QStudy: выбор резервной копии отменён. Запуск остановлен; данные не изменены.' }
             $name = Copy-QStudyInternetSelectedBackup -Root $Root -SourcePath $selected
             Write-Host 'Резервная копия скопирована. Перед восстановлением QStudy проверит её содержимое.'
-            return [PSCustomObject]@{ archive = $name; new_installation = $false; legacy_detected = $true }
+            return [PSCustomObject]@{ archive = $name; new_installation = $false; legacy_detected = $legacyDetected }
         }
         Write-Host 'Введите только 1, 2 или 0. Команды вводить не нужно.'
     }

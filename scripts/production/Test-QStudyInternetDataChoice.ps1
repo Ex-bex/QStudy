@@ -57,9 +57,45 @@ try {
     foreach ($path in @((Join-Path $hostRoot 'backend'), (Join-Path $hostRoot 'deployment\data\backend'), $outside)) { [IO.Directory]::CreateDirectory($path) | Out-Null }
     $legacy = Join-Path $hostRoot 'backend\studyhub.db'
     $production = Join-Path $hostRoot 'deployment\data\backend\studyhub.db'
+    $localSettings = Join-Path $hostRoot 'backend\.env'
+    $hostSettings = Join-Path $hostRoot 'deployment\.env'
+    [IO.File]::WriteAllText($localSettings, 'FixtureSecretExistingLocalSettingsNeverParsed')
+    [IO.File]::WriteAllText($hostSettings, 'FixtureSecretExistingHostSettingsNeverParsed')
+    $source = Join-Path $outside 'chosen-backup.zip'
+    $payload = [Text.Encoding]::UTF8.GetBytes('FixtureSecretDummyZipOnly_NotExtracted_письмо')
+    [IO.File]::WriteAllBytes($source, $payload)
+    $sourceBytes = [Convert]::ToBase64String($payload)
+    $script:answers.Enqueue('0')
+    Assert-InternetDataChoiceThrows { Resolve-QStudyInternetDataChoice -Root $hostRoot } 'fresh checkout asks for data transfer; choice 0 stops instead of silently using an empty database'
+    $script:answers.Enqueue('')
+    Assert-InternetDataChoiceThrows { Resolve-QStudyInternetDataChoice -Root $hostRoot } 'fresh empty input stops instead of choosing a blank installation'
+    Assert-InternetDataChoice ($script:promptCount -eq 2 -and $script:pickerCount -eq 0) 'fresh cancellation asks numeric questions without opening a dialog'
+    Assert-InternetDataChoice (-not (Test-Path -LiteralPath $legacy) -and -not (Test-Path -LiteralPath $production) -and -not (Test-Path -LiteralPath (Join-Path $hostRoot 'deployment\data\backups'))) 'fresh cancellation creates no database or backup folder'
+    $script:answers.Enqueue('1'); $script:selectedFile = ''
+    Assert-InternetDataChoiceThrows { Resolve-QStudyInternetDataChoice -Root $hostRoot } 'fresh file-picker cancellation stops without selecting a new empty installation'
+    Assert-InternetDataChoice (-not (Test-Path -LiteralPath $production)) 'fresh cancelled import creates no production database'
+    $script:answers.Enqueue('2')
     $result = Resolve-QStudyInternetDataChoice -Root $hostRoot
-    Assert-InternetDataChoice (-not $result.legacy_detected -and -not $result.new_installation -and -not $result.archive) 'fresh empty checkout needs no data-choice prompt'
-    Assert-InternetDataChoice ($script:promptCount -eq 0 -and $script:pickerCount -eq 0) 'fresh launch neither prompts nor opens a dialog'
+    Assert-InternetDataChoice (-not $result.legacy_detected -and $result.new_installation -and -not $result.archive) 'fresh choice 2 explicitly requests a separate blank installation without claiming legacy data exists'
+    Assert-InternetDataChoice (-not (Test-Path -LiteralPath $production)) 'fresh new-installation choice itself creates no database'
+    $beforePrompts = $script:promptCount; $beforePicker = $script:pickerCount
+    $result = Resolve-QStudyInternetDataChoice -Root $hostRoot -NewInstallation
+    Assert-InternetDataChoice (-not $result.legacy_detected -and $result.new_installation -and -not $result.archive -and $script:promptCount -eq $beforePrompts -and $script:pickerCount -eq $beforePicker) 'explicit fresh new-installation flag makes the same deliberate choice without UI'
+    $script:answers.Enqueue('1'); $script:selectedFile = $source
+    $result = Resolve-QStudyInternetDataChoice -Root $hostRoot
+    Assert-InternetDataChoice ($result.archive -cmatch '^qstudy-\d{8}-\d{6}-[a-f0-9]{8}\.zip$' -and -not $result.new_installation -and -not $result.legacy_detected) 'fresh copied checkout supports backup import without a local legacy database'
+    $freshCopied = Join-Path $hostRoot ('deployment\data\backups\' + $result.archive)
+    Assert-InternetDataChoice ([Convert]::ToBase64String([IO.File]::ReadAllBytes($freshCopied)) -ceq $sourceBytes) 'fresh selected backup is copied byte-for-byte for later verification'
+    Assert-InternetDataChoice ([Convert]::ToBase64String([IO.File]::ReadAllBytes($source)) -ceq $sourceBytes -and -not (Test-Path -LiteralPath $production) -and -not (Test-Path -LiteralPath $legacy)) 'fresh import preserves selected source and performs no database writes or ZIP restoration'
+    $beforePrompts = $script:promptCount; $beforePicker = $script:pickerCount
+    $explicit = Resolve-QStudyInternetDataChoice -Root $hostRoot -Archive $result.archive
+    Assert-InternetDataChoice ($explicit.archive -ceq $result.archive -and -not $explicit.new_installation -and -not $explicit.legacy_detected -and $script:promptCount -eq $beforePrompts -and $script:pickerCount -eq $beforePicker) 'fresh explicit existing archive remains usable without data-choice UI'
+    [IO.File]::WriteAllText($production, 'FixtureSecretExistingFreshProductionNeverParsed')
+    $result = Resolve-QStudyInternetDataChoice -Root $hostRoot
+    Assert-InternetDataChoice (-not $result.legacy_detected -and -not $result.archive -and -not $result.new_installation -and $script:promptCount -eq $beforePrompts -and $script:pickerCount -eq $beforePicker) 'an existing production installation with no legacy database launches without any transfer prompt'
+    Assert-InternetDataChoice ([IO.File]::ReadAllText($production) -ceq 'FixtureSecretExistingFreshProductionNeverParsed') 'ordinary repeat launch preserves all existing production bytes'
+    Assert-InternetDataChoice ([IO.File]::ReadAllText($localSettings) -ceq 'FixtureSecretExistingLocalSettingsNeverParsed' -and [IO.File]::ReadAllText($hostSettings) -ceq 'FixtureSecretExistingHostSettingsNeverParsed') 'fresh choices and repeat launch leave both settings files unchanged'
+    Remove-Item -LiteralPath $production -Force
     [IO.File]::WriteAllText($legacy, 'FixtureSecretLegacyDatabaseNeverParsed')
     $legacyBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($legacy))
     $script:answers.Enqueue('2')
@@ -80,10 +116,6 @@ try {
     $script:answers.Enqueue('1'); $script:pickerError = $true
     Assert-InternetDataChoiceThrows { Resolve-QStudyInternetDataChoice -Root $hostRoot } 'file-picker errors provide a safe clear stop'
     $script:pickerError = $false
-    $source = Join-Path $outside 'chosen-backup.zip'
-    $payload = [Text.Encoding]::UTF8.GetBytes('FixtureSecretDummyZipOnly_NotExtracted_письмо')
-    [IO.File]::WriteAllBytes($source, $payload)
-    $sourceBytes = [Convert]::ToBase64String($payload)
     $script:answers.Enqueue('1'); $script:selectedFile = $source
     $result = Resolve-QStudyInternetDataChoice -Root $hostRoot
     Assert-InternetDataChoice ($result.archive -cmatch '^qstudy-\d{8}-\d{6}-[a-f0-9]{8}\.zip$' -and -not $result.new_installation -and $result.legacy_detected) 'choice 1 copies explicitly selected external ZIP under a core-compatible generated basename'
@@ -159,6 +191,8 @@ public static class QStudyDataChoiceSparseFixture {
     } finally { $large.Dispose() }
     Assert-InternetDataChoiceThrows { Copy-QStudyInternetSelectedBackup -Root $hostRoot -SourcePath $largeSource } 'source over 2 GB is rejected before hashing/copying'
     Assert-InternetDataChoice ([Convert]::ToBase64String([IO.File]::ReadAllBytes($legacy)) -ceq $legacyBytes) 'all selections and failures preserve the original local database'
+    Assert-InternetDataChoice ([IO.File]::ReadAllText($localSettings) -ceq 'FixtureSecretExistingLocalSettingsNeverParsed' -and [IO.File]::ReadAllText($hostSettings) -ceq 'FixtureSecretExistingHostSettingsNeverParsed') 'all selections and failures preserve both settings files without reading them in production code'
+    Assert-InternetDataChoice ([Convert]::ToBase64String([IO.File]::ReadAllBytes($freshCopied)) -ceq $sourceBytes) 'later legacy selections and failures never overwrite the earlier fresh backup import'
     Assert-InternetDataChoice (@(Get-ChildItem -LiteralPath $backupFolder -Force -Filter '.import-*.tmp').Count -eq 0) 'no unfinished private import file remains'
     Write-Host ('Internet data-choice checks passed (' + $checks + ' assertions). Disposable files; no UI/database/ZIP execution.')
 } finally {

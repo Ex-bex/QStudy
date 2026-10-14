@@ -254,9 +254,13 @@ function global:Read-Host {
         return 'first-admin@example.org'
     }
     $scenario = $env:QSTUDY_INTERNET_LAUNCH_TEST_SCENARIO
-    if ($Prompt -match '0|1|2|Enter|проброс|правил|копи|данн|архив') {
-        if ($scenario -eq 'data-new-isolated') { return '2' }
+    if ($Prompt -ceq 'Выберите 1, 2 или 0') {
+        if ($scenario -eq 'data-cancelled') { return '0' }
+        if ($scenario -eq 'data-empty') { return '' }
         if ($scenario -in @('data-archive', 'data-dialog-cancelled')) { return '1' }
+        return '2'
+    }
+    if ($Prompt -match '0|1|2|Enter|проброс|правил|копи|данн|архив') {
         if ($scenario -eq 'port-mapping-manual-confirmed') { return '' }
         if ($scenario -eq 'port-mapping-conflict-confirmed') { return '1' }
         if ($scenario -eq 'port-mapping-conflict-enter') { return '' }
@@ -284,7 +288,7 @@ exit $launcherExitCode
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'network' -and $_.httpPort -eq 8080 -and $_.noPause }).Count -eq 1) 'network diagnostic receives the saved port without pausing'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'check' -and $_.offline }).Count -eq 1) 'offline configuration validation precedes stack work'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'launch' -and $_.noBrowser }).Count -eq 1) 'NoBrowser reaches the real launch contract'
-    Assert-Launch (@(Get-Content -LiteralPath $promptLog).Count -eq 1 -and [IO.File]::ReadAllText($promptLog) -match 'Email нового первого администратора') 'fresh administrator asks for an email once'
+    Assert-Launch (@(Get-Content -LiteralPath $promptLog).Count -eq 2 -and @(Get-Content -LiteralPath $promptLog | Where-Object { $_ -ceq 'Выберите 1, 2 или 0' }).Count -eq 1 -and @(Get-Content -LiteralPath $promptLog | Where-Object { $_ -like 'Email нового первого администратора*' }).Count -eq 1) 'fresh administrator asks for a deliberate data choice and an email once'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'first-admin' -and $_.email -ceq 'first-admin@example.org' }).Count -eq 1) 'first-admin receives the chosen email'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'wrapper' -and $_.returnedAfterNestedExit -and $_.code -eq 0 }).Count -eq 1) 'nested launcher exits return to the fixture wrapper'
     Assert-Launch ($result.output -match 'http://94.125.99.135:8080' -and $result.output -match 'выключенным Wi-Fi') 'completion displays the configured URL and requires an independent Internet check'
@@ -393,7 +397,29 @@ exit $launcherExitCode
     Assert-Launch ($result.code -ne 0 -and $result.output -match 'сохранена установка HTTPS') 'HTTP button refuses a saved HTTPS configuration'
     Assert-Launch ((Get-LaunchManagerActions $calls) -ceq '' -and [IO.File]::ReadAllText((Join-Path $fixture 'deployment\.env')) -ceq $httpsEnvironment) 'HTTPS configuration and host are untouched'
 
-    $result = Invoke-FixtureLaunch -LegacyDatabase
+    foreach ($scenario in @('data-cancelled', 'data-empty')) {
+        $result = Invoke-FixtureLaunch -WithoutAdmin -Scenario $scenario
+        $calls = @(Read-LaunchCalls)
+        Assert-Launch ($result.code -ne 0) ($scenario + ' first installation requires an explicit choice before creating an empty database')
+        Assert-Launch ([IO.File]::ReadAllText($promptLog).Contains('Выберите 1, 2 или 0') -and $result.output -match 'перв|Перв') ($scenario + ' first-run backup choice is visible even without a local legacy database')
+        Assert-Launch ((Get-LaunchManagerActions $calls) -ceq '' -and @($calls | Where-Object source -eq 'docker').Count -eq 0 -and @($calls | Where-Object source -eq 'public-access').Count -eq 0) ($scenario + ' cancellation happens before initialization, Docker or public network changes')
+        Assert-Launch (-not (Test-Path -LiteralPath (Join-Path $fixture 'deployment\.env')) -and -not (Test-Path -LiteralPath (Join-Path $fixture 'backend\studyhub.db')) -and -not (Test-Path -LiteralPath (Join-Path $fixture 'deployment\data\backend\studyhub.db'))) ($scenario + ' leaves a fresh installation without a new configuration or database')
+        Assert-Launch (@($calls | Where-Object source -eq 'data-dialog').Count -eq 0) ($scenario + ' does not open the archive dialog implicitly')
+        Assert-NoPublish $calls ($scenario + ' cannot publish or install autostart')
+    }
+    $result = Invoke-FixtureLaunch -WithoutAdmin -Scenario 'data-archive'
+    $calls = @(Read-LaunchCalls)
+    Assert-Launch ($result.code -eq 0) ('fresh host backup dialog restores the existing project: ' + $result.output)
+    Assert-Launch (-not (Test-Path -LiteralPath (Join-Path $fixture 'backend\studyhub.db')) -and @($calls | Where-Object source -eq 'data-dialog').Count -eq 1) 'first installation without a legacy database can select a backup through the file dialog'
+    Assert-Launch ((Get-LaunchManagerActions $calls) -ceq 'init-http,check,stack-status,prepare,verify,restore,account-status,launch') 'fresh backup is verified and restored before account checks and publication'
+    $ordered = Get-LaunchActions $calls
+    Assert-Launch ($ordered.IndexOf('manager:verify') -lt $ordered.IndexOf('manager:restore') -and $ordered.IndexOf('manager:restore') -lt $ordered.IndexOf('public-access:enable') -and $ordered.IndexOf('public-access:enable') -lt $ordered.IndexOf('manager:launch')) 'fresh backup verification and restoration precede every public network action and launch'
+    Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'restore' -and $_.noPublish -and $_.archive -match '^qstudy-\d{8}-\d{6}-[a-f0-9]{8}\.zip$' }).Count -eq 1) 'fresh dialog selection imports under a safe basename and restores with NoPublish'
+    Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'fixture-admin')) -ceq 'restored-admin' -and @($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'first-admin' }).Count -eq 0) 'fresh backup retains its existing administrator instead of creating or resetting one'
+    Assert-Launch (@(Get-Content -LiteralPath $promptLog).Count -eq 1 -and [IO.File]::ReadAllText($promptLog).Contains('Выберите 1, 2 или 0')) 'fresh restore asks only for the data choice without administrator credentials'
+    Assert-Launch ([IO.File]::ReadAllText((Join-Path $fixture 'deployment\data\backend\studyhub.db')) -ceq 'restored-production-accounts') 'fresh backup restores the intended production data'
+
+    $result = Invoke-FixtureLaunch -LegacyDatabase -Scenario 'data-cancelled'
     $calls = @(Read-LaunchCalls)
     Assert-Launch ($result.code -ne 0 -and [IO.File]::ReadAllText($promptLog) -match '0|1|2') 'copied local data offers a command-free choice and cancellation blocks empty production'
     Assert-Launch ((Get-LaunchManagerActions $calls) -ceq '' -and @($calls | Where-Object source -eq 'docker').Count -eq 0) 'legacy data cancellation runs before initialization, Docker or preparation'
@@ -519,7 +545,7 @@ exit $launcherExitCode
     }
     $result = Invoke-FixtureLaunch -WithoutAdmin -Arguments @('-AdminEmail', 'chosen-admin@example.org')
     $calls = @(Read-LaunchCalls)
-    Assert-Launch ($result.code -eq 0 -and [IO.File]::ReadAllText($promptLog).Length -eq 0) 'explicit AdminEmail avoids a separate email prompt'
+    Assert-Launch ($result.code -eq 0 -and @(Get-Content -LiteralPath $promptLog).Count -eq 1 -and [IO.File]::ReadAllText($promptLog).Contains('Выберите 1, 2 или 0')) 'explicit AdminEmail avoids a separate email prompt while first-run data choice stays deliberate'
     Assert-Launch (@($calls | Where-Object { $_.source -eq 'manager' -and $_.action -eq 'first-admin' -and $_.email -ceq 'chosen-admin@example.org' }).Count -eq 1) 'explicit AdminEmail is used only to create the missing first administrator'
 
     $result = Invoke-FixtureLaunch -Scenario 'launch-error' -Arguments @('-EnableAutostart')
