@@ -11,6 +11,7 @@ import {
   preparePrivateProxyRequest,
 } from "./lib/native-server.mjs";
 import { createGameUpgradeProxy } from "./lib/lumaball-ws-proxy.mjs";
+import { prepareGameResponse } from "./lib/game-csp.mjs";
 import {
   nativeStopConfiguration,
   nativeStopRequested,
@@ -54,6 +55,7 @@ async function main() {
         response.end("Откройте QStudy по адресу, указанному в окне запуска.");
         return;
       }
+      prepareGameResponse(response, configuration);
       handle(request, response).catch(() => {
         if (response.headersSent) response.destroy();
         else {

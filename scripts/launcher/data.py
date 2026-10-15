@@ -8,6 +8,7 @@ import re
 import secrets
 import subprocess
 import tempfile
+import time
 
 
 def dataset(root: Path, source: str) -> dict:
@@ -39,7 +40,18 @@ def atomic_json(path: Path, value) -> None:
             json.dump(value, output, ensure_ascii=True, separators=(",", ":"))
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, path)
+        for attempt in range(12):
+            try:
+                os.replace(temporary, path)
+                break
+            except OSError as error:
+                # Windows readers (including PowerShell 5.1) can open status
+                # without FILE_SHARE_DELETE. Keep the old whole JSON until a
+                # brief reader/AV sharing conflict clears; permanent denial is
+                # still raised after a bounded total wait of under one second.
+                if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 11:
+                    raise
+                time.sleep(min(0.01 * 2 ** attempt, 0.1))
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

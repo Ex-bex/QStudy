@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -38,6 +39,7 @@ import {
   type Team,
 } from "@/lib/lumaball/engine";
 import { GamePeers } from "@/lib/lumaball/peers";
+import { requestGameSession } from "@/lib/lumaball/session-queue";
 import {
   MatchResultDelivery,
   roomInvitationUrl,
@@ -53,6 +55,7 @@ import {
   type Session,
 } from "@/lib/lumaball/types";
 import styles from "./game-room.module.css";
+import { useQBall } from "./context";
 
 type RoomView = Room & { is_member?: boolean };
 const zero = (): Input => ({ x: 0, y: 0, kick: false });
@@ -71,6 +74,8 @@ const statusLabels: Record<Room["status"], string> = {
 };
 
 export default function GameRoom({ roomId }: { roomId: string }) {
+  const router = useRouter();
+  const { setRoomActive } = useQBall();
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [room, setRoom] = useState<RoomView | null>(null);
   const [connection, setConnection] = useState<
@@ -81,6 +86,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [sessionConfig, setSessionConfig] = useState<Session["config"] | null>(
     null,
   );
@@ -123,6 +129,11 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     }
     return false;
   }, []);
+
+  useEffect(() => {
+    setRoomActive(connection === "online");
+    return () => setRoomActive(false);
+  }, [connection, setRoomActive]);
 
   useEffect(() => {
     let disposed = false;
@@ -191,10 +202,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     };
     const connect = async (initial = false) => {
       try {
-        const session = await gameRequest<Session>("/session", {
-          method: "POST",
-          body: "{}",
-        });
+        const session = await requestGameSession<Session>();
         if (disposed) return;
         identityRef.current = session.identity;
         setIdentity(session.identity);
@@ -587,6 +595,33 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     }
   };
   const online = connection === "online";
+  const leave = async () => {
+    if (leaving) return;
+    if (
+      room?.host_id === identity?.id &&
+      !window.confirm(
+        "Вы создатель комнаты. При выходе комната закроется для всех игроков. Выйти?",
+      )
+    )
+      return;
+    setLeaving(true);
+    try {
+      await gameRequest(`/rooms/${encodeURIComponent(roomId)}/leave`, {
+        method: "POST",
+        body: "{}",
+      });
+      setRoomActive(false);
+      router.push("/qball/play");
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Не удалось выйти из комнаты. Повторите попытку.",
+      );
+    } finally {
+      setLeaving(false);
+    }
+  };
   const showOverlay = !online || room?.status !== "playing";
   const connectionLabel =
     connection === "online"
@@ -607,7 +642,17 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   return (
     <section className={styles.room}>
       <div className={styles.topline}>
-        <Link href="/qball/play" className={styles.back}>
+        <Link
+          href="/qball/play"
+          className={styles.back}
+          target={online ? "_blank" : undefined}
+          rel={online ? "noopener noreferrer" : undefined}
+          title={
+            online
+              ? "Список откроется в новой вкладке, игра продолжит работать"
+              : undefined
+          }
+        >
           <ArrowLeft size={16} /> Все комнаты
         </Link>
         <span className={styles.transport}>
@@ -666,6 +711,12 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                 ? "Отправьте ссылку другу, а пароль комнаты сообщите отдельно."
                 : "Друг сможет войти по ссылке как гость, если гостевой вход разрешён.")}
           </p>
+          {room.host_id === identity?.id && (
+            <p>
+              Эта вкладка держит комнату. Не закрывайте её; список комнат и
+              страницы сайта открываются отдельно.
+            </p>
+          )}
         </section>
       )}
       {help && (
@@ -1120,10 +1171,21 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       )}
       <div className={styles.bottomNote}>
         <span>Играйте честно. Уважайте соперников.</span>
-        <Link href="/qball/play">
-          Найти другую игру
-          <ArrowRight size={14} />
-        </Link>
+        {online ? (
+          <button
+            className={styles.leaveButton}
+            onClick={() => void leave()}
+            disabled={leaving}
+          >
+            {leaving ? "Выходим…" : "Выйти из комнаты"}
+            <ArrowRight size={14} />
+          </button>
+        ) : (
+          <Link href="/qball/play">
+            Найти другую игру
+            <ArrowRight size={14} />
+          </Link>
+        )}
       </div>
     </section>
   );

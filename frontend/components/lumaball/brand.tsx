@@ -19,12 +19,20 @@ export function LumaMark({ className = "" }: { className?: string }) {
   );
 }
 
-export function LumaBrand({ compact = false }: { compact?: boolean }) {
+export function LumaBrand({
+  compact = false,
+  newTab = false,
+}: {
+  compact?: boolean;
+  newTab?: boolean;
+}) {
   const { config } = useQBall();
   return (
     <Link
       className={`lb-brand ${compact ? "lb-brand-compact" : ""}`}
       href="/qball"
+      target={newTab ? "_blank" : undefined}
+      rel={newTab ? "noopener noreferrer" : undefined}
       aria-label={`${config.title} — главная`}
     >
       <LumaMark />

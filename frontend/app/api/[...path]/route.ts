@@ -149,10 +149,10 @@ async function proxy(
   if (request.headers.get("content-type"))
     headers.set("content-type", request.headers.get("content-type")!);
   const token = request.cookies.get(COOKIE)?.value;
+  const guestCookie = request.cookies.get(GUEST_COOKIE)?.value;
   if (token && !brandingAsset) headers.set("Authorization", `Bearer ${token}`);
   if (path[0] === "lumaball") {
-    const guest = request.cookies.get(GUEST_COOKIE)?.value;
-    if (guest) headers.set("X-LumaBall-Session", guest);
+    if (guestCookie) headers.set("X-LumaBall-Session", guestCookie);
   }
   if (brandingAsset && request.headers.get("if-none-match"))
     headers.set("If-None-Match", request.headers.get("if-none-match")!);
@@ -250,12 +250,22 @@ async function proxy(
         (path[0] !== "lumaball" || !!token))
     )
       clearSession(response);
-    if (upstream.status === 401 && path[0] === "lumaball" && !token)
+    // Read-only identity checks can finish after a new guest signs in. They
+    // must never erase the newer HttpOnly credential through a late response.
+    if (
+      upstream.status === 401 &&
+      endpoint === "lumaball/session" &&
+      request.method === "POST" &&
+      guestCookie &&
+      !token
+    ) {
       response.cookies.set(GUEST_COOKIE, "", {
         ...cookieOptions,
         maxAge: 0,
         expires: new Date(0),
       });
+      response.headers.set("X-QBall-Guest-Reset", "1");
+    }
     return response;
   } catch {
     if (importBody?.tooLarge) {

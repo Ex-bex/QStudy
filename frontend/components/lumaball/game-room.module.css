@@ -624,6 +624,20 @@
   text-decoration: none;
   color: #b296cb;
 }
+.leaveButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid #71506f;
+  border-radius: 7px;
+  background: #302032;
+  color: #ecc7de;
+  font-size: 11px;
+}
+.leaveButton:disabled {
+  opacity: 0.6;
+}
 .help {
   position: relative;
   padding: 18px 50px 18px 20px;

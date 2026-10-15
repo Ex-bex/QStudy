@@ -5,10 +5,12 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { LumaConfig, LumaIdentity, LumaSession } from "@/types/lumaball";
+import { requestGameSession } from "@/lib/lumaball/session-queue";
 
 export const DEFAULT_LUMA_CONFIG: LumaConfig = {
   enabled: true,
@@ -63,6 +65,8 @@ type LumaContextValue = {
   identity: LumaIdentity | null;
   loading: boolean;
   error: string;
+  roomActive: boolean;
+  setRoomActive: (active: boolean) => void;
   refresh: () => Promise<void>;
   enter: () => Promise<LumaIdentity>;
 };
@@ -74,31 +78,37 @@ export function QBallProvider({ children }: { children: ReactNode }) {
   const [identity, setIdentity] = useState<LumaIdentity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [roomActive, setRoomActive] = useState(false);
+  const revision = useRef(0);
+  const pendingEntry = useRef<Promise<LumaIdentity> | null>(null);
   const refresh = useCallback(async () => {
+    const requestRevision = ++revision.current;
     try {
       const value = await lumaApi<LumaConfig>("/lumaball/config");
+      if (requestRevision !== revision.current) return;
       setConfig(value);
       setError("");
       const response = await fetch("/api/lumaball/me", {
         credentials: "same-origin",
         cache: "no-store",
       });
+      if (requestRevision !== revision.current) return;
       if (response.ok) {
         const current = (await response.json()) as {
           identity: LumaIdentity;
           config: LumaConfig;
         };
+        if (requestRevision !== revision.current) return;
         setIdentity(current.identity);
         setConfig(current.config);
       } else if (response.status === 401) setIdentity(null);
     } catch (cause) {
+      if (requestRevision !== revision.current) return;
       setError(
-        cause instanceof Error
-          ? cause.message
-          : "Не удалось загрузить QBall.",
+        cause instanceof Error ? cause.message : "Не удалось загрузить QBall.",
       );
     } finally {
-      setLoading(false);
+      if (requestRevision === revision.current) setLoading(false);
     }
   }, []);
   useEffect(() => {
@@ -117,18 +127,41 @@ export function QBallProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", update);
     };
   }, [refresh]);
-  const enter = useCallback(async () => {
-    const session = await lumaApi<LumaSession>("/lumaball/session", {
-      method: "POST",
+  const enter = useCallback(() => {
+    if (pendingEntry.current) return pendingEntry.current;
+    ++revision.current;
+    const operation = requestGameSession<LumaSession>().then((session) => {
+      ++revision.current;
+      setIdentity(session.identity);
+      setConfig(session.config);
+      setError("");
+      setLoading(false);
+      return session.identity;
     });
-    setIdentity(session.identity);
-    setConfig(session.config);
-    setError("");
-    return session.identity;
+    pendingEntry.current = operation;
+    void operation.then(
+      () => {
+        pendingEntry.current = null;
+      },
+      () => {
+        pendingEntry.current = null;
+        setLoading(false);
+      },
+    );
+    return operation;
   }, []);
   return (
     <LumaContext.Provider
-      value={{ config, identity, loading, error, refresh, enter }}
+      value={{
+        config,
+        identity,
+        loading,
+        error,
+        roomActive,
+        setRoomActive,
+        refresh,
+        enter,
+      }}
     >
       {children}
     </LumaContext.Provider>

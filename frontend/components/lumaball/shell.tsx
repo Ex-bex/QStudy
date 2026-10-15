@@ -9,26 +9,36 @@ import { useQBall } from "./context";
 
 export default function LumaShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { identity, config } = useQBall();
+  const { identity, config, roomActive } = useQBall();
   const room = pathname.startsWith("/qball/room/");
+  const preserveRoom = room && roomActive;
+  const navigation = preserveRoom
+    ? { target: "_blank", rel: "noopener noreferrer" }
+    : {};
   return (
     <div className={`lb-site ${room ? "lb-site-room" : ""}`}>
       <header className="lb-header">
         <div className="lb-header-inner">
-          <LumaBrand />
+          <LumaBrand newTab={preserveRoom} />
           <nav className="lb-nav" aria-label="Навигация QBall">
             <Link
               href="/qball/play"
+              {...navigation}
               aria-current={pathname === "/qball/play" ? "page" : undefined}
             >
               Комнаты
             </Link>
-            <Link href="/qball#how-to-play">Как играть</Link>
-            <Link href="/qball#rules">Правила</Link>
+            <Link href="/qball#how-to-play" {...navigation}>
+              Как играть
+            </Link>
+            <Link href="/qball#rules" {...navigation}>
+              Правила
+            </Link>
           </nav>
           <div className="lb-header-actions">
             <Link
               href={identity?.kind === "user" ? "/dashboard" : "/"}
+              {...navigation}
               className="lb-qstudy-link"
             >
               <ArrowLeft size={14} /> QStudy
@@ -36,6 +46,7 @@ export default function LumaShell({ children }: { children: ReactNode }) {
             {identity?.is_admin && (
               <Link
                 href="/dashboard/admin/qball"
+                {...navigation}
                 className="lb-icon-link"
                 aria-label="Управление QBall"
               >
@@ -46,6 +57,7 @@ export default function LumaShell({ children }: { children: ReactNode }) {
               <Link
                 className="lb-identity"
                 href="/qball/play"
+                {...navigation}
                 title={identity.name}
               >
                 <UserRound size={14} />
@@ -55,6 +67,7 @@ export default function LumaShell({ children }: { children: ReactNode }) {
               <Link
                 className="lb-header-login"
                 href="/login?next=%2Fqball%2Fplay"
+                {...navigation}
               >
                 Войти <ArrowUpRight size={14} />
               </Link>
