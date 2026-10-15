@@ -29,7 +29,9 @@ class NativeRuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="qstudy-native-fixture-")
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        # Windows CI exposes TEMP through RUNNER~1. Match the runtime's
+        # canonical path rather than asserting an 8.3 alias is the data path.
+        self.root = Path(self.temporary.name).resolve()
         for directory in ("backend/app", "deployment", ".local/managed"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         (self.root / "backend/app/config.py").write_text("class Settings:\n SECRET_KEY: str\n BFF_PROXY_SECRET: str = ''\n SMTP_PASSWORD: str = ''\n GEMINI_API_KEY: str = ''\n PUBLIC_BASE_URL: str = ''\n ALLOW_PUBLIC_HTTP: bool = False\n DATABASE_URL: str = ''\n UPLOAD_DIR: str = ''\n BACKUP_DIR: str = ''\n CORS_ORIGINS: str = ''\n", encoding="utf-8")
@@ -73,6 +75,27 @@ class NativeRuntimeTests(unittest.TestCase):
         self.assertFalse(self.settings.exists())
         self.assertFalse((self.root / "backend/studyhub.db").exists())
         self.assertEqual(production.read_bytes(), self.original)
+
+    @unittest.skipUnless(os.name == "nt", "Windows 8.3 path aliases")
+    def test_windows_short_path_alias_selects_the_same_existing_store(self):
+        import ctypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        short_name = kernel.GetShortPathNameW
+        short_name.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_ulong]
+        short_name.restype = ctypes.c_ulong
+        size = short_name(str(self.root), None, 0)
+        if not size:
+            self.skipTest("No short path is available on the fixture volume")
+        buffer = ctypes.create_unicode_buffer(size)
+        if not short_name(str(self.root), buffer, size) or buffer.value.casefold() == str(self.root).casefold():
+            self.skipTest("8.3 aliases are disabled for the fixture directory")
+        database = self.root / "backend/studyhub.db"
+        database.write_bytes(b"existing-accounts-through-both-paths")
+        environment = data.load_environment({**self.config, "root": buffer.value})
+        self.assertEqual(environment["DATABASE_URL"], "sqlite:///" + database.as_posix())
+        self.assertEqual(environment["QSTUDY_ENV_FILE"], str(self.settings))
+        self.assertEqual(database.read_bytes(), b"existing-accounts-through-both-paths")
+        self.assertEqual(self.settings.read_bytes(), self.original)
 
     def test_environment_file_cannot_inject_node_python_or_arbitrary_shell_settings(self):
         self.settings.write_bytes(self.original + b"NODE_OPTIONS=--inspect=0.0.0.0\r\nPYTHONPATH=attacker\r\nINJECTED_UNKNOWN=not-allowed\r\n")
