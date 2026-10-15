@@ -44,9 +44,8 @@ class TransferFixture(unittest.TestCase):
         (self.backend / "app").mkdir()
         (self.backend / "app" / "example.py").write_text("original_source = True\n", encoding="utf-8")
         (self.backend / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
-        for name in ("Install-QStudy.cmd", "Start-QStudy.cmd", "Start-QStudy-LAN.cmd", "Start-QStudy-Internet.cmd"):
+        for name in ("Install-QStudy.cmd", "Start-QStudy.cmd", "Start-QStudy-LAN.cmd", "Start-QStudy-Internet.cmd", "Stop-QStudy.cmd"):
             (self.root / name).write_text("@echo fixture\n", encoding="utf-8")
-        (self.root / "Stop-QStudy.cmd").write_text("do-not-export-obsolete-command\n", encoding="utf-8")
         for path in (self.root / ".local" / "private.txt", self.root / "frontend" / "node_modules" / "private.txt", self.root / "frontend" / ".next" / "private.txt", self.root / "output" / "private.txt"):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("do-not-export-runtime-secret", encoding="utf-8")
@@ -189,8 +188,7 @@ class TransferTests(TransferFixture):
         with zipfile.ZipFile(archive) as source:
             names = source.namelist()
             exported_buttons = {name for name in names if name.count("/") == 1 and name.endswith(".cmd")}
-            self.assertEqual(exported_buttons, {"QStudy/Install-QStudy.cmd", "QStudy/Start-QStudy.cmd", "QStudy/Start-QStudy-LAN.cmd", "QStudy/Start-QStudy-Internet.cmd"})
-            self.assertNotIn("QStudy/Stop-QStudy.cmd", names)
+            self.assertEqual(exported_buttons, {"QStudy/Install-QStudy.cmd", "QStudy/Start-QStudy.cmd", "QStudy/Start-QStudy-LAN.cmd", "QStudy/Start-QStudy-Internet.cmd", "QStudy/Stop-QStudy.cmd"})
             self.assertIn("QStudy/backend/app/example.py", names)
             self.assertIn("QStudy/backend/requirements.txt", names)
             self.assertNotIn("do-not-export-runtime-secret", b"".join(source.read(name) for name in names).decode("utf-8", errors="ignore"))

@@ -13,13 +13,13 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-import { useLumaBall } from "@/components/lumaball/context";
+import { useQBall } from "@/components/lumaball/context";
 
 function CourtIllustration() {
   return (
     <div
       className="lb-scene"
-      aria-label="Иллюстрация футбольного поля LumaBall"
+      aria-label="Иллюстрация футбольного поля QBall"
       role="img"
     >
       <span className="lb-scene-orbit lb-scene-orbit-one" />
@@ -86,8 +86,8 @@ function CourtIllustration() {
   );
 }
 
-export default function LumaBallHome() {
-  const { config, identity, error, loading } = useLumaBall();
+export default function QBallHome() {
+  const { config, identity, error, loading } = useQBall();
   return (
     <main>
       <section className="lb-hero lb-container" aria-labelledby="lb-hero-title">
@@ -102,7 +102,7 @@ export default function LumaBallHome() {
           </h1>
           <p className="lb-hero-description">{config.description}</p>
           <div className="lb-hero-actions">
-            <Link href="/lumaball/play" className="lb-button lb-button-primary">
+            <Link href="/qball/play" className="lb-button lb-button-primary">
               Время играть <ArrowUpRight size={19} />
             </Link>
             <a href="#how-to-play" className="lb-text-button">
@@ -205,7 +205,7 @@ export default function LumaBallHome() {
               Футбол встречает аэрохоккей: простая физика, быстрые решения и
               удовольствие от точного удара.
             </p>
-            <Link className="lb-text-button" href="/lumaball/play">
+            <Link className="lb-text-button" href="/qball/play">
               Выбрать комнату <ArrowRight size={17} />
             </Link>
           </div>
@@ -251,7 +251,7 @@ export default function LumaBallHome() {
             Личная комната? Задайте пароль при создании и поделитесь им с
             друзьями.
           </p>
-          <Link href="/lumaball/play">
+          <Link href="/qball/play">
             Увидимся на поле <ArrowUpRight size={16} />
           </Link>
         </div>
@@ -259,7 +259,7 @@ export default function LumaBallHome() {
       <section className="lb-final-cta lb-container">
         <span className="lb-eyebrow">УЧЁБА ПОДОЖДЁТ ПЯТЬ МИНУТ</span>
         <h2>Хороший момент, чтобы сыграть.</h2>
-        <Link href="/lumaball/play" className="lb-button lb-button-primary">
+        <Link href="/qball/play" className="lb-button lb-button-primary">
           Найти свой матч <ArrowUpRight size={18} />
         </Link>
         <span className="lb-cta-spark">✦</span>

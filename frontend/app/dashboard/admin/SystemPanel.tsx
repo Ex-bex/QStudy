@@ -320,10 +320,10 @@ export default function SystemPanel() {
 
   return (
     <div className={styles.system}>
-      <section aria-labelledby="host-heading">
+      <section aria-labelledby="host-heading" id="system-host">
         <div className="academic-section-heading">
           <h2 id="host-heading">
-            <Server size={18} /> Работа сайта
+            <Server size={18} /> Работа и остановка сайта
           </h2>
           <button
             className="btn btn-secondary"
@@ -373,9 +373,10 @@ export default function SystemPanel() {
               </div>
               {!canControl && (
                 <p className={styles.note}>
-                  Управление запуском доступно после запуска QStudy новой
-                  кнопкой Start-QStudy.cmd, Start-QStudy-LAN.cmd или
-                  Start-QStudy-Internet.cmd на компьютере хоста.
+                  Для остановки на компьютере хоста есть отдельный файл{" "}
+                  <strong>Stop-QStudy.cmd</strong>. Управление из браузера
+                  доступно при запуске через Start-QStudy.cmd,
+                  Start-QStudy-LAN.cmd или Start-QStudy-Internet.cmd.
                 </p>
               )}
               {host?.last_action?.status === "failed" && (
@@ -401,7 +402,7 @@ export default function SystemPanel() {
                 </button>
                 <button
                   className="btn btn-danger"
-                  disabled={!canControl || disabled}
+                  disabled={disabled}
                   onClick={() => setControlConfirmation("stop")}
                 >
                   <Power size={15} /> Остановить сайт
@@ -415,30 +416,36 @@ export default function SystemPanel() {
                 >
                   <strong>
                     {controlConfirmation === "stop"
-                      ? "Остановить QStudy для всех пользователей?"
+                      ? canControl
+                        ? "Остановить QStudy и игру для всех пользователей?"
+                        : "Как остановить сайт на этом хосте"
                       : "Перезапустить QStudy?"}
                   </strong>
                   <p>
                     {controlConfirmation === "stop"
-                      ? "Аккаунты, материалы и настройки сохранятся. Чтобы включить сайт снова, откройте кнопку запуска на компьютере хоста."
+                      ? canControl
+                        ? "Завершатся работа сайта и все игровые комнаты. Аккаунты, материалы и настройки сохранятся. Чтобы включить сайт снова, откройте нужный Start-QStudy на компьютере хоста."
+                        : "Откройте папку QStudy на компьютере хоста и дважды щёлкните Stop-QStudy.cmd. Если приложение запущено вручную в терминале или Docker, остановите именно этот запуск в его терминале или Docker Desktop. Данные сохранятся. Для последующего управления из браузера запустите сайт штатным Start-QStudy."
                       : "Сайт станет ненадолго недоступен. Данные и пароли аккаунтов сохранятся."}
                   </p>
                   <div className={styles.actions}>
-                    <button
-                      className="btn btn-primary"
-                      disabled={disabled}
-                      onClick={() => {
-                        void requestAction(controlConfirmation);
-                      }}
-                    >
-                      Подтвердить
-                    </button>
+                    {(canControl || controlConfirmation !== "stop") && (
+                      <button
+                        className="btn btn-primary"
+                        disabled={disabled}
+                        onClick={() => {
+                          void requestAction(controlConfirmation);
+                        }}
+                      >
+                        Подтвердить
+                      </button>
+                    )}
                     <button
                       className="btn btn-secondary"
                       disabled={disabled}
                       onClick={() => setControlConfirmation(null)}
                     >
-                      Отмена
+                      {canControl ? "Отмена" : "Понятно"}
                     </button>
                   </div>
                 </div>

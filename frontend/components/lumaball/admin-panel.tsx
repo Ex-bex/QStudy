@@ -221,7 +221,7 @@ export default function LumaAdminPanel() {
     { name: "name", label: "Игровое имя", required: true },
     {
       name: "banned",
-      label: "Заблокировать доступ к LumaBall",
+      label: "Заблокировать доступ к QBall",
       type: "checkbox",
     },
     { name: "ban_reason", label: "Причина блокировки", type: "textarea" },
@@ -229,7 +229,7 @@ export default function LumaAdminPanel() {
   if (user.role !== "admin")
     return (
       <p className="muted">
-        Управление LumaBall доступно администратору QStudy.
+        Управление QBall доступно администратору QStudy.
       </p>
     );
 
@@ -237,12 +237,12 @@ export default function LumaAdminPanel() {
     <div className={styles.admin}>
       <header className={styles.heading}>
         <div>
-          <p className={styles.eyebrow}>QSTUDY × LUMABALL</p>
+          <p className={styles.eyebrow}>QSTUDY × QBALL</p>
           <h1>Центр игрового притяжения</h1>
           <p>Оформление, комнаты, игроки и история матчей в одном месте.</p>
         </div>
-        <Link className={styles.primary} href="/lumaball">
-          Открыть LumaBall <ArrowUpRight size={17} />
+        <Link className={styles.primary} href="/qball">
+          Открыть QBall <ArrowUpRight size={17} />
         </Link>
       </header>
       <div className={styles.stats}>
@@ -273,7 +273,7 @@ export default function LumaAdminPanel() {
           </div>
         ))}
       </div>
-      <nav className={styles.tabs} aria-label="Управление LumaBall">
+      <nav className={styles.tabs} aria-label="Управление QBall">
         {(
           [
             { id: "settings", label: "Площадка", Icon: CircleDot },
@@ -323,7 +323,7 @@ export default function LumaAdminPanel() {
             initial={settings}
             onSaved={(value) => {
               setSettings(value);
-              setNotice("Настройки LumaBall сохранены.");
+              setNotice("Настройки QBall сохранены.");
               window.dispatchEvent(new Event("lumaball:updated"));
             }}
           />
@@ -477,7 +477,7 @@ export default function LumaAdminPanel() {
                           Убрать пароль
                         </button>
                       )}
-                    <Link href={`/lumaball/room/${room.id}`}>
+                    <Link href={`/qball/room/${room.id}`}>
                       Открыть <ArrowUpRight size={13} />
                     </Link>
                   </div>
@@ -531,7 +531,7 @@ export default function LumaAdminPanel() {
             <div>
               <h2>Игровые профили</h2>
               <p>
-                Ограничения действуют в LumaBall. Учебные аккаунты управляются в
+                Ограничения действуют в QBall. Учебные аккаунты управляются в
                 основном центре.
               </p>
             </div>
@@ -605,7 +605,7 @@ export default function LumaAdminPanel() {
                         {player.user_id !== user.id && !player.is_admin && (
                           <DeleteButton
                             title={`Удалить игровой профиль ${player.name}?`}
-                            description="Удалятся только игровой профиль и гостевые ключи LumaBall. Аккаунт QStudy, пароль и учебные данные сохранятся."
+                            description="Удалятся только игровой профиль и гостевые ключи QBall. Аккаунт QStudy, пароль и учебные данные сохранятся."
                             endpoint={`/admin/lumaball/players/${player.id}`}
                             onDeleted={() => {
                               void refreshPlayers();
@@ -778,7 +778,7 @@ function SettingsForm({
         <section className={styles.panel}>
           <div className={styles.sectionHeading}>
             <div>
-              <h2>Лицо LumaBall</h2>
+              <h2>Лицо QBall</h2>
               <p>Тексты главной страницы и правила сообщества.</p>
             </div>
           </div>
@@ -839,7 +839,7 @@ function SettingsForm({
                 {
                   key: "guests_enabled",
                   label: "Разрешить гостей",
-                  hint: "Игра без регистрации с именем guest# и личным номером.",
+                  hint: "Игра без регистрации с именем guest# и случайным номером.",
                 },
                 {
                   key: "guest_create_rooms",
@@ -964,13 +964,13 @@ function SettingsForm({
         <div className={styles.panel}>
           <div className={styles.sectionHeading}>
             <div>
-              <h2>Логотип LumaBall</h2>
+              <h2>Логотип QBall</h2>
               <p>Прозрачный PNG. Можно заменить в любое время.</p>
             </div>
           </div>
           <LogoUpload<LumaConfig>
-            title="Логотип LumaBall"
-            currentUrl={form.logo_url || "/branding/lumaball-mark.svg"}
+            title="Логотип QBall"
+            currentUrl={form.logo_url || "/branding/qball-logo.png"}
             custom={Boolean(form.logo_url)}
             endpoint="/admin/lumaball/logo"
             onSaved={(result) => {
@@ -984,7 +984,7 @@ function SettingsForm({
           <h3>Один аккаунт — два пространства</h3>
           <p>
             Игроки QStudy входят без повторной регистрации. Блокировка игрового
-            профиля ограничивает доступ только к LumaBall.
+            профиля ограничивает доступ только к QBall.
           </p>
           <Link href="/dashboard/admin">
             Управлять аккаунтами <ArrowUpRight size={14} />

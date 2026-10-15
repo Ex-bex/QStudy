@@ -150,14 +150,14 @@ export default function AdminPage() {
                   verticalAlign: "-3px",
                 }}
               />
-              LumaBall
+              QBall
             </h2>
             <p className="muted" style={{ marginTop: 7 }}>
               Игровая площадка, логотип, комнаты, участники и история матчей.
             </p>
           </div>
-          <Link href="/dashboard/admin/lumaball" className="btn btn-secondary">
-            Управлять LumaBall <ArrowUpRight size={16} />
+          <Link href="/dashboard/admin/qball" className="btn btn-secondary">
+            Управлять QBall <ArrowUpRight size={16} />
           </Link>
         </div>
       </section>

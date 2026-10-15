@@ -261,15 +261,32 @@ try {
   assert.match(expiredGuest.headers.get("set-cookie"), /lumaball_guest=;/);
   assert.doesNotMatch(expiredGuest.headers.get("set-cookie"), /qstudy_session/);
   assert.equal(
-    (await fetch(origin + "/lumaball")).status,
+    (await fetch(origin + "/qball")).status,
     200,
     "production build serves the public introduction",
   );
   assert.equal(
-    (await fetch(origin + "/lumaball/play")).status,
+    (await fetch(origin + "/qball/play")).status,
     200,
     "production build serves the guest-capable lobby",
   );
+  for (const [before, after] of [
+    ["/lumaball?from=invite", "/qball?from=invite"],
+    ["/lumaball/play", "/qball/play"],
+    [
+      "/lumaball/room/" + "a".repeat(32) + "?from=invite",
+      "/qball/room/" + "a".repeat(32) + "?from=invite",
+    ],
+    ["/dashboard/admin/lumaball", "/dashboard/admin/qball"],
+  ]) {
+    const redirect = await fetch(origin + before, { redirect: "manual" });
+    assert.equal(redirect.status, 307);
+    const location = new URL(redirect.headers.get("location"), origin);
+    assert.equal(location.pathname + location.search, after);
+  }
+  const brand = await fetch(origin + "/branding/qball-logo.png");
+  assert.equal(brand.status, 200);
+  assert.match(brand.headers.get("content-type"), /image\/png/);
   const stopBegan = Date.now();
   const stopped = new Promise((resolve) =>
     child.once("exit", (code) => resolve(code)),
@@ -290,7 +307,7 @@ try {
   );
   assert.ok(Date.now() - stopBegan < 8000, "detached child stops promptly");
   console.log(
-    "Native built-server integration passed: HTTP login/cookie, LumaBall HttpOnly guest/member sessions and public pages, CSRF, exact Host, signed socket IP, private-file graceful stop. Disposable loopback API only.",
+    "Native built-server integration passed: HTTP login/cookie, QBall HttpOnly sessions, public pages, legacy redirects, PNG logo, CSRF, exact Host, signed socket IP, private-file graceful stop. Disposable loopback API only.",
   );
 } finally {
   if (child && child.exitCode === null) {

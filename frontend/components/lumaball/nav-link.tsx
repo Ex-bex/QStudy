@@ -4,9 +4,9 @@ import styles from "./nav-link.module.css";
 
 export default function LumaNavLink() {
   return (
-    <Link href="/lumaball" className={styles.link}>
+    <Link href="/qball" className={styles.link}>
       <Gamepad2 size={15} />
-      <span>LumaBall</span>
+      <span>QBall</span>
     </Link>
   );
 }

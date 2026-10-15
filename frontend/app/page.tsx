@@ -22,7 +22,7 @@ export default function Home() {
           <a href="#space">Пространство</a>
           <a href="#how-it-works">Как это работает</a>
           <a href="#assistant">ИИ-помощник</a>
-          <Link href="/lumaball">LumaBall</Link>
+          <Link href="/qball">QBall</Link>
           <Link href="/developers">Разработчики</Link>
         </nav>
         <div className="landing-actions">

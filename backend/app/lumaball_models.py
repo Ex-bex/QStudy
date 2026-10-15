@@ -1,4 +1,7 @@
-"""LumaBall records share QStudy's engine, accounts, and backup lifecycle."""
+"""QBall records share QStudy's engine, accounts, and backup lifecycle.
+
+The original internal table names remain stable for existing installations.
+"""
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text

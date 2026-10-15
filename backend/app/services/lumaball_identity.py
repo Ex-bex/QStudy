@@ -65,7 +65,7 @@ class IceServer(BaseModel):
 class GameSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     enabled: bool = True
-    title: str = Field(default="LumaBall", min_length=1, max_length=60)
+    title: str = Field(default="QBall", min_length=1, max_length=60)
     description: str = Field(default="Футбол в браузере. Быстрые матчи, своя команда и один точный удар.", max_length=500)
     announcement: str = Field(default="", max_length=300)
     rules: str = Field(default="Играйте честно, уважайте соперников и не мешайте другим участникам. Управление: WASD или стрелки, пробел — удар.", max_length=5000)
@@ -93,12 +93,28 @@ class GameSettings(BaseModel):
         return self
 
 
+def upgrade_default_brand(db) -> bool:
+    """Rename the original default without replacing administrator settings."""
+    row = db.get(LumaBallSettings, "site")
+    if row is None:
+        return False
+    try:
+        values = json.loads(row.value_json)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(values, dict) or values.get("title") != "LumaBall":
+        return False
+    values["title"] = "QBall"
+    row.value_json = json.dumps(values, ensure_ascii=False)
+    return True
+
+
 def get_settings(db) -> GameSettings:
     row = db.get(LumaBallSettings, "site")
     try:
         return GameSettings.model_validate(json.loads(row.value_json)) if row else GameSettings()
     except (ValueError, TypeError):
-        raise HTTPException(503, "Настройки LumaBall повреждены. Обратитесь к администратору")
+        raise HTTPException(503, "Настройки QBall повреждены. Обратитесь к администратору")
 
 
 def get_config(db) -> dict:
@@ -150,11 +166,11 @@ def _check_profile(profile, db, *, expected_version=None):
                                   or (expected_version is not None and user.token_version != expected_version)):
         raise HTTPException(401, "Сессия QStudy завершена. Войдите снова")
     if profile.banned:
-        raise HTTPException(403, "Доступ к LumaBall ограничен администратором")
+        raise HTTPException(403, "Доступ к QBall ограничен администратором")
     admin = bool(user and user.role == "admin" and user.is_active)
     config = get_settings(db)
     if not config.enabled and not admin:
-        raise HTTPException(503, "LumaBall временно закрыт администратором")
+        raise HTTPException(503, "QBall временно закрыт администратором")
     if profile.kind == "guest" and not config.guests_enabled:
         raise HTTPException(403, "Гостевой вход отключён. Войдите в QStudy")
     return Identity(profile, admin, user, token_version=user.token_version if user else None)
@@ -234,13 +250,13 @@ def resolve_identity(request: Request, db, create_guest=False) -> Identity:
         credential = db.get(LumaBallGuestCredential, _digest(guest)) if _TOKEN.fullmatch(guest) else None
         if (credential is None or credential.expires_at <= utcnow()
                 or not _after_restore_cutoff(credential.created_at, db)):
-            raise HTTPException(401, "Гостевая сессия истекла. Откройте LumaBall заново")
+            raise HTTPException(401, "Гостевая сессия истекла. Откройте QBall заново")
         return _check_profile(db.get(LumaBallProfile, credential.profile_id), db)
     if not create_guest:
         raise HTTPException(401, "Начните игру или войдите в QStudy")
     config = get_settings(db)
     if not config.enabled:
-        raise HTTPException(503, "LumaBall временно закрыт администратором")
+        raise HTTPException(503, "QBall временно закрыт администратором")
     if not config.guests_enabled:
         raise HTTPException(403, "Гостевой вход отключён. Войдите в QStudy")
     return _create_guest(db)

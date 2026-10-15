@@ -1,4 +1,4 @@
-"""Public LumaBall entry and administrator controls, sharing QStudy auth."""
+"""Public QBall entry and administrator controls, sharing QStudy auth."""
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -84,7 +84,7 @@ def change_nickname(data: Nickname, request: Request, db: Session = Depends(get_
 def public_logo(request: Request, db: Session = Depends(get_db)):
     asset = db.get(BrandingAsset, "lumaball")
     if asset is None:
-        raise HTTPException(404, "Логотип LumaBall пока не загружен")
+        raise HTTPException(404, "Логотип QBall пока не загружен")
     headers = {"Cache-Control": "no-cache", "ETag": f'"{asset.digest}"', "X-Content-Type-Options": "nosniff"}
     if request.headers.get("if-none-match") == headers["ETag"]:
         return Response(status_code=304, headers=headers)

@@ -2,6 +2,20 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  async redirects() {
+    return [
+      {
+        source: "/lumaball/:path*",
+        destination: "/qball/:path*",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/admin/lumaball",
+        destination: "/dashboard/admin/qball",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {

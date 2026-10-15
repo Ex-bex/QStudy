@@ -26,6 +26,7 @@ import {
   X,
   Workflow,
   Gamepad2,
+  Power,
 } from "lucide-react";
 import Brand from "@/components/brand";
 import NotificationsBell from "@/lib/notifications";
@@ -46,7 +47,7 @@ const sections = [
         label: "Связь с разработчиками",
         icon: MessageSquare,
       },
-      { href: "/lumaball", label: "LumaBall", icon: Gamepad2 },
+      { href: "/qball", label: "QBall", icon: Gamepad2 },
     ],
   },
   {
@@ -245,6 +246,14 @@ function Shell({ children }: { children: React.ReactNode }) {
               >
                 <ShieldCheck />
                 Администратор
+              </Link>
+              <Link
+                onClick={() => setOpen(false)}
+                href="/dashboard/admin#system-host"
+                className="nav-link"
+              >
+                <Power />
+                Остановить сайт
               </Link>
             </>
           )}

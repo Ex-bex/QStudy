@@ -85,7 +85,9 @@ async def lifespan(app: FastAPI):
     initialize_database()
     initialize_operations(engine)
     from app.services.lumaball_rooms import initialize_rooms
+    from app.services.lumaball_identity import upgrade_default_brand
     with SessionLocal() as db:
+        upgrade_default_brand(db)
         initialize_rooms(db)
     await lumaball_realtime.hub.start()
     await background.start_workers()

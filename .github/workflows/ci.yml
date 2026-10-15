@@ -47,6 +47,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QStudyNativeLauncher.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QStudyNativeStop.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QStudyInstaller.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s scripts/tests -p "test_native*.py"
@@ -78,7 +80,7 @@ jobs:
       - name: Native production HTTP integration
         working-directory: frontend
         run: node lib/native-server.integration.mjs
-      - name: LumaBall production WebSocket and persistence integration
+      - name: QBall production WebSocket and persistence integration
         run: python scripts/tests/lumaball_stack.py --run
 
   production:

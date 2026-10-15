@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import PasswordInput from "@/components/password-input";
 import type { LumaList, LumaRoom } from "@/types/lumaball";
-import { lumaApi, useLumaBall } from "./context";
+import { lumaApi, useQBall } from "./context";
 
 const statusLabels: Record<LumaRoom["status"], string> = {
   lobby: "Собираем команду",
@@ -34,7 +34,7 @@ const statusLabels: Record<LumaRoom["status"], string> = {
 };
 
 export default function LumaLobby() {
-  const { config, identity, loading: identityLoading, enter } = useLumaBall();
+  const { config, identity, loading: identityLoading, enter } = useQBall();
   const router = useRouter();
   const [rooms, setRooms] = useState<LumaRoom[]>([]);
   const [loading, setLoading] = useState(true);
@@ -161,7 +161,7 @@ export default function LumaLobby() {
         method: "POST",
         body: JSON.stringify({ password: roomPassword }),
       });
-      router.push(`/lumaball/room/${encodeURIComponent(room.id)}`);
+      router.push(`/qball/room/${encodeURIComponent(room.id)}`);
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Не удалось войти в комнату.";
@@ -187,7 +187,7 @@ export default function LumaLobby() {
           time_limit: timeLimit || config.time_limit,
         }),
       });
-      router.push(`/lumaball/room/${encodeURIComponent(room.id)}`);
+      router.push(`/qball/room/${encodeURIComponent(room.id)}`);
     } catch (cause) {
       setCreateError(
         cause instanceof Error ? cause.message : "Не удалось создать комнату.",
@@ -198,8 +198,8 @@ export default function LumaLobby() {
 
   return (
     <main className="lb-container lb-lobby">
-      <Link className="lb-back-link" href="/lumaball">
-        <ArrowLeft size={14} /> О LumaBall
+      <Link className="lb-back-link" href="/qball">
+        <ArrowLeft size={14} /> О QBall
       </Link>
       <div className="lb-lobby-heading">
         <div>
@@ -364,13 +364,13 @@ export default function LumaLobby() {
             {!identity && (
               <Link
                 className="lb-button lb-button-outline"
-                href="/login?next=%2Flumaball%2Fplay"
+                href="/login?next=%2Fqball%2Fplay"
               >
                 Войти через QStudy <ArrowUpRight size={16} />
               </Link>
             )}
             {identity?.is_admin && (
-              <Link href="/dashboard/admin/lumaball" className="lb-text-button">
+              <Link href="/dashboard/admin/qball" className="lb-text-button">
                 Управление игрой <ArrowUpRight size={15} />
               </Link>
             )}
@@ -393,7 +393,7 @@ export default function LumaLobby() {
           </div>
           {!config.enabled && (
             <div className="lb-inline-notice">
-              LumaBall временно закрыт администратором.
+              QBall временно закрыт администратором.
             </div>
           )}
           {config.enabled && !config.guests_enabled && !identity && (

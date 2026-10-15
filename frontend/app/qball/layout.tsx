@@ -1,19 +1,23 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { LumaBallProvider } from "@/components/lumaball/context";
+import { QBallProvider } from "@/components/lumaball/context";
 import LumaShell from "@/components/lumaball/shell";
-import "./lumaball.css";
+import "./qball.css";
 
 export const metadata: Metadata = {
-  title: "LumaBall — время сыграть",
+  title: "QBall — время сыграть",
   description:
     "Динамичный футбол в браузере. Создайте комнату, соберите команду и играйте с аккаунтом QStudy или в гостевом режиме.",
+  icons: {
+    icon: "/branding/qball-logo.png",
+    apple: "/branding/qball-logo.png",
+  },
 };
 
-export default function LumaBallLayout({ children }: { children: ReactNode }) {
+export default function QBallLayout({ children }: { children: ReactNode }) {
   return (
-    <LumaBallProvider>
+    <QBallProvider>
       <LumaShell>{children}</LumaShell>
-    </LumaBallProvider>
+    </QBallProvider>
   );
 }

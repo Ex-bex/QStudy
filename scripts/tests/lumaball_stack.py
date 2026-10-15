@@ -263,8 +263,12 @@ def main():
                 student = stack.enter_context(httpx.Client(base_url=site_url, headers={"Origin": site_url}, timeout=12, trust_env=False))
 
                 stage = "checking public pages and HttpOnly guest sessions"
-                landing = host.get("/lumaball")
-                require(landing.status_code == 200 and "LumaBall" in landing.text, "Public game landing page did not render")
+                landing = host.get("/qball")
+                require(landing.status_code == 200 and "QBall" in landing.text, "Public game landing page did not render")
+                legacy = host.get("/lumaball?from=invite")
+                require(legacy.status_code == 307 and legacy.headers.get("location", "").endswith("/qball?from=invite"),
+                        "Legacy game links did not redirect to QBall with their query")
+                require(host.get("/branding/qball-logo.png").status_code == 200, "Bundled QBall PNG logo is missing")
                 host_session, host_response = session(host)
                 peer_session, peer_response = session(peer)
                 host_identity, peer_identity = host_session["identity"], peer_session["identity"]
@@ -290,7 +294,7 @@ def main():
                     require("qstudy_session" in client.cookies, "QStudy login did not set its session cookie")
                 member_session, _ = session(student)
                 require(member_session["identity"]["kind"] == "user" and member_session["identity"].get("user_id") is not None,
-                        "LumaBall did not reuse the signed-in QStudy account")
+                        "QBall did not reuse the signed-in QStudy account")
                 require(student.get("/api/admin/lumaball/settings").status_code == 403, "Student gained administrator privileges")
                 response_json(admin.patch("/api/admin/lumaball/settings", json={"announcement": "Fixture persisted announcement"}))
 
@@ -370,7 +374,7 @@ def main():
         reason = str(error) if isinstance(error, StackFailure) else type(error).__name__
         if isinstance(error, OSError):
             reason += f" (errno={error.errno}, winerror={getattr(error, 'winerror', None)})"
-        print(f"FAIL: LumaBall disposable stack at {stage}: {reason}", file=sys.stderr)
+        print(f"FAIL: QBall disposable stack at {stage}: {reason}", file=sys.stderr)
         return 1
 
 

@@ -1,6 +1,6 @@
 import GameRoom from "@/components/lumaball/game-room";
 
-export default async function LumaBallRoomPage({
+export default async function QBallRoomPage({
   params,
 }: {
   params: Promise<{ roomId: string }>;

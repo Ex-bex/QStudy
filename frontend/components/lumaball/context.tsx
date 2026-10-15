@@ -12,7 +12,7 @@ import type { LumaConfig, LumaIdentity, LumaSession } from "@/types/lumaball";
 
 export const DEFAULT_LUMA_CONFIG: LumaConfig = {
   enabled: true,
-  title: "LumaBall",
+  title: "QBall",
   description:
     "Маленькое поле. Большие эмоции. Футбол в браузере, где решают реакция и командная игра.",
   announcement: "",
@@ -69,7 +69,7 @@ type LumaContextValue = {
 
 const LumaContext = createContext<LumaContextValue | null>(null);
 
-export function LumaBallProvider({ children }: { children: ReactNode }) {
+export function QBallProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState(DEFAULT_LUMA_CONFIG);
   const [identity, setIdentity] = useState<LumaIdentity | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,7 +95,7 @@ export function LumaBallProvider({ children }: { children: ReactNode }) {
       setError(
         cause instanceof Error
           ? cause.message
-          : "Не удалось загрузить LumaBall.",
+          : "Не удалось загрузить QBall.",
       );
     } finally {
       setLoading(false);
@@ -135,8 +135,8 @@ export function LumaBallProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useLumaBall() {
+export function useQBall() {
   const value = useContext(LumaContext);
-  if (!value) throw new Error("LumaBallProvider is required");
+  if (!value) throw new Error("QBallProvider is required");
   return value;
 }

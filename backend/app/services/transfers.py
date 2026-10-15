@@ -39,7 +39,7 @@ MAX_MANIFEST = 8 * 1024 ** 2
 MAX_SETTINGS = 128 * 1024
 EXPIRES_HOURS = 24
 _SOURCE_ROOTS = {"frontend", "scripts", "docs", "assets", ".github"}
-_ROOT_FILES = {"README.md", "LICENSE", ".gitignore", ".gitattributes", ".dockerignore", "Install-QStudy.cmd", "Start-QStudy.cmd", "Start-QStudy-LAN.cmd", "Start-QStudy-Internet.cmd"}
+_ROOT_FILES = {"README.md", "LICENSE", ".gitignore", ".gitattributes", ".dockerignore", "Install-QStudy.cmd", "Start-QStudy.cmd", "Start-QStudy-LAN.cmd", "Start-QStudy-Internet.cmd", "Stop-QStudy.cmd"}
 _EXCLUDED = {"node_modules", ".next", ".venv", "venv", "__pycache__", ".git", ".local", ".backups", "data", "uploads", "output", "local-documents", "build", "dist", "out"}
 _COUNT_TABLES = {"accounts": "users", "groups": "student_groups", "courses": "courses", "documents": "syllabus_documents"}
 

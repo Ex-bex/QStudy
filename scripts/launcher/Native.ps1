@@ -1,4 +1,4 @@
-﻿# The four root buttons use this native Windows runtime. No Docker or data restore.
+﻿# The root launch and stop buttons use this native Windows runtime. No data restore.
 . (Join-Path $PSScriptRoot '..\QStudy.Common.ps1')
 . (Join-Path $PSScriptRoot '..\QStudy.Install.ps1')
 
@@ -138,6 +138,23 @@ function Read-QStudyNativeState([string]$Root) {
     return $state
 }
 
+function Get-QStudyNativeStorageOwner([string]$Path) {
+    return (Get-Item -LiteralPath $Path -Force).GetAccessControl([Security.AccessControl.AccessControlSections]::Owner).GetOwner([Security.Principal.SecurityIdentifier]).Value
+}
+
+function Assert-QStudyNativeStopOwner([string]$Root) {
+    $localPath = Assert-QStudyNativePath $Root (Join-Path $Root '.local')
+    if (-not (Test-Path -LiteralPath $localPath)) { return }
+    $caller = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if (-not (Test-Path -LiteralPath $localPath -PathType Container) -or (Get-QStudyNativeStorageOwner $localPath) -cne $caller) {
+        throw 'QStudy: остановите сайт из того же Windows-аккаунта, которым он был запущен. Владелец и права служебной папки не изменены.'
+    }
+    $state = Read-QStudyInstallJson (Join-Path $Root '.local\launcher\state.json')
+    if ($null -ne $state -and $state.root -ceq $Root -and $state.computer -ceq (Get-QStudyComputerFingerprint) -and $state.owner_sid -cne $caller) {
+        throw 'QStudy: действующий запуск принадлежит другому Windows-аккаунту. Процессы, данные и права доступа не изменены.'
+    }
+}
+
 function Stop-QStudyNativeState([string]$Root, $State, $Runtime) {
     if ($null -eq $State) { return }
     # Admin restart replaces child PIDs. Recover only the latest private status
@@ -155,9 +172,15 @@ function Stop-QStudyNativeState([string]$Root, $State, $Runtime) {
             }
         }
     }
-    if ($null -ne (Get-QStudyOwnedProcess $State.supervisor.identity)) {
-        $configPath = Join-Path $Root '.local\launcher\launch.json'
-        & $Runtime.python -I (Join-Path $Root 'scripts\launcher\control.py') --config $configPath --action stop
+    $supervisor = Get-QStudyOwnedProcess $State.supervisor.identity
+    if ($null -ne $supervisor) {
+        $configPath = Assert-QStudyNativePath $Root (Join-Path $Root '.local\launcher\launch.json')
+        $config = Read-QStudyInstallJson $configPath
+        if ($null -eq $config -or $config.root -cne $Root -or $config.instance -cne $State.instance -or $config.owner_sid -cne $State.owner_sid) {
+            throw 'QStudy: состояние управления не соответствует действующему запуску. Процессы и данные сохранены.'
+        }
+        # Stopping must not install dependencies or trust a copied runtime path.
+        & $supervisor.ExecutablePath -I (Join-Path $Root 'scripts\launcher\control.py') --config $configPath --action stop
         if ($LASTEXITCODE -ne 0) { throw 'QStudy: уже выполняется команда администратора. Дождитесь её завершения и повторите запуск.' }
         $deadline = [DateTime]::UtcNow.AddSeconds(100)
         while ($null -ne (Get-QStudyOwnedProcess $State.supervisor.identity) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
@@ -165,6 +188,32 @@ function Stop-QStudyNativeState([string]$Root, $State, $Runtime) {
     }
     # An interrupted supervisor can leave only its originally verified children.
     foreach ($name in @('frontend', 'backend')) { if ($null -ne $State.$name) { Stop-QStudyRecord $State.$name } }
+}
+
+function Stop-QStudySite([string]$Root) {
+    $state = Read-QStudyNativeState $Root
+    if ($null -ne $state) {
+        Stop-QStudyNativeState $Root $state $null
+        $statePath = Assert-QStudyNativePath $Root (Join-Path $Root '.local\launcher\state.json')
+        foreach ($name in @('supervisor', 'frontend', 'backend')) {
+            if ($null -ne $state.$name -and $null -ne (Get-QStudyOwnedProcess $state.$name.identity)) {
+                throw 'QStudy: сайт ещё завершает работу. Повторите Stop-QStudy.cmd через минуту; состояние сохранено.'
+            }
+        }
+        # Clear process state only after success. Keep data choice and settings.
+        if (Test-Path -LiteralPath $statePath -PathType Leaf) { Remove-Item -LiteralPath $statePath -Force }
+    }
+    # The original development launcher has its own ownership-checked state.
+    # Never kill arbitrary python/node processes or processes on an occupied port.
+    $legacy = Read-QStudyState
+    foreach ($name in @('frontend', 'backend')) {
+        if ($null -ne $legacy.$name) {
+            Stop-QStudyRecord $legacy.$name
+            $legacy.$name = $null
+            Write-QStudyState $legacy
+        }
+    }
+    Disable-QStudyNativeNetwork -Root $Root
 }
 
 function New-QStudyNativeChildRecord([string]$Name, [int]$ProcessId, [string]$Root, [string]$Instance, [int]$Port, [string]$Bind, [string]$HostHeader = '') {

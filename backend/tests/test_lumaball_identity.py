@@ -29,7 +29,7 @@ from app.operational_models import AuditLog
 from app.routers import lumaball_identity
 from app.services.backups import BackupService, verify_backup
 from app.services.lumaball_identity import (consume_ticket, get_config,
-    resolve_identity, validate_identity)
+    resolve_identity, upgrade_default_brand, validate_identity)
 from starlette.requests import Request
 
 
@@ -99,7 +99,7 @@ class LumaBallIdentityTests(unittest.TestCase):
     def test_public_config_does_not_create_profiles_or_expose_private_records(self):
         response = self.client.get("/api/lumaball/config")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["title"], "LumaBall")
+        self.assertEqual(response.json()["title"], "QBall")
         self.assertIsNone(response.json()["logo_url"])
         self.assertNotIn("ice_servers", response.json())
         self.assertNotIn("private", response.text)
@@ -126,6 +126,46 @@ class LumaBallIdentityTests(unittest.TestCase):
             self.assertEqual(record.digest, hashlib.sha256(token.encode()).hexdigest())
             self.assertNotIn(token, str(record.__dict__))
             self.assertEqual(db.query(User).count(), 2)
+
+    def test_independent_guests_receive_unique_random_numbers_without_qstudy_accounts(self):
+        guests = [self.create_guest() for _ in range(8)]
+        names = [guest["identity"]["name"] for guest in guests]
+        self.assertEqual(len(set(names)), 8)
+        self.assertEqual(len({guest["identity"]["id"] for guest in guests}), 8)
+        for name in names:
+            self.assertRegex(name, r"^guest#[1-9][0-9]{5}$")
+        with self.sessions() as db:
+            self.assertEqual(db.query(User).count(), 2)
+            self.assertEqual({profile.name for profile in db.query(LumaBallProfile)}, set(names))
+            for profile in db.query(LumaBallProfile):
+                self.assertEqual(profile.name, f"guest#{profile.guest_number}")
+
+    def test_default_brand_upgrade_preserves_existing_settings_and_accounts(self):
+        stored = {"title": "LumaBall", "announcement": "Keep this announcement",
+                  "guests_enabled": False, "score_limit": 7}
+        with self.sessions() as db:
+            db.add(LumaBallSettings(key="site", value_json=json.dumps(stored)))
+            db.commit()
+            self.assertTrue(upgrade_default_brand(db))
+            db.commit()
+            self.assertFalse(upgrade_default_brand(db))
+            upgraded = json.loads(db.get(LumaBallSettings, "site").value_json)
+            self.assertEqual(upgraded, {**stored, "title": "QBall"})
+            self.assertEqual(get_config(db)["title"], "QBall")
+            self.assertEqual(db.query(User).count(), 2)
+
+    def test_default_brand_upgrade_preserves_custom_names_and_invalid_settings(self):
+        with self.sessions() as db:
+            self.assertFalse(upgrade_default_brand(db))
+            row = LumaBallSettings(key="site", value_json='{"title":"Our football club"}')
+            db.add(row)
+            db.commit()
+            self.assertFalse(upgrade_default_brand(db))
+            self.assertEqual(get_config(db)["title"], "Our football club")
+            row.value_json = "malformed saved settings"
+            db.commit()
+            self.assertFalse(upgrade_default_brand(db))
+            self.assertEqual(row.value_json, "malformed saved settings")
 
     def test_guest_number_collision_is_retried_without_overwriting_another_guest(self):
         with patch("app.services.lumaball_identity.secrets.randbelow", side_effect=[17, 17, 18]):

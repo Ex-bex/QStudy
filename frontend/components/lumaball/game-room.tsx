@@ -554,7 +554,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   return (
     <section className={styles.room}>
       <div className={styles.topline}>
-        <Link href="/lumaball/play" className={styles.back}>
+        <Link href="/qball/play" className={styles.back}>
           <ArrowLeft size={16} /> Все комнаты
         </Link>
         <span className={styles.transport}>
@@ -564,7 +564,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       </div>
       <header className={styles.header}>
         <div>
-          <span className={styles.eyebrow}>LUMABALL · LIVE ARENA</span>
+          <span className={styles.eyebrow}>QBALL · LIVE ARENA</span>
           <h1>{room?.name || "Футбол начинается здесь"}</h1>
           <p>
             {room
@@ -685,7 +685,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                 </span>
               </div>
               <div className={styles.pitch}>
-                <canvas ref={canvasRef} aria-label="Футбольное поле LumaBall" />
+                <canvas ref={canvasRef} aria-label="Футбольное поле QBall" />
                 {showOverlay && (
                   <div className={styles.overlay}>
                     <div className={styles.overlayCard}>
@@ -1018,7 +1018,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       )}
       <div className={styles.bottomNote}>
         <span>Играйте честно. Уважайте соперников.</span>
-        <Link href="/lumaball/play">
+        <Link href="/qball/play">
           Найти другую игру
           <ArrowRight size={14} />
         </Link>
