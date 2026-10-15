@@ -56,7 +56,7 @@ try {
             ($bootstrapBytes[$index] -eq 13 -and ($index + 1 -ge $bootstrapBytes.Length -or $bootstrapBytes[$index + 1] -ne 10))) { $bareLineBreak = $true; break }
     }
     Assert-Field (-not $bareLineBreak) 'every hybrid CMD line break is raw CRLF, including the embedded PowerShell body'
-    Assert-Field ([IO.File]::ReadAllText((Join-Path $workspace '.gitattributes')) -match '(?m)^assets/distribution/Update-QBall-Field\.cmd[ \t]+-text[ \t]*\r?$') 'Git preserves hybrid CMD raw bytes in the downloadable artifact'
+    Assert-Field ([IO.File]::ReadAllText((Join-Path $workspace '.gitattributes')) -match '(?m)^assets/distribution/Update-QBall-Field\.cmd[ \t]+-text(?:[ \t]+whitespace=cr-at-eol)?[ \t]*\r?$') 'Git preserves hybrid CMD raw bytes in the downloadable artifact'
     $archive = Join-Path $workspace 'assets/distribution/QStudy-QBall-Browser-Fix.zip'
     $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-Field ($actualHash -ceq $script:QBallFieldHash) 'bundled bootstrap pins the real repository package SHA256'
