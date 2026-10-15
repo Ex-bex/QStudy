@@ -8,11 +8,13 @@ from app.database import Base, engine, SessionLocal
 from app.config import settings
 from app.security import rate_limit, client_key, BodySizeLimitMiddleware
 from app.job_models import AIJob
-from app import operational_models
+from app import operational_models, lumaball_models, lumaball_room_models
 from app.services import background, backups
 from app.services.audit import initialize_operations
 from app.routers import (auth_routes, admin, academic, subjects, notes, files, tasks, chat,
-                         exam, cards, search, tests, notifications, lectures, learning, developers, branding, system)
+                         exam, cards, search, tests, notifications, lectures, learning, developers, branding, system,
+                         lumaball_identity, lumaball_rooms)
+from app.services import lumaball_realtime
 
 
 def initialize_database():
@@ -29,6 +31,7 @@ def initialize_database():
             "flashcards": {"source_context_json": "TEXT DEFAULT '{}'"},
             "lectures": {"source_context_json": "TEXT DEFAULT '{}'"},
             "chat_messages": {"source_context_json": "TEXT DEFAULT '{}'"},
+            "lumaball_rooms": {"match_started_at": "DATETIME"},
             "syllabus_documents": {"source_restricted": "BOOLEAN NOT NULL DEFAULT FALSE", "source_sha256": "VARCHAR(64) DEFAULT ''"},
             "student_groups": {"program": "VARCHAR(300) DEFAULT ''", "study_year": "INTEGER", "semester": "INTEGER", "warnings_json": "TEXT DEFAULT '[]'"},
             "schedule_entries": {"start_times_json": "TEXT DEFAULT '[]'", "teacher": "VARCHAR(200) DEFAULT ''", "notes": "TEXT DEFAULT ''",
@@ -81,6 +84,10 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(backups.create_pre_upgrade_backup)
     initialize_database()
     initialize_operations(engine)
+    from app.services.lumaball_rooms import initialize_rooms
+    with SessionLocal() as db:
+        initialize_rooms(db)
+    await lumaball_realtime.hub.start()
     await background.start_workers()
     try:
         await backups.start_backup_scheduler()
@@ -89,7 +96,10 @@ async def lifespan(app: FastAPI):
         try:
             await backups.stop_backup_scheduler()
         finally:
-            await background.stop_workers()
+            try:
+                await background.stop_workers()
+            finally:
+                await lumaball_realtime.hub.stop()
 
 
 app = FastAPI(title="QStudy API", version="2.0.0", lifespan=lifespan)
@@ -106,7 +116,7 @@ async def request_security(request: Request, call_next):
     limit = settings.MAX_UPLOAD_BYTES + 1024 * 1024
     if request.method == "POST" and request.url.path == "/api/admin/system/imports":
         limit = settings.MAX_TRANSFER_BYTES
-    if request.method == "PUT" and request.url.path.startswith("/api/branding/"):
+    if request.method == "PUT" and (request.url.path.startswith("/api/branding/") or request.url.path == "/api/admin/lumaball/logo"):
         limit = min(limit, MAX_LOGO_BYTES + 64 * 1024)
     length = request.headers.get("content-length")
     if length:
@@ -133,8 +143,9 @@ async def request_security(request: Request, call_next):
 
 
 for router in (lectures, auth_routes, admin, academic, subjects, notes, files, tasks, chat,
-               exam, cards, search, tests, notifications, learning, developers, branding, system):
+               exam, cards, search, tests, notifications, learning, developers, branding, system, lumaball_identity, lumaball_rooms):
     app.include_router(router.router, prefix="/api")
+app.include_router(lumaball_realtime.router, prefix="/api")
 
 
 @app.get("/api/health")

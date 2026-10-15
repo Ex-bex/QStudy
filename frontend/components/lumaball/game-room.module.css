@@ -1,0 +1,1084 @@
+.room {
+  max-width: 1380px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 30px 34px;
+  color: #ece6f6;
+  font-family: inherit;
+}
+.room * {
+  box-sizing: border-box;
+}
+.topline,
+.header,
+.headerActions,
+.transport,
+.back,
+.scoreboard,
+.arenaFooter,
+.controls,
+.teamPick,
+.hostControls,
+.hostControls > div,
+.people h2,
+.chat h2,
+.member,
+.memberActions,
+.chatForm,
+.bottomNote,
+.bottomNote a,
+.playerBadge {
+  display: flex;
+  align-items: center;
+}
+.topline {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.back {
+  gap: 9px;
+  color: #aaa0bc;
+  text-decoration: none;
+  font-size: 13px;
+}
+.back:hover {
+  color: #ddc8ff;
+}
+.transport {
+  gap: 7px;
+  color: #a99cbd;
+  font-size: 11px;
+}
+.onlineDot,
+.offlineDot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7fe0be;
+}
+.offlineDot {
+  background: #80748e;
+}
+.header {
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 25px;
+}
+.eyebrow {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: #ac86e8;
+  font-weight: 700;
+}
+.header h1 {
+  font-size: clamp(25px, 3vw, 35px);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 1.2;
+  margin: 7px 0;
+}
+.header p {
+  font-size: 12px;
+  color: #988ca9;
+  margin: 9px 0 0;
+}
+.headerActions {
+  gap: 12px;
+}
+.playerBadge {
+  gap: 8px;
+  font-size: 12px;
+  color: #c4b4d7;
+  padding: 10px 13px;
+  border: 1px solid #33243f;
+  border-radius: 10px;
+  background: #1a1324;
+  max-width: 250px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.room button,
+.room select,
+.room input {
+  font: inherit;
+}
+.room button {
+  cursor: pointer;
+}
+.room button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.iconButton {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 36px;
+  min-height: 36px;
+  border: 1px solid #34263f;
+  background: #1b1425;
+  color: #b8a4cc;
+  border-radius: 9px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 285px;
+  gap: 18px;
+}
+.main {
+  min-width: 0;
+}
+.arena {
+  border: 1px solid #352541;
+  background: #120e1a;
+  border-radius: 15px;
+  overflow: hidden;
+  position: relative;
+}
+.arena:fullscreen {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: #100c17;
+  border-radius: 0;
+}
+.arena:fullscreen .pitch {
+  width: min(100%, 170vh);
+  align-self: center;
+}
+.scoreboard {
+  justify-content: center;
+  gap: 35px;
+  padding: 19px 20px 15px;
+  min-height: 83px;
+  background: linear-gradient(90deg, #1b1325, #181121);
+}
+.scoreboard > span {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 11px;
+  letter-spacing: 0.015em;
+}
+.scoreboard b {
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.05em;
+}
+.scoreboard .clock {
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #e4d9f0;
+  font-size: 19px;
+  min-width: 95px;
+  text-align: center;
+}
+.clock small {
+  font-size: 9px;
+  color: #91829e;
+}
+.pink {
+  color: #f092ac;
+}
+.blue {
+  color: #98b6ff;
+}
+.pitch {
+  position: relative;
+  aspect-ratio: 12/7;
+}
+.pitch canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #151020;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(14, 10, 23, 0.43);
+  backdrop-filter: blur(2px);
+  padding: 12px;
+}
+.overlayCard {
+  text-align: center;
+  max-width: 360px;
+  padding: 26px 30px;
+  border: 1px solid rgba(178, 139, 232, 0.17);
+  border-radius: 15px;
+  background: rgba(22, 15, 34, 0.9);
+  box-shadow: 0 12px 50px #0003;
+}
+.overlayCard > svg {
+  color: #b99bdf;
+}
+.overlayCard h2 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  margin: 13px 0 8px;
+}
+.overlayCard p {
+  font-size: 12px;
+  color: #a99bb9;
+  line-height: 1.7;
+  margin: 0 0 18px;
+}
+.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 41px;
+  padding: 9px 19px;
+  border: 1px solid #ae83e2;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #a17ade, #8860bc);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 4px 20px #9a6ac31c;
+}
+.primary:hover {
+  filter: brightness(1.08);
+}
+.arenaFooter {
+  justify-content: space-between;
+  padding: 11px 17px;
+  border-top: 1px solid #2b2035;
+  gap: 15px;
+  color: #8e819f;
+  font-size: 10px;
+}
+.arenaFooter span,
+.arenaFooter button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.arenaFooter button {
+  color: #b3a0c9;
+  background: none;
+  border: 0;
+  font-size: 10px;
+}
+.controls {
+  justify-content: space-between;
+  gap: 15px;
+  padding: 18px 0;
+}
+.controlCopy .eyebrow {
+  color: #7f708e;
+  font-size: 8px;
+  letter-spacing: 0.13em;
+}
+.controlCopy p {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 0;
+  font-size: 10px;
+  color: #8b7c9b;
+}
+.controlCopy p > span {
+  margin: 0 6px;
+}
+.controls kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 10px inherit;
+  padding: 4px 6px;
+  min-width: 22px;
+  border: 1px solid #352740;
+  border-radius: 5px;
+  background: #1e1628;
+  color: #b7a5cd;
+}
+.teamPick {
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.teamPick > span {
+  font-size: 10px;
+  color: #8d7e9c;
+  margin-right: 4px;
+}
+.teamButton {
+  border: 1px solid #35253f;
+  background: transparent;
+  color: #a18fb5;
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-size: 10px;
+}
+.teamSelected {
+  background: #2b1e3e;
+  border-color: #8660ab;
+  color: #d7b6ff;
+}
+.hostControls {
+  justify-content: space-between;
+  gap: 15px;
+  border: 1px solid #32253d;
+  background: #1a1323;
+  border-radius: 10px;
+  padding: 13px 16px;
+  margin-top: 4px;
+}
+.hostControls > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #a793bd;
+  font-size: 11px;
+}
+.hostControls > div {
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.hostControls button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #24192f;
+  border: 1px solid #3b2b48;
+  color: #c5afd9;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 10px;
+}
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  min-width: 0;
+}
+.people,
+.chat {
+  border: 1px solid #30223b;
+  border-radius: 13px;
+  background: #1a1323;
+  padding: 18px 16px;
+}
+.people h2,
+.chat h2 {
+  gap: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 19px;
+  color: #dacde8;
+}
+.people h2 > span {
+  margin-left: auto;
+  color: #927eaa;
+  font-size: 10px;
+}
+.teamSection + .teamSection {
+  margin-top: 19px;
+}
+.teamSection h3 {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+  color: #927da8;
+}
+.teamSection h3.pink {
+  color: #dd8ba2;
+}
+.teamSection h3.blue {
+  color: #8ea5d7;
+}
+.member {
+  gap: 8px;
+  margin-top: 9px;
+  min-height: 33px;
+}
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #352440;
+  color: #c8a5e3;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.pinkAvatar {
+  color: #efadc0;
+  background: #432736;
+}
+.blueAvatar {
+  color: #b0c4f7;
+  background: #26344c;
+}
+.memberName {
+  font-size: 11px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #c3b4d1;
+}
+.memberName small {
+  font-size: 8px;
+  margin-left: 4px;
+  color: #887399;
+}
+.memberName em {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 8px;
+  color: #7e6e8d;
+}
+.memberActions {
+  gap: 4px;
+}
+.memberActions select {
+  max-width: 68px;
+  width: 68px;
+  font-size: 8px;
+  color: #a28bb5;
+  background: #241a2e;
+  border: 1px solid #392745;
+  border-radius: 5px;
+  padding: 4px 1px;
+}
+.memberActions button {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: 0;
+  background: none;
+  color: #9a789d;
+}
+.emptyTeam {
+  font-size: 10px;
+  margin: 0;
+  color: #6e5b7d;
+}
+.chat {
+  padding-bottom: 12px;
+  flex: 1;
+  min-height: 235px;
+  display: flex;
+  flex-direction: column;
+}
+.chat h2 {
+  justify-content: space-between;
+  margin-bottom: 13px;
+}
+.chat h2 span {
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: #9276b0;
+}
+.messages {
+  overflow-y: auto;
+  min-height: 130px;
+  max-height: 210px;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #483156 transparent;
+}
+.emptyChat {
+  color: #75627f;
+  font-size: 10px;
+  line-height: 1.9;
+  margin: 10px 0;
+}
+.message {
+  margin: 11px 0;
+}
+.message strong {
+  font-size: 9px;
+  font-weight: 600;
+  color: #bd96dd;
+}
+.message p {
+  font-size: 11px;
+  color: #b4a3c3;
+  line-height: 1.5;
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.chatForm {
+  border-top: 1px solid #30213b;
+  margin-top: 12px;
+  padding-top: 10px;
+  gap: 6px;
+}
+.chatForm input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: #d5c4e4;
+  font-size: 10px;
+  background: transparent;
+  padding: 5px 0;
+}
+.chatForm input::placeholder {
+  color: #776584;
+}
+.chatForm button {
+  border: 0;
+  background: transparent;
+  color: #b491dc;
+  padding: 6px;
+  display: flex;
+}
+.bottomNote {
+  justify-content: space-between;
+  gap: 20px;
+  margin: 24px 0 0;
+  padding-top: 17px;
+  border-top: 1px solid #2d2137;
+  font-size: 10px;
+  color: #74647f;
+}
+.bottomNote a {
+  gap: 7px;
+  text-decoration: none;
+  color: #b296cb;
+}
+.help {
+  position: relative;
+  padding: 18px 50px 18px 20px;
+  background: #251934;
+  border: 1px solid #513565;
+  border-radius: 10px;
+  margin-bottom: 18px;
+}
+.help strong {
+  font-size: 13px;
+}
+.help p {
+  color: #b5a0c7;
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 6px 0 0;
+}
+.help > button {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  min-width: 28px;
+  min-height: 28px;
+}
+.error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 13px 16px;
+  border: 1px solid #774155;
+  background: #3a2031;
+  color: #efbdcf;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+.error button {
+  border: 1px solid #ac6a83;
+  background: transparent;
+  color: #f4d3e1;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 11px;
+}
+.joinCard {
+  max-width: 450px;
+  margin: 50px auto 80px;
+  padding: 36px;
+  border: 1px solid #453150;
+  background: #1d1528;
+  border-radius: 18px;
+  text-align: center;
+}
+.joinIcon {
+  width: 54px;
+  height: 54px;
+  margin: auto;
+  border-radius: 16px;
+  background: #332142;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #c5a1ee;
+}
+.joinCard h2 {
+  font-size: 23px;
+  letter-spacing: -0.04em;
+  margin: 20px 0 9px;
+}
+.joinCard p {
+  font-size: 12px;
+  color: #a58db8;
+  line-height: 1.7;
+}
+.joinCard form {
+  margin-top: 24px;
+}
+.joinCard label {
+  display: block;
+  text-align: left;
+  font-size: 11px;
+  color: #baa4ce;
+  margin-bottom: 15px;
+}
+.passwordField {
+  display: flex;
+  margin-top: 7px;
+  border: 1px solid #4b335d;
+  border-radius: 8px;
+  background: #181020;
+  overflow: hidden;
+}
+.passwordField input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 13px;
+  color: #e9dcf2;
+  background: none;
+  border: 0;
+  outline: 0;
+}
+.passwordField button {
+  background: none;
+  border: 0;
+  color: #ab88ca;
+  padding: 0 10px;
+  font-size: 10px;
+}
+.joinCard .primary {
+  width: 100%;
+}
+.touchControls {
+  display: none;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 15px 18px;
+  touch-action: none;
+}
+.joystick {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  background: radial-gradient(circle, #30213f, #21172d);
+  border: 1px solid #4e355f;
+  border-radius: 50%;
+  touch-action: none;
+  user-select: none;
+  outline-offset: 5px;
+}
+.joystickCross {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #614673;
+  font-size: 49px;
+  font-weight: 200;
+}
+.stick {
+  position: absolute;
+  left: 28px;
+  top: 28px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid #9c75b8;
+  background: linear-gradient(140deg, #8e62b6, #62447f);
+  box-shadow: 0 3px 15px #0004;
+  transform: translate(var(--stick-x, 0), var(--stick-y, 0));
+  pointer-events: none;
+}
+.touchControls p {
+  text-align: center;
+  color: #756381;
+  font-size: 10px;
+  line-height: 1.7;
+}
+.kick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 82px;
+  height: 82px;
+  border-radius: 50%;
+  border: 1px solid #8d639e;
+  background: linear-gradient(140deg, #684080, #3d294f);
+  color: #e5c8f4;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  touch-action: none;
+  user-select: none;
+}
+.kickActive {
+  background: #9870b4;
+  transform: scale(0.94);
+}
+.spin {
+  animation: spin 1.2s linear infinite;
+}
+.pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (hover: none), (pointer: coarse) {
+  .touchControls {
+    display: flex;
+  }
+  .controlCopy {
+    display: none;
+  }
+  .controls {
+    justify-content: center;
+  }
+  .teamPick {
+    justify-content: center;
+  }
+}
+@media (min-width: 1550px) {
+  .room {
+    padding-top: 30px;
+  }
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 305px;
+    gap: 22px;
+  }
+}
+@media (max-width: 1100px) {
+  .room {
+    padding: 20px;
+  }
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 250px;
+    gap: 14px;
+  }
+  .controlCopy {
+    display: none;
+  }
+  .controls {
+    justify-content: flex-start;
+  }
+  .people,
+  .chat {
+    padding: 15px 12px;
+  }
+  .hostControls {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .memberActions select {
+    max-width: 57px;
+    width: 57px;
+  }
+  .scoreboard {
+    gap: 20px;
+    padding: 15px 10px;
+  }
+  .scoreboard > span {
+    gap: 11px;
+    font-size: 10px;
+  }
+  .scoreboard b {
+    font-size: 27px;
+  }
+}
+@media (max-width: 800px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+  .header {
+    align-items: flex-start;
+  }
+  .playerBadge {
+    max-width: 180px;
+    font-size: 10px;
+    padding: 8px 9px;
+  }
+  .headerActions {
+    gap: 7px;
+  }
+  .people,
+  .chat {
+    min-height: 260px;
+  }
+  .controls {
+    justify-content: space-between;
+  }
+  .controlCopy {
+    display: block;
+  }
+  .hostControls {
+    align-items: center;
+    flex-direction: row;
+  }
+  .messages {
+    max-height: 200px;
+  }
+  .room {
+    padding: 18px 18px 25px;
+  }
+  .header h1 {
+    font-size: 27px;
+  }
+}
+@media (max-width: 520px) {
+  .room {
+    padding: 16px 12px 24px;
+  }
+  .topline {
+    margin-bottom: 23px;
+    gap: 8px;
+  }
+  .transport {
+    max-width: 55%;
+    font-size: 9px;
+  }
+  .back {
+    font-size: 11px;
+  }
+  .header {
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .header h1 {
+    font-size: 24px;
+    max-width: 240px;
+    overflow-wrap: anywhere;
+  }
+  .header p {
+    font-size: 10px;
+    line-height: 1.6;
+  }
+  .headerActions {
+    flex-direction: column-reverse;
+    align-items: flex-end;
+  }
+  .playerBadge {
+    max-width: 124px;
+    font-size: 9px;
+    gap: 5px;
+    padding: 7px;
+  }
+  .playerBadge svg {
+    width: 12px;
+  }
+  .iconButton {
+    min-width: 29px;
+    min-height: 29px;
+  }
+  .eyebrow {
+    font-size: 8px;
+  }
+  .scoreboard {
+    padding: 12px 5px;
+    gap: 20px;
+    min-height: 68px;
+  }
+  .scoreboard > span {
+    font-size: 9px;
+    gap: 7px;
+  }
+  .scoreboard b {
+    font-size: 25px;
+  }
+  .scoreboard .clock {
+    min-width: 65px;
+    font-size: 15px;
+  }
+  .clock small {
+    font-size: 8px;
+  }
+  .arena {
+    border-radius: 11px;
+  }
+  .arenaFooter {
+    font-size: 8px;
+    padding: 9px 11px;
+    gap: 5px;
+  }
+  .arenaFooter button {
+    font-size: 8px;
+  }
+  .overlay {
+    padding: 8px;
+  }
+  .overlayCard {
+    padding: 16px 19px;
+    max-width: 270px;
+    border-radius: 12px;
+  }
+  .overlayCard > svg {
+    width: 20px;
+    height: 20px;
+  }
+  .overlayCard h2 {
+    font-size: 16px;
+    margin: 8px 0 5px;
+  }
+  .overlayCard p {
+    font-size: 10px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+  .primary {
+    min-height: 35px;
+    padding: 7px 12px;
+    font-size: 11px;
+  }
+  .controls {
+    justify-content: center;
+    padding: 14px 0;
+  }
+  .controlCopy {
+    display: none;
+  }
+  .teamPick {
+    gap: 5px;
+    justify-content: center;
+  }
+  .teamPick > span {
+    font-size: 9px;
+  }
+  .teamButton {
+    font-size: 9px;
+    padding: 7px 8px;
+  }
+  .sidebar {
+    grid-template-columns: 1fr;
+  }
+  .people {
+    min-height: 0;
+  }
+  .teamSection {
+    display: inline-block;
+    vertical-align: top;
+    width: calc(50% - 8px);
+    margin: 0 12px 15px 0;
+  }
+  .teamSection:nth-of-type(2) {
+    margin-right: 0;
+  }
+  .teamSection + .teamSection {
+    margin-top: 0;
+  }
+  .teamSection:last-child {
+    display: block;
+    width: 100%;
+    margin: 5px 0 0;
+  }
+  .people h2 {
+    margin-bottom: 18px;
+  }
+  .memberActions select {
+    max-width: 54px;
+    width: 54px;
+    font-size: 7px;
+  }
+  .member {
+    gap: 5px;
+  }
+  .avatar {
+    min-width: 24px;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    font-size: 10px;
+  }
+  .memberName {
+    font-size: 10px;
+  }
+  .chat {
+    min-height: 230px;
+  }
+  .hostControls {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px;
+  }
+  .hostControls > span {
+    font-size: 10px;
+  }
+  .hostControls > div {
+    justify-content: space-between;
+    gap: 5px;
+  }
+  .hostControls button {
+    font-size: 9px;
+    padding: 7px 9px;
+  }
+  .bottomNote {
+    align-items: flex-start;
+    font-size: 9px;
+    line-height: 1.6;
+    gap: 18px;
+  }
+  .bottomNote > span {
+    max-width: 55%;
+  }
+  .bottomNote a {
+    white-space: nowrap;
+    font-size: 9px;
+  }
+  .touchControls {
+    padding: 0 10px 17px;
+  }
+  .joinCard {
+    margin: 30px auto 50px;
+    padding: 27px 21px;
+  }
+  .help p {
+    font-size: 11px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin,
+  .pulse {
+    animation: none;
+  }
+}

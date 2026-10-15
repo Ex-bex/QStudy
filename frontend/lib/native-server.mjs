@@ -133,3 +133,111 @@ export function prepareNativeRequest(request, configuration) {
   request.rawHeaders = raw;
   return true;
 }
+
+/** A separate explicit mode for the unpublished Docker listener behind Caddy. */
+export function privateProxyConfiguration(environment, args) {
+  if (
+    environment.QSTUDY_ACCESS_MODE !== "proxy" ||
+    environment.TRUST_PROXY_HEADERS !== "true"
+  )
+    throw new Error("Private proxy mode must be explicitly configured");
+  const origin = new URL(environment.PUBLIC_BASE_URL);
+  if (
+    !["http:", "https:"].includes(origin.protocol) ||
+    origin.username ||
+    origin.password ||
+    origin.pathname !== "/" ||
+    origin.search ||
+    origin.hash ||
+    (origin.protocol === "http:" && environment.ALLOW_PUBLIC_HTTP !== "true")
+  )
+    throw new Error("Invalid private proxy origin");
+  if (
+    args.length !== 4 ||
+    args[0] !== "--hostname" ||
+    args[1] !== "0.0.0.0" ||
+    args[2] !== "--port" ||
+    args[3] !== "3000"
+  )
+    throw new Error("Invalid private proxy listener");
+  return {
+    bind: "0.0.0.0",
+    port: 3000,
+    authority: origin.host,
+    hostname: origin.hostname,
+    protocol: origin.protocol,
+  };
+}
+
+export function preparePrivateProxyRequest(request, configuration) {
+  const hostCount = request.rawHeaders.reduce(
+    (count, value, i) =>
+      count + (i % 2 === 0 && value.toLowerCase() === "host" ? 1 : 0),
+    0,
+  );
+  const host = request.headers.host;
+  const socketIP = request.socket.remoteAddress?.replace(/^::ffff:/, "");
+  const health =
+    request.method === "GET" &&
+    request.url === "/api/health" &&
+    socketIP === "127.0.0.1" &&
+    host === "127.0.0.1:3000";
+  const defaultPort = configuration.protocol === "https:" ? "443" : "80";
+  if (
+    hostCount !== 1 ||
+    typeof host !== "string" ||
+    (!health &&
+      host !== configuration.authority &&
+      !(
+        host === configuration.hostname + ":" + defaultPort &&
+        !configuration.authority.includes(":")
+      ))
+  )
+    return false;
+  if (
+    !request.url?.startsWith("/") ||
+    request.url.startsWith("//") ||
+    request.url.includes("\\")
+  )
+    return false;
+  const clientIP = health
+    ? "127.0.0.1"
+    : request.headers["x-real-ip"] ||
+      (socketIP === "127.0.0.1" ? "127.0.0.1" : undefined);
+  // The frontend service has no published port. Caddy alone supplies X-Real-IP.
+  if (typeof clientIP !== "string" || !isIP(clientIP)) return false;
+  for (const key of Object.keys(request.headers))
+    if (
+      key === "forwarded" ||
+      key.startsWith("x-forwarded-") ||
+      key.startsWith("x-qstudy-")
+    )
+      delete request.headers[key];
+  request.headers["x-real-ip"] = clientIP;
+  request.headers["x-forwarded-proto"] = configuration.protocol.slice(0, -1);
+  request.headers["x-forwarded-host"] = configuration.authority;
+  request.headers["x-forwarded-port"] =
+    new URL(configuration.protocol + "//" + configuration.authority).port ||
+    defaultPort;
+  const raw = [];
+  for (let i = 0; i < request.rawHeaders.length; i += 2) {
+    const key = request.rawHeaders[i].toLowerCase();
+    if (
+      key === "forwarded" ||
+      key === "x-real-ip" ||
+      key.startsWith("x-forwarded-") ||
+      key.startsWith("x-qstudy-")
+    )
+      continue;
+    raw.push(request.rawHeaders[i], request.rawHeaders[i + 1]);
+  }
+  for (const key of [
+    "x-real-ip",
+    "x-forwarded-proto",
+    "x-forwarded-host",
+    "x-forwarded-port",
+  ])
+    raw.push(key, request.headers[key]);
+  request.rawHeaders = raw;
+  return true;
+}

@@ -13,6 +13,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const COOKIE = "qstudy_session";
+const GUEST_COOKIE = "lumaball_guest";
 const MAX_BODY = 26 * 1024 * 1024;
 
 async function proxy(
@@ -37,12 +38,16 @@ async function proxy(
     /^[a-f0-9]{64}\.png$/.exec(path[3])?.[0] === path[3];
   const brandingUpload =
     request.method === "PUT" &&
-    path[0] === "branding" &&
-    ((path.length === 2 && path[1] === "project-logo") ||
-      (path.length === 4 &&
-        path[1] === "departments" &&
-        /^[1-9][0-9]*$/.test(path[2]) &&
-        path[3] === "logo"));
+    ((path.length === 3 &&
+      path[0] === "admin" &&
+      path[1] === "lumaball" &&
+      path[2] === "logo") ||
+      (path[0] === "branding" &&
+        ((path.length === 2 && path[1] === "project-logo") ||
+          (path.length === 4 &&
+            path[1] === "departments" &&
+            /^[1-9][0-9]*$/.test(path[2]) &&
+            path[3] === "logo"))));
   const bodyLimit = systemImport
     ? MAX_SYSTEM_ARCHIVE_BYTES
     : brandingUpload
@@ -145,6 +150,10 @@ async function proxy(
     headers.set("content-type", request.headers.get("content-type")!);
   const token = request.cookies.get(COOKIE)?.value;
   if (token && !brandingAsset) headers.set("Authorization", `Bearer ${token}`);
+  if (path[0] === "lumaball") {
+    const guest = request.cookies.get(GUEST_COOKIE)?.value;
+    if (guest) headers.set("X-LumaBall-Session", guest);
+  }
   if (brandingAsset && request.headers.get("if-none-match"))
     headers.set("If-None-Match", request.headers.get("if-none-match")!);
   const endpoint = path.join("/");
@@ -182,7 +191,21 @@ async function proxy(
       endpoint,
     );
     let response: NextResponse;
-    if (isAuth && upstream.ok) {
+    if (
+      endpoint === "lumaball/session" &&
+      request.method === "POST" &&
+      upstream.ok
+    ) {
+      const data = await upstream.json();
+      const guest = data.guest_token;
+      delete data.guest_token;
+      response = NextResponse.json(data, { status: upstream.status });
+      if (typeof guest === "string" && /^[A-Za-z0-9_-]{40,128}$/.test(guest))
+        response.cookies.set(GUEST_COOKIE, guest, {
+          ...cookieOptions,
+          maxAge: 60 * 60 * 24 * 30,
+        });
+    } else if (isAuth && upstream.ok) {
       const data = await upstream.json();
       const session = data.access_token || data.token;
       delete data.access_token;
@@ -221,9 +244,18 @@ async function proxy(
     if (
       endpoint === "auth/logout" ||
       (endpoint === "auth/reset-password" && upstream.ok) ||
-      (upstream.status === 401 && !isAuth && !brandingAsset)
+      (upstream.status === 401 &&
+        !isAuth &&
+        !brandingAsset &&
+        (path[0] !== "lumaball" || !!token))
     )
       clearSession(response);
+    if (upstream.status === 401 && path[0] === "lumaball" && !token)
+      response.cookies.set(GUEST_COOKIE, "", {
+        ...cookieOptions,
+        maxAge: 0,
+        expires: new Date(0),
+      });
     return response;
   } catch {
     if (importBody?.tooLarge) {

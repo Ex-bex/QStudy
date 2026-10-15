@@ -127,7 +127,7 @@ def main(argv=None):
             import uvicorn
             from app.main import app
             # A single process owns the SQLite-backed queue and scheduled backups.
-            uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False, proxy_headers=False)
+            uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False, proxy_headers=False, ws_max_size=24 * 1024, ws_max_queue=16)
             return 0
         if arguments.command in ("mail-check", "mail-check-if-enabled"):
             from app.config import settings

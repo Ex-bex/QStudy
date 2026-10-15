@@ -135,10 +135,10 @@ class BodySizeLimitMiddleware:
             # Only the administrator transfer endpoint accepts a large raw ZIP.
             # Its handler authenticates before consuming this bounded stream.
             limit = settings.MAX_TRANSFER_BYTES
-        if scope.get('method') == 'PUT' and scope.get('path', '').startswith('/api/branding/'):
+        if scope.get('method') == 'PUT' and (scope.get('path', '').startswith('/api/branding/') or scope.get('path') == '/api/admin/lumaball/logo'):
             from app.services.branding import MAX_LOGO_BYTES
             # One logo plus bounded multipart overhead, including streamed requests.
-            limit = min(limit, MAX_LOGO_BYTES + 64 * 1024)
+            limit = MAX_LOGO_BYTES + 64 * 1024
 
         async def limited_receive():
             nonlocal received

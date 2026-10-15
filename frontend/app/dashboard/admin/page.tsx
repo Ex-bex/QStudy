@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   KeyRound,
   ShieldCheck,
   Users,
   BookOpen,
   GraduationCap,
+  Gamepad2,
+  ArrowUpRight,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -127,6 +130,37 @@ export default function AdminPage() {
         ))}
       </div>
       <SystemPanel />
+      <section
+        className="panel"
+        style={{
+          padding: 24,
+          marginBottom: 24,
+          background: "#faf7ff",
+          borderColor: "#e7dcf3",
+        }}
+      >
+        <div className="academic-section-heading" style={{ marginBottom: 0 }}>
+          <div>
+            <h2 style={{ color: "#76529b" }}>
+              <Gamepad2
+                size={20}
+                style={{
+                  display: "inline",
+                  marginRight: 8,
+                  verticalAlign: "-3px",
+                }}
+              />
+              LumaBall
+            </h2>
+            <p className="muted" style={{ marginTop: 7 }}>
+              Игровая площадка, логотип, комнаты, участники и история матчей.
+            </p>
+          </div>
+          <Link href="/dashboard/admin/lumaball" className="btn btn-secondary">
+            Управлять LumaBall <ArrowUpRight size={16} />
+          </Link>
+        </div>
+      </section>
       <OperationsPanel />
       <BrandingAdmin />
       <DeveloperDirectoryAdmin />

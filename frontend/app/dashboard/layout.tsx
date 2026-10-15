@@ -25,11 +25,13 @@ import {
   Menu,
   X,
   Workflow,
+  Gamepad2,
 } from "lucide-react";
 import Brand from "@/components/brand";
 import NotificationsBell from "@/lib/notifications";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { api, setToken } from "@/lib/api";
+import LumaNavLink from "@/components/lumaball/nav-link";
 
 const sections = [
   {
@@ -39,7 +41,12 @@ const sections = [
       { href: "/dashboard/groups", label: "Группы и расписание", icon: Users },
       { href: "/dashboard/modules", label: "Модульные работы", icon: Layers },
       { href: "/dashboard/syllabi", label: "Силабусы", icon: FileText },
-      { href: "/developers", label: "Связь с разработчиками", icon: MessageSquare },
+      {
+        href: "/developers",
+        label: "Связь с разработчиками",
+        icon: MessageSquare,
+      },
+      { href: "/lumaball", label: "LumaBall", icon: Gamepad2 },
     ],
   },
   {
@@ -290,6 +297,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <strong>{label}</strong>
           </div>
           <div className="topbar-right">
+            <LumaNavLink />
             <span className="topbar-date">
               <CalendarDays
                 size={13}

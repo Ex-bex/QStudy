@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Loader2, ShieldCheck } from "lucide-react";
@@ -8,6 +8,7 @@ import Brand from "./brand";
 import LearningScene from "./learning-scene";
 import PasswordInput from "./password-input";
 import { api, setToken } from "@/lib/api";
+import { authReturnPath } from "@/lib/auth-return";
 
 export default function AuthForm({ register = false }: { register?: boolean }) {
   const router = useRouter();
@@ -17,6 +18,12 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [returnTo, setReturnTo] = useState("/dashboard");
+  useEffect(() => {
+    setReturnTo(
+      authReturnPath(new URLSearchParams(window.location.search).get("next")),
+    );
+  }, []);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -37,7 +44,7 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
           : new URLSearchParams({ username: email, password }),
       });
       setToken("cookie");
-      router.replace("/dashboard");
+      router.replace(returnTo);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось войти");
     } finally {
@@ -168,7 +175,9 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
           )}
           <p className="auth-switch">
             {register ? "Уже с нами?" : "Пока нет аккаунта?"}{" "}
-            <Link href={register ? "/login" : "/register"}>
+            <Link
+              href={`${register ? "/login" : "/register"}${returnTo === "/dashboard" ? "" : `?next=${encodeURIComponent(returnTo)}`}`}
+            >
               {register ? "Войти" : "Зарегистрироваться"}
             </Link>
           </p>

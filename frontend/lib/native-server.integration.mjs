@@ -22,6 +22,7 @@ const stopFile = join(controlDirectory, "frontend-stop-" + instance + ".json");
 const proof = "disposable-native-proxy-proof-0123456789";
 let calls = 0;
 let child;
+const guestSecret = "disposable-guest-credential-0123456789abcdefghi";
 const backend = createServer((request, response) => {
   calls++;
   request.resume();
@@ -33,7 +34,30 @@ const backend = createServer((request, response) => {
         user: { id: 1, role: "admin" },
       }),
     );
-  else if (request.url === "/api/health")
+  else if (request.url === "/api/lumaball/session") {
+    const member = request.headers.authorization === "Bearer fixture-session";
+    response.end(
+      JSON.stringify({
+        identity: {
+          id: member ? "member" : "guest",
+          kind: member ? "user" : "guest",
+          name: member ? "Студент" : "guest#123456",
+        },
+        config: {},
+        ws_ticket: "single-use-opaque-ticket",
+        ...(member ? {} : { guest_token: guestSecret }),
+      }),
+    );
+  } else if (request.url === "/api/lumaball/me") {
+    if (request.headers["x-lumaball-session"] !== guestSecret)
+      response.statusCode = 401;
+    response.end(
+      JSON.stringify({
+        guestValid: request.headers["x-lumaball-session"] === guestSecret,
+        memberValid: request.headers.authorization === "Bearer fixture-session",
+      }),
+    );
+  } else if (request.url === "/api/health")
     response.end(JSON.stringify({ status: "ok", service: "QStudy" }));
   else
     response.end(
@@ -184,6 +208,68 @@ try {
     beforeCrossSite,
     "cross-site mutation never reaches the API",
   );
+  const guestSession = await fetch(origin + "/api/lumaball/session", {
+    method: "POST",
+    headers: { Origin: origin },
+  });
+  assert.equal(guestSession.status, 200);
+  const guestData = await guestSession.json();
+  assert.equal(guestData.identity.name, "guest#123456");
+  assert.equal(
+    guestData.guest_token,
+    undefined,
+    "guest credentials never appear in browser JSON",
+  );
+  const guestCookie = guestSession.headers.get("set-cookie");
+  assert.match(guestCookie, /lumaball_guest=/);
+  assert.match(guestCookie, /HttpOnly/i);
+  assert.match(guestCookie, /SameSite=Strict/i);
+  assert.match(guestCookie, /Max-Age=2592000/i);
+  assert.doesNotMatch(guestCookie, /;\s*Secure(?:;|$)/i);
+  const resumed = await fetch(origin + "/api/lumaball/me", {
+    headers: {
+      Cookie: guestCookie.split(";", 1)[0],
+      "X-LumaBall-Session": "forged-browser-header",
+    },
+  });
+  assert.deepEqual(
+    await resumed.json(),
+    { guestValid: true, memberValid: false },
+    "BFF forwards only its HttpOnly guest cookie",
+  );
+  const memberGame = await fetch(origin + "/api/lumaball/session", {
+    method: "POST",
+    headers: {
+      Origin: origin,
+      Cookie: "qstudy_session=fixture-session; " + guestCookie.split(";", 1)[0],
+    },
+  });
+  assert.equal(
+    (await memberGame.json()).identity.kind,
+    "user",
+    "QStudy session takes precedence over guest identity",
+  );
+  assert.equal(
+    memberGame.headers.get("set-cookie"),
+    null,
+    "member game entry does not replace either session",
+  );
+  const expiredGuest = await fetch(origin + "/api/lumaball/me", {
+    headers: { Cookie: "lumaball_guest=expired" },
+  });
+  assert.equal(expiredGuest.status, 401);
+  assert.match(expiredGuest.headers.get("set-cookie"), /lumaball_guest=;/);
+  assert.doesNotMatch(expiredGuest.headers.get("set-cookie"), /qstudy_session/);
+  assert.equal(
+    (await fetch(origin + "/lumaball")).status,
+    200,
+    "production build serves the public introduction",
+  );
+  assert.equal(
+    (await fetch(origin + "/lumaball/play")).status,
+    200,
+    "production build serves the guest-capable lobby",
+  );
   const stopBegan = Date.now();
   const stopped = new Promise((resolve) =>
     child.once("exit", (code) => resolve(code)),
@@ -204,7 +290,7 @@ try {
   );
   assert.ok(Date.now() - stopBegan < 8000, "detached child stops promptly");
   console.log(
-    "Native built-server integration passed: HTTP login/cookie, CSRF, exact Host, signed socket IP, private-file graceful stop. Disposable loopback API only.",
+    "Native built-server integration passed: HTTP login/cookie, LumaBall HttpOnly guest/member sessions and public pages, CSRF, exact Host, signed socket IP, private-file graceful stop. Disposable loopback API only.",
   );
 } finally {
   if (child && child.exitCode === null) {

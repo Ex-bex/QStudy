@@ -14,4 +14,4 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app ./
 USER node
 EXPOSE 3000
-CMD ["node", "node_modules/next/dist/bin/next", "start", "--hostname", "0.0.0.0", "--port", "3000"]
+CMD ["node", "server.mjs", "--hostname", "0.0.0.0", "--port", "3000"]

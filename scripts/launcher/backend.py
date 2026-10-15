@@ -57,7 +57,7 @@ def main():
         logging_config["filters"] = {"safe_startup": {"()": SafeStartupLog}}
         for handler in logging_config["handlers"].values():
             handler["filters"] = ["safe_startup"]
-        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=arguments.port, access_log=False, proxy_headers=False, log_config=logging_config))
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=arguments.port, access_log=False, proxy_headers=False, log_config=logging_config, ws_max_size=24 * 1024, ws_max_queue=16))
         if hasattr(signal, "SIGBREAK"):
             signal.signal(signal.SIGBREAK, lambda *_: setattr(server, "should_exit", True))
         stop_file = root / ".local/managed" / ("backend-stop-" + arguments.instance + ".json")

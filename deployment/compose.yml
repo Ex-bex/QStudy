@@ -61,6 +61,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set the public HTTPS origin}
       BFF_PROXY_SECRET: ${BFF_PROXY_SECRET:?Generate the proxy secret with init}
       TRUST_PROXY_HEADERS: "true"
+      QSTUDY_ACCESS_MODE: proxy
     depends_on:
       backend:
         condition: service_healthy

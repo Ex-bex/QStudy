@@ -78,6 +78,8 @@ jobs:
       - name: Native production HTTP integration
         working-directory: frontend
         run: node lib/native-server.integration.mjs
+      - name: LumaBall production WebSocket and persistence integration
+        run: python scripts/tests/lumaball_stack.py --run
 
   production:
     runs-on: ubuntu-latest
