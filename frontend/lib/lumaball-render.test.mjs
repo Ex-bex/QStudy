@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { URL } from "node:url";
 import ts from "typescript";
-import { FootballEngine } from "./lumaball/engine.ts";
+import { FIELD, FootballEngine } from "./lumaball/engine.ts";
 
 const source = readFileSync(
   new URL("./lumaball/render.ts", import.meta.url),
@@ -44,6 +44,8 @@ function fixture() {
     const context = new Proxy(state, {
       get(target, name) {
         if (name in target) return target[name];
+        if (name === "createLinearGradient")
+          return () => ({ addColorStop() {} });
         return (...args) =>
           target.calls.push({
             name,
@@ -119,12 +121,14 @@ function fixture() {
   };
 }
 
-test("the static original-color pitch is cached and RAF draws never measure layout", () => {
+test("the static football pitch is cached and RAF draws never measure layout", () => {
   const f = fixture();
   const renderer = new FootballRenderer(f.canvas);
   try {
     const value = frame();
-    for (let index = 0; index < 120; index++) renderer.draw(value, "red");
+    renderer.draw(value, "red");
+    const paintedCalls = f.offscreen[0].context.calls.length;
+    for (let index = 1; index < 120; index++) renderer.draw(value, "red");
     assert.equal(f.canvas.measurements, 1);
     assert.equal(f.offscreen.length, 1);
     assert.equal(
@@ -132,19 +136,20 @@ test("the static original-color pitch is cached and RAF draws never measure layo
       120,
     );
     assert.equal(
-      f.offscreen[0].context.calls.filter((call) => call.name === "fillRect")
-        .length,
-      3,
-      "background and two goals are built once",
+      f.offscreen[0].context.calls.length,
+      paintedCalls,
+      "the complete static scene is built once across 120 animation frames",
     );
     assert.ok(
       f.offscreen[0].context.calls.some(
-        (call) => call.name === "fillRect" && call.fill === "#2d1a66",
+        (call) =>
+          call.name === "fillRect" && call.fill === FOOTBALL_PALETTE.background,
       ),
     );
     assert.ok(
       f.offscreen[0].context.calls.some(
-        (call) => call.name === "stroke" && call.stroke === "#4a2fb3",
+        (call) =>
+          call.name === "stroke" && call.stroke === FOOTBALL_PALETTE.line,
       ),
     );
     for (const color of [
@@ -186,9 +191,13 @@ test("observer changes and DPR changes rebuild one cached pitch, then dispose co
     assert.equal(f.canvas.width, 1600);
     assert.equal(f.offscreen.length, 1, "resize reuses its offscreen canvas");
     assert.equal(
-      f.offscreen[0].context.calls.filter((call) => call.name === "fillRect")
-        .length,
-      9,
+      f.offscreen[0].context.calls.filter(
+        (call) =>
+          call.name === "fillRect" &&
+          call.fill === FOOTBALL_PALETTE.background &&
+          call.args.join() === [0, 0, FIELD.width, FIELD.height].join(),
+      ).length,
+      3,
     );
     renderer.draw(value, "red");
     const count = f.canvas.context.calls.length;

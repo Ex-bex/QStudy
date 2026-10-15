@@ -1,8 +1,10 @@
 import { FIELD, type GameFrame } from "./engine";
 
 export const FOOTBALL_PALETTE = {
-  background: "#2d1a66",
-  grid: "#4a2fb3",
+  background: "#10171d",
+  turf: "#173f35",
+  stripe: "rgba(214,244,222,.035)",
+  line: "rgba(232,245,236,.64)",
   red: "#ef4444",
   blue: "#93c5fd",
   ball: "rgba(255,215,0,.8)",
@@ -11,64 +13,126 @@ export const FOOTBALL_PALETTE = {
 function paintPitch(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = FOOTBALL_PALETTE.background;
   ctx.fillRect(0, 0, FIELD.width, FIELD.height);
-  ctx.strokeStyle = FOOTBALL_PALETTE.grid;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  for (let x = 0; x <= FIELD.width; x += 80) {
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, FIELD.height);
-  }
-  for (let y = 0; y <= FIELD.height; y += 80) {
-    ctx.moveTo(0, y);
-    ctx.lineTo(FIELD.width, y);
-  }
-  ctx.stroke();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(220,208,255,.48)";
-  ctx.strokeRect(
+  const width = FIELD.right - FIELD.left;
+  const height = FIELD.bottom - FIELD.top;
+  ctx.fillStyle = "#1b2a2a";
+  ctx.fillRect(FIELD.left - 12, FIELD.top - 12, width + 24, height + 24);
+  ctx.strokeStyle = "rgba(180,202,197,.13)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(FIELD.left - 12, FIELD.top - 12, width + 24, height + 24);
+  ctx.fillStyle = FOOTBALL_PALETTE.turf;
+  ctx.fillRect(FIELD.left, FIELD.top, width, height);
+  const light = ctx.createLinearGradient(
     FIELD.left,
     FIELD.top,
-    FIELD.right - FIELD.left,
-    FIELD.bottom - FIELD.top,
+    FIELD.right,
+    FIELD.bottom,
   );
+  light.addColorStop(0, "rgba(125,177,140,.07)");
+  light.addColorStop(0.5, "rgba(125,177,140,0)");
+  light.addColorStop(1, "rgba(0,9,14,.19)");
+  ctx.fillStyle = light;
+  ctx.fillRect(FIELD.left, FIELD.top, width, height);
+  ctx.fillStyle = FOOTBALL_PALETTE.stripe;
+  const stripeWidth = width / 12;
+  for (let index = 0; index < 12; index += 2)
+    ctx.fillRect(
+      FIELD.left + index * stripeWidth,
+      FIELD.top,
+      stripeWidth,
+      height,
+    );
+
+  // Goal mouths and boundaries share the simulation's exact coordinates.
+  for (const side of ["red", "blue"] as const) {
+    const left = side === "red";
+    const x = left ? FIELD.left - FIELD.goalDepth : FIELD.right;
+    ctx.fillStyle = "#152329";
+    ctx.fillRect(
+      x,
+      FIELD.goalTop,
+      FIELD.goalDepth,
+      FIELD.goalBottom - FIELD.goalTop,
+    );
+    ctx.strokeStyle = "rgba(222,234,232,.12)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let offset = 8; offset < FIELD.goalDepth; offset += 8) {
+      ctx.moveTo(x + offset, FIELD.goalTop);
+      ctx.lineTo(x + offset, FIELD.goalBottom);
+    }
+    for (let y = FIELD.goalTop + 12; y < FIELD.goalBottom; y += 12) {
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + FIELD.goalDepth, y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = left ? "#bf7180" : "#83a9c2";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(left ? FIELD.left : FIELD.right, FIELD.goalTop);
+    ctx.lineTo(left ? x : x + FIELD.goalDepth, FIELD.goalTop);
+    ctx.lineTo(left ? x : x + FIELD.goalDepth, FIELD.goalBottom);
+    ctx.lineTo(left ? FIELD.left : FIELD.right, FIELD.goalBottom);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = FOOTBALL_PALETTE.line;
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(600, FIELD.top);
-  ctx.lineTo(600, FIELD.bottom);
+  ctx.moveTo(FIELD.left, FIELD.top);
+  ctx.lineTo(FIELD.right, FIELD.top);
+  ctx.moveTo(FIELD.left, FIELD.bottom);
+  ctx.lineTo(FIELD.right, FIELD.bottom);
+  for (const x of [FIELD.left, FIELD.right]) {
+    ctx.moveTo(x, FIELD.top);
+    ctx.lineTo(x, FIELD.goalTop);
+    ctx.moveTo(x, FIELD.goalBottom);
+    ctx.lineTo(x, FIELD.bottom);
+  }
+  ctx.moveTo(FIELD.width / 2, FIELD.top);
+  ctx.lineTo(FIELD.width / 2, FIELD.bottom);
   ctx.stroke();
   ctx.beginPath();
   ctx.arc(600, 350, 82, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.fillStyle = "rgba(220,208,255,.55)";
+  ctx.fillStyle = "#d8e7dd";
   ctx.beginPath();
-  ctx.arc(600, 350, 4, 0, Math.PI * 2);
+  ctx.arc(600, 350, 3, 0, Math.PI * 2);
   ctx.fill();
-  for (const side of ["red", "blue"] as const) {
-    const left = side === "red";
-    ctx.fillStyle = left ? "rgba(239,68,68,.09)" : "rgba(147,197,253,.09)";
-    ctx.fillRect(
-      left ? FIELD.left - FIELD.goalDepth : FIELD.right,
-      FIELD.goalTop,
-      FIELD.goalDepth,
-      FIELD.goalBottom - FIELD.goalTop,
-    );
-    ctx.strokeStyle = FOOTBALL_PALETTE[side];
-    ctx.lineWidth = 3;
-    ctx.strokeRect(
-      left ? FIELD.left - FIELD.goalDepth : FIELD.right,
-      FIELD.goalTop,
-      FIELD.goalDepth,
-      FIELD.goalBottom - FIELD.goalTop,
-    );
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(220,208,255,.22)";
-    for (let y = FIELD.goalTop + 14; y < FIELD.goalBottom; y += 14) {
+  ctx.strokeStyle = "rgba(232,245,236,.46)";
+  for (const left of [true, false]) {
+    const goalLine = left ? FIELD.left : FIELD.right;
+    for (const [depth, top, bottom] of [
+      [150, 174, 526],
+      [55, 220, 480],
+    ]) {
+      const inside = goalLine + (left ? depth : -depth);
       ctx.beginPath();
-      ctx.moveTo(left ? FIELD.left - FIELD.goalDepth : FIELD.right, y);
-      ctx.lineTo(left ? FIELD.left : FIELD.right + FIELD.goalDepth, y);
+      ctx.moveTo(goalLine, top);
+      ctx.lineTo(inside, top);
+      ctx.lineTo(inside, bottom);
+      ctx.lineTo(goalLine, bottom);
       ctx.stroke();
     }
-    ctx.strokeStyle = "rgba(220,208,255,.35)";
-    ctx.strokeRect(left ? FIELD.left : FIELD.right - 150, 174, 150, 352);
+    ctx.beginPath();
+    ctx.arc(
+      left ? FIELD.left + 112 : FIELD.right - 112,
+      350,
+      2.5,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
+  for (const [x, y, start] of [
+    [FIELD.left, FIELD.top, 0],
+    [FIELD.right, FIELD.top, Math.PI / 2],
+    [FIELD.right, FIELD.bottom, Math.PI],
+    [FIELD.left, FIELD.bottom, Math.PI * 1.5],
+  ]) {
+    ctx.beginPath();
+    ctx.arc(x, y, 14, start, start + Math.PI / 2);
+    ctx.stroke();
   }
 }
 
