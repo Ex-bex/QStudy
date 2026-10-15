@@ -14,7 +14,6 @@ import {
   ArrowRight,
   ArrowUpRight,
   CircleDot,
-  Gamepad2,
   LockKeyhole,
   Plus,
   RefreshCw,
@@ -25,6 +24,7 @@ import {
 import PasswordInput from "@/components/password-input";
 import type { LumaList, LumaRoom } from "@/types/lumaball";
 import { lumaApi, useQBall } from "./context";
+import "./original-lobby.css";
 
 const statusLabels: Record<LumaRoom["status"], string> = {
   lobby: "Собираем команду",
@@ -40,6 +40,7 @@ export default function LumaLobby() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [create, setCreate] = useState(false);
   const [lockedRoom, setLockedRoom] = useState<LumaRoom | null>(null);
   const [busy, setBusy] = useState("");
@@ -131,6 +132,7 @@ export default function LumaLobby() {
       .includes(query.toLocaleLowerCase("ru-RU")),
   );
   const online = rooms.reduce((count, room) => count + room.players, 0);
+  const selectedRoom = rooms.find((room) => room.id === selectedRoomId);
   const available = rooms.find(
     (room) => !room.locked && room.players < room.max_players,
   );
@@ -197,47 +199,19 @@ export default function LumaLobby() {
   }
 
   return (
-    <main className="lb-container lb-lobby">
-      <Link className="lb-back-link" href="/qball">
-        <ArrowLeft size={14} /> О QBall
-      </Link>
-      <div className="lb-lobby-heading">
-        <div>
-          <p className="lb-eyebrow">ПОЛЕ УЖЕ ЖДЁТ</p>
-          <h1>
-            Найдите свою <em>команду.</em>
-          </h1>
-          <p>Присоединяйтесь к матчу или начните собственную историю.</p>
-        </div>
-        <button
-          className="lb-button lb-button-primary"
-          onClick={() => {
-            setCreate(true);
-            setCreateError("");
-          }}
-          disabled={!mayCreate || identityLoading || Boolean(busy)}
-        >
-          <Plus size={18} /> Создать комнату
-        </button>
+    <main className="lb-container lb-lobby lb-lobby-original">
+      <div className="lb-original-heading">
+        <Link className="lb-back-link" href="/qball">
+          <ArrowLeft size={15} /> QBall
+        </Link>
+        <h1>Список комнат</h1>
+        <span>Онлайн-футбол с друзьями</span>
       </div>
-      <div className="lb-lobby-layout">
-        <section className="lb-rooms-panel" aria-labelledby="lb-rooms-title">
-          <div className="lb-room-toolbar">
-            <div>
-              <h2 id="lb-rooms-title">Игровые комнаты</h2>
-              <span>
-                {rooms.length} комнат · {online} игроков
-              </span>
-            </div>
-            <button
-              className="lb-icon-button"
-              type="button"
-              onClick={refreshRooms}
-              aria-label="Обновить комнаты"
-            >
-              <RefreshCw size={17} />
-            </button>
-          </div>
+      <div className="lb-original-browser">
+        <section
+          className="lb-original-room-panel"
+          aria-label="Игровые комнаты"
+        >
           <label className="lb-search">
             <Search size={17} />
             <input
@@ -253,158 +227,189 @@ export default function LumaLobby() {
               <button onClick={refreshRooms}>Повторить</button>
             </div>
           )}
-          {loading ? (
-            <div className="lb-empty" role="status">
-              <span className="lb-loading-ball">
-                <CircleDot size={30} />
-              </span>
-              <h3>Ищем ваш следующий матч…</h3>
-              <p>Получаем список комнат.</p>
-            </div>
-          ) : filtered.length ? (
-            <div className="lb-room-list">
-              {filtered.map((room) => (
-                <article className="lb-room-card" key={room.id}>
-                  <div
-                    className={`lb-room-symbol ${room.status === "playing" ? "lb-room-symbol-active" : ""}`}
-                  >
-                    <Gamepad2 size={23} />
-                  </div>
-                  <div className="lb-room-card-copy">
-                    <h3>
-                      {room.name}
-                      {room.locked && (
-                        <LockKeyhole size={13} aria-label="Комната с паролем" />
-                      )}
-                    </h3>
-                    <p>
-                      {room.host_name} <span>·</span> до {room.score_limit}{" "}
-                      голов <span>·</span> {room.time_limit} мин
-                    </p>
-                    <span
-                      className={`lb-room-status lb-room-status-${room.status}`}
-                    >
-                      <i />
-                      {statusLabels[room.status]}
-                    </span>
-                  </div>
-                  <div className="lb-room-card-right">
-                    <span>
-                      <Users size={14} /> {room.players}
-                      <small> / {room.max_players}</small>
-                    </span>
-                    <button
-                      className="lb-button lb-button-small lb-button-soft"
-                      disabled={
-                        !mayEnter ||
-                        Boolean(busy) ||
-                        room.players >= room.max_players
+          <div className="lb-original-table-scroll">
+            <table className="lb-original-room-table">
+              <thead>
+                <tr>
+                  <th scope="col">Индекс</th>
+                  <th scope="col">Название комнаты</th>
+                  <th scope="col">Пароль</th>
+                  <th scope="col">Игроки</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!loading &&
+                  filtered.map((room, index) => (
+                    <tr
+                      key={room.id}
+                      tabIndex={0}
+                      aria-selected={selectedRoomId === room.id}
+                      className={
+                        selectedRoomId === room.id ? "lb-original-selected" : ""
                       }
-                      onClick={() => void joinRoom(room)}
+                      onClick={() =>
+                        setSelectedRoomId((current) =>
+                          current === room.id ? null : room.id,
+                        )
+                      }
+                      onDoubleClick={() => {
+                        if (room.players < room.max_players)
+                          void joinRoom(room);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedRoomId(room.id);
+                        }
+                      }}
                     >
-                      {busy === room.id
-                        ? "Входим…"
-                        : room.players >= room.max_players
-                          ? "Заполнена"
-                          : "Войти"}
-                      <ArrowUpRight size={14} />
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div className="lb-empty">
-              <span>
-                <CircleDot size={34} />
-              </span>
-              <h3>
-                {query ? "Комната не нашлась" : "Пусть первый матч будет вашим"}
-              </h3>
-              <p>
-                {query
-                  ? "Попробуйте другое название или имя игрока."
-                  : "Создайте комнату и пригласите друзей. Всё начинается с первого удара."}
-              </p>
-              {!query && (
-                <button
-                  className="lb-button lb-button-soft"
-                  disabled={!mayCreate || Boolean(busy)}
-                  onClick={() => {
-                    setCreate(true);
-                    setCreateError("");
-                  }}
-                >
-                  <Plus size={16} /> Создать комнату
-                </button>
-              )}
+                      <td>{index + 1}</td>
+                      <td>
+                        <strong>{room.name}</strong>
+                        <small>
+                          {room.host_name} · {statusLabels[room.status]} ·{" "}
+                          {room.score_limit} голов / {room.time_limit} мин
+                        </small>
+                      </td>
+                      <td>
+                        {room.locked ? (
+                          <>
+                            <LockKeyhole size={13} /> Да
+                          </>
+                        ) : (
+                          "Нет"
+                        )}
+                      </td>
+                      <td>
+                        <Users size={13} /> {room.players} / {room.max_players}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            {loading ? (
+              <div className="lb-empty" role="status">
+                <CircleDot size={32} />
+                <h3>Загружаем комнаты…</h3>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="lb-empty">
+                <CircleDot size={42} />
+                <h3>{query ? "Комната не найдена" : "Список комнат пуст"}</h3>
+                <p>
+                  {query
+                    ? "Попробуйте другое название."
+                    : "Создайте комнату и пригласите друзей."}
+                </p>
+              </div>
+            ) : null}
+          </div>
+          <p className="lb-original-list-hint">
+            Выберите комнату в списке и нажмите «Войти». Двойной щелчок сразу
+            открывает вход.
+          </p>
+        </section>
+        <aside className="lb-original-room-controls">
+          <button
+            className="lb-original-control lb-original-control-enter"
+            disabled={
+              !selectedRoom ||
+              !mayEnter ||
+              Boolean(busy) ||
+              (selectedRoom?.players ?? 0) >= (selectedRoom?.max_players ?? 0)
+            }
+            onClick={() => {
+              if (selectedRoom) void joinRoom(selectedRoom);
+            }}
+          >
+            <ArrowUpRight size={19} />
+            {busy && busy !== "create" ? "Входим…" : "Войти в комнату"}
+          </button>
+          <button
+            className="lb-original-control lb-original-control-create"
+            disabled={!mayCreate || identityLoading || Boolean(busy)}
+            onClick={() => {
+              setCreate(true);
+              setCreateError("");
+            }}
+          >
+            <Plus size={19} />
+            Создать комнату
+          </button>
+          <button
+            className="lb-original-control lb-original-control-refresh"
+            onClick={refreshRooms}
+          >
+            <RefreshCw size={18} />
+            Обновить список
+          </button>
+          <div className="lb-original-room-stats">
+            <p>
+              Количество комнат: <strong>{rooms.length}</strong>
+            </p>
+            <p>
+              Количество игроков: <strong>{online}</strong>
+            </p>
+          </div>
+          {selectedRoom && (
+            <div className="lb-original-selection">
+              <span>Выбрана комната</span>
+              <strong>{selectedRoom.name}</strong>
+              <small>
+                {selectedRoom.players >= selectedRoom.max_players
+                  ? "Комната заполнена"
+                  : statusLabels[selectedRoom.status]}
+              </small>
             </div>
           )}
-        </section>
-        <aside className="lb-lobby-aside">
-          <div className="lb-player-card">
-            <span className="lb-player-avatar">
-              {identity ? (
-                identity.name.slice(0, 1).toUpperCase()
-              ) : (
-                <Users size={26} />
-              )}
+          <div className="lb-original-account">
+            <span className="lb-original-account-icon">
+              {identity?.name.slice(0, 1).toUpperCase() || <Users size={25} />}
             </span>
-            <p className="lb-eyebrow">ВАШЕ МЕСТО НА ПОЛЕ</p>
-            <h2>{identity?.name || "Игра начинается с вас"}</h2>
+            <strong>{identity?.name || "Гостевой вход"}</strong>
             <p>
               {identity?.kind === "user"
-                ? "Аккаунт QStudy уже с вами. Можно сразу играть."
+                ? "Аккаунт QStudy подключён."
                 : identity
-                  ? "Ваш гостевой номер сохранён в этом браузере."
-                  : config.guests_enabled
-                    ? "Войдите в комнату — мы выдадим вам гостевой номер. Регистрация не обязательна."
-                    : "Для входа на поле нужен аккаунт QStudy."}
+                  ? "Ваш случайный номер сохранён в этом браузере."
+                  : "При входе в комнату вы получите имя guest# со случайным номером."}
             </p>
             {!identity && (
-              <Link
-                className="lb-button lb-button-outline"
-                href="/login?next=%2Fqball%2Fplay"
-              >
-                Войти через QStudy <ArrowUpRight size={16} />
+              <Link href="/login?next=%2Fqball%2Fplay">
+                Войти через QStudy <ArrowUpRight size={14} />
               </Link>
             )}
             {identity?.is_admin && (
-              <Link href="/dashboard/admin/qball" className="lb-text-button">
-                Управление игрой <ArrowUpRight size={15} />
+              <Link href="/dashboard/admin/qball">
+                Управление игрой <ArrowUpRight size={14} />
               </Link>
             )}
           </div>
-          <div className="lb-quick-card">
-            <ZapIcon />
-            <h3>Не терпится сыграть?</h3>
-            <p>
-              Зайдите в свободную открытую комнату — команда уже собирается.
-            </p>
-            <button
-              className="lb-button lb-button-primary"
-              disabled={!available || !mayEnter || Boolean(busy)}
-              onClick={() => {
-                if (available) void joinRoom(available);
-              }}
-            >
-              Быстрый вход <ArrowRight size={16} />
-            </button>
-          </div>
+          <button
+            className="lb-original-quick"
+            disabled={!available || !mayEnter || Boolean(busy)}
+            onClick={() => {
+              if (available) void joinRoom(available);
+            }}
+          >
+            Быстрый вход <ArrowRight size={14} />
+          </button>
           {!config.enabled && (
-            <div className="lb-inline-notice">
+            <p className="lb-inline-notice">
               QBall временно закрыт администратором.
-            </div>
+            </p>
           )}
           {config.enabled && !config.guests_enabled && !identity && (
-            <div className="lb-inline-notice">
-              Гостевой вход отключён. Войдите с аккаунтом QStudy.
-            </div>
+            <p className="lb-inline-notice">
+              Гостевой вход отключён. Войдите через QStudy.
+            </p>
           )}
           <p className="lb-lobby-hint">
-            WASD или стрелки — движение.
+            WASD / стрелки — движение.
             <br />
-            Пробел — удар. На телефоне есть экранные кнопки.
+            Пробел / Shift — удар.
+            <br />
+            На телефоне — джойстик и кнопка.
           </p>
         </aside>
       </div>
@@ -578,13 +583,5 @@ export default function LumaLobby() {
         </div>
       )}
     </main>
-  );
-}
-
-function ZapIcon() {
-  return (
-    <span className="lb-quick-symbol" aria-hidden="true">
-      ✦
-    </span>
   );
 }

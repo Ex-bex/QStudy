@@ -8,11 +8,18 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD = (
     'frontend/app/api/[...path]/route.ts',
+    'frontend/app/qball/qball.css',
     'frontend/components/lumaball/brand.tsx',
     'frontend/components/lumaball/context.tsx',
     'frontend/components/lumaball/game-room.module.css',
     'frontend/components/lumaball/game-room.tsx',
+    'frontend/components/lumaball/lobby.tsx',
+    'frontend/components/lumaball/original-lobby.css',
     'frontend/components/lumaball/shell.tsx',
+    'frontend/lib/lumaball/render.ts',
+    'frontend/lib/lumaball/snapshot-interpolator.ts',
+    'frontend/lib/lumaball-snapshots.test.mjs',
+    'frontend/lib/lumaball-render.test.mjs',
     'frontend/lib/game-csp.mjs',
     'frontend/lib/game-csp.test.mjs',
     'frontend/lib/lumaball/session-queue.ts',
@@ -20,6 +27,7 @@ PAYLOAD = (
     'frontend/lib/native-server.integration.mjs',
     'frontend/server.mjs',
     'scripts/launcher/data.py',
+    'backend/app/services/lumaball_realtime.py',
 )
 STOP_HELPERS = (
     'scripts/launcher/Stop-Previous.ps1', 'scripts/launcher/Native.ps1',
@@ -34,7 +42,7 @@ chcp 65001 >nul
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0.qstudy-fix\\Apply.ps1" -Root "%~dp0." %*
 exit /b %errorlevel%
 '''.replace('\n', '\r\n').encode('ascii')
-README = '''QStudy / QBall: исправление гостевого входа, приглашений и соединения
+README = '''QStudy / QBall: плавность игры и исходный интерфейс комнат
 
 1. Распакуйте СОДЕРЖИМОЕ ZIP в существующую папку работающего QStudy
    на Windows-хосте рядом с Start-QStudy-Internet.cmd.
@@ -47,7 +55,7 @@ README = '''QStudy / QBall: исправление гостевого входа
    Создайте комнату и отправьте ссылку из «Пригласить друга».
 
 Помощник проверяет пакет, штатно останавливает эту установку, сохраняет
-изменяемые исходники, обновляет интерфейс и запись статуса запуска,
+изменяемые исходники, обновляет интерфейс, игровой сетевой канал и запись статуса,
 затем запускает прежний режим.
 База, аккаунты, документы, логотипы в базе, .env, ключи и пароли не входят
 в этот ZIP и не заменяются. Импорт резервной копии не нужен.
@@ -58,6 +66,11 @@ README = '''QStudy / QBall: исправление гостевого входа
 Вкладку создателя оставляйте открытой. «Комнаты» и справочные ссылки
 из активной игры открываются отдельно. «Выйти из комнаты» у создателя
 закрывает её для всех — перед этим показывается предупреждение.
+
+Картинка создателя обновляется на каждом кадре браузера независимо от сети.
+Для остальных игроков сглаживаются сетевые снимки; передача ограничена
+30 снимками в секунду, управление отправляется сразу при нажатии клавиш.
+Восстановлены компактная таблица комнат и меню команд исходного LumaBall.
 '''
 
 

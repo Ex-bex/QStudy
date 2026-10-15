@@ -26,8 +26,8 @@ function Get-QBallFixFiles([string]$Root, [string]$Package) {
     foreach ($entry in @($manifest.files)) {
         $relative = [string]$entry.path
         if ($relative.Contains('\') -or $relative.Contains('//') -or $relative -match '(^|/)(\.|\.env[^/]*|\.next|node_modules|uploads|\.git|\.local)(/|$)' -or
-            $relative -cnotmatch '^(frontend/(server\.mjs|next\.config\.ts|(app|components|lib|types)/[A-Za-z0-9_./\[\]()-]+\.(ts|tsx|mjs|css)|public/[A-Za-z0-9_./-]+\.(png|svg|ico|webp))|scripts/launcher/data\.py)$' -or
-            [string]$entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not $seen.Add($relative)) { throw 'Пакет содержит запрещённый или повторный путь. Допускаются только перечисленные исходники интерфейса и записи статуса запуска.' }
+            $relative -cnotmatch '^(frontend/(server\.mjs|next\.config\.ts|(app|components|lib|types)/[A-Za-z0-9_./\[\]()-]+\.(ts|tsx|mjs|css)|public/[A-Za-z0-9_./-]+\.(png|svg|ico|webp))|scripts/launcher/data\.py|backend/app/services/lumaball_realtime\.py)$' -or
+            [string]$entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not $seen.Add($relative)) { throw 'Пакет содержит запрещённый или повторный путь. Допускаются только перечисленные исходники интерфейса, игрового канала и записи статуса запуска.' }
         $source = Resolve-QBallFixPath $Package ('payload/' + $relative)
         $target = Resolve-QBallFixPath $Root $relative
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'В пакете отсутствует исходник.' }

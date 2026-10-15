@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.config import settings
 from app.database import SessionLocal
-from app.lumaball_room_models import LumaBallChatMessage, LumaBallRoom
+from app.lumaball_room_models import LumaBallChatMessage, LumaBallRoom, LumaBallRoomMember
 from app.security import client_key, rate_limit
 from app.services import lumaball_rooms as rooms
 from app.services.lumaball_identity import consume_ticket, get_config, get_settings, validate_identity
@@ -125,6 +125,9 @@ class Connection:
     counts: dict = field(default_factory=lambda: defaultdict(deque))
     last_validation: float = 0
     last_score_save: float = 0
+    _transient: dict[str, dict] = field(default_factory=dict, repr=False)
+    _transient_task: asyncio.Task | None = field(default=None, repr=False)
+    _transient_closed: bool = field(default=False, repr=False)
 
     @property
     def id(self):
@@ -147,6 +150,41 @@ class Connection:
             return True
         except (RuntimeError, OSError, WebSocketDisconnect, asyncio.TimeoutError):
             return False
+
+    def send_transient(self, key, value):
+        """Keep only the newest state per stream; never await a slow recipient."""
+        if self._transient_closed or (key not in self._transient and len(self._transient) >= 32):
+            return False
+        self._transient[key] = value
+        if self._transient_task is None or self._transient_task.done():
+            self._transient_task = asyncio.create_task(self._drain_transient())
+        return True
+
+    async def _drain_transient(self):
+        try:
+            while self._transient and not self._transient_closed:
+                key = next(iter(self._transient))
+                value = self._transient.pop(key)
+                if not await self.send(value):
+                    self._transient.clear()
+                    break
+        finally:
+            if self._transient_task is asyncio.current_task():
+                self._transient_task = None
+
+    async def stop_transients(self):
+        self._transient_closed = True
+        self._transient.clear()
+        task, self._transient_task = self._transient_task, None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    def discard_transients(self):
+        self._transient.clear()
 
 
 class GameHub:
@@ -198,6 +236,15 @@ class GameHub:
 
     async def broadcast(self, room_id, message, *, exclude=None):
         peers = [item for item in list(self.connections.values()) if item.room_id == room_id and item.id != exclude]
+        if message.get("type") == "frame":
+            for item in peers:
+                item.send_transient("frame", message)
+            return
+        if message.get("type") == "room":
+            # Drop queued snapshots/inputs at an authoritative room boundary.
+            # An in-flight send precedes this reliable message under send_lock.
+            for item in peers:
+                item.discard_transients()
         if peers:
             await asyncio.gather(*(item.send(message) for item in peers))
 
@@ -205,6 +252,7 @@ class GameHub:
         for connection in list(self.connections.values()):
             if connection.room_id == room_id and self.connections.get(connection.id) is connection:
                 self.connections.pop(connection.id, None)
+                await connection.stop_transients()
                 await connection.send({"type": "closed", "reason": reason})
                 try:
                     await connection.socket.close(code=1000)
@@ -215,6 +263,7 @@ class GameHub:
         connection = self.connections.get(profile_id)
         if connection:
             self.connections.pop(profile_id, None)
+            await connection.stop_transients()
             await connection.send({"type": "closed", "reason": reason})
             try:
                 await connection.socket.close(code=1000)
@@ -223,6 +272,7 @@ class GameHub:
             await self.depart(connection, forced=True)
 
     async def depart(self, connection, *, forced=False):
+        await connection.stop_transients()
         if not forced and self.connections.get(connection.id) is not connection:
             return  # An old tab must not disconnect the tab that replaced it.
         replacement = self.connections.get(connection.id)
@@ -294,10 +344,16 @@ class GameHub:
         if kind not in ("frame", "input", "signal") and not connection.allow("control", 25):
             raise HTTPException(429, "Слишком много команд")
         with self.sessions() as db:
-            room = rooms.room_by_id(db, connection.room_id)
-            own = rooms.member(db, room.id, connection.id)
-            if own is None:
+            # A single current DB snapshot authenticates room membership on
+            # every packet; no permission or room-state cache is introduced.
+            membership = db.query(LumaBallRoom, LumaBallRoomMember).join(
+                LumaBallRoomMember, LumaBallRoomMember.room_id == LumaBallRoom.id).filter(
+                LumaBallRoom.id == connection.room_id, LumaBallRoom.status != "closed",
+                LumaBallRoomMember.profile_id == connection.id, LumaBallRoomMember.left_at.is_(None)).first()
+            if membership is None:
+                rooms.room_by_id(db, connection.room_id)
                 raise HTTPException(403, "Вы больше не состоите в комнате")
+            room, own = membership
             if kind == "signal":
                 target_id = data.get("target")
                 target = self.connections.get(target_id) if isinstance(target_id, str) else None
@@ -314,7 +370,7 @@ class GameHub:
                     return
                 host = self.connections.get(room.host_id)
                 if host and host.id != connection.id:
-                    await host.send({"type": "input", "from": connection.id, "input": {key: value[key] for key in ("x", "y", "kick")}})
+                    host.send_transient("input:" + connection.id, {"type": "input", "from": connection.id, "input": {key: value[key] for key in ("x", "y", "kick")}})
             elif kind == "frame":
                 if room.host_id != connection.id:
                     raise HTTPException(403, "Кадры отправляет создатель комнаты")
@@ -394,6 +450,7 @@ class GameHub:
             previous = self.connections.get(connection.id)
             self.connections[connection.id] = connection
             if previous:
+                await previous.stop_transients()
                 await previous.send({"type": "closed", "reason": "another_tab"})
                 try:
                     await previous.socket.close(code=1000)

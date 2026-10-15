@@ -31,7 +31,7 @@ try {
     Write-FixtureFile $old 'original source'
     Write-FixtureFile $database 'PRIVATE_FIXTURE_ACCOUNTS'; Write-FixtureFile $dotenv 'PRIVATE_FIXTURE_SETTINGS'
     $databaseHash = (Get-FileHash -LiteralPath $database).Hash; $dotenvHash = (Get-FileHash -LiteralPath $dotenv).Hash
-    $paths = @('frontend/lib/game-csp.mjs', 'frontend/lib/lumaball/session-queue.ts', 'scripts/launcher/data.py')
+    $paths = @('frontend/lib/game-csp.mjs', 'frontend/lib/lumaball/session-queue.ts', 'scripts/launcher/data.py', 'backend/app/services/lumaball_realtime.py')
     $entries = @()
     foreach ($relative in $paths) {
         $source = Join-Path $package ('payload/' + $relative)
@@ -40,8 +40,8 @@ try {
     }
     Write-FixManifest $entries
     $plan = Get-QBallFixFiles $fixture $package
-    Assert-Fix ($plan.files.Count -eq 3) 'valid frontend entries and the exact launcher data helper pass SHA256 validation'
-    foreach ($relative in @('backend/.env', 'frontend/.env', 'frontend/lib/../../backend/secret.ts', 'frontend/node_modules/file.ts', 'frontend/.next/file.ts', 'frontend/lib/../secret.ts', 'frontend/lib//alias.ts', 'frontend/lib/escape.db', 'C:/outside.ts', 'scripts/launcher/control.py', 'scripts/launcher/data.py.bak')) {
+    Assert-Fix ($plan.files.Count -eq 4) 'valid frontend entries and exact launcher/game relay helpers pass SHA256 validation'
+    foreach ($relative in @('backend/.env', 'frontend/.env', 'frontend/lib/../../backend/secret.ts', 'frontend/node_modules/file.ts', 'frontend/.next/file.ts', 'frontend/lib/../secret.ts', 'frontend/lib//alias.ts', 'frontend/lib/escape.db', 'C:/outside.ts', 'scripts/launcher/control.py', 'scripts/launcher/data.py.bak', 'backend/app/config.py', 'backend/app/auth.py', 'backend/app/services/lumaball_realtime.py.bak')) {
         Write-FixManifest @(@{ path = $relative; sha256 = ('a' * 64) })
         Assert-FixThrows { Get-QBallFixFiles $fixture $package } ('reject private/generated/traversal path: ' + $relative)
     }

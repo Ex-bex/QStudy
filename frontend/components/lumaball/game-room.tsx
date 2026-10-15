@@ -15,6 +15,7 @@ import {
   ArrowRight,
   CircleHelp,
   Copy,
+  Menu,
   Expand,
   Flag,
   LoaderCircle,
@@ -39,13 +40,14 @@ import {
   type Team,
 } from "@/lib/lumaball/engine";
 import { GamePeers } from "@/lib/lumaball/peers";
+import { SnapshotInterpolator } from "@/lib/lumaball/snapshot-interpolator";
 import { requestGameSession } from "@/lib/lumaball/session-queue";
 import {
   MatchResultDelivery,
   roomInvitationUrl,
   teamsReady,
 } from "@/lib/lumaball/room-state";
-import { drawFootball } from "@/lib/lumaball/render";
+import { FootballRenderer } from "@/lib/lumaball/render";
 import {
   gameRequest,
   type ChatMessage,
@@ -96,6 +98,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const [remaining, setRemaining] = useState(300);
   const [directCount, setDirectCount] = useState(0);
   const [help, setHelp] = useState(false);
+  const [roomMenuOpen, setRoomMenuOpen] = useState(true);
   const [stick, setStick] = useState({ x: 0, y: 0 });
   const [kicking, setKicking] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -106,6 +109,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const engineRef = useRef<FootballEngine | null>(null);
   const peersRef = useRef<GamePeers | null>(null);
   const frameRef = useRef<GameFrame | null>(null);
+  const snapshotsRef = useRef(new SnapshotInterpolator());
   const inputRef = useRef(zero());
   const keysRef = useRef(new Set<string>());
   const touchRef = useRef(zero());
@@ -136,6 +140,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   }, [connection, setRoomActive]);
 
   useEffect(() => {
+    const snapshots = snapshotsRef.current;
     let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnects = 0;
@@ -146,7 +151,10 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     setNeedsJoin(false);
     const acceptRoom = (value: RoomView) => {
       if (disposed) return;
-      if (roomRef.current?.match_id !== value.match_id) frameRef.current = null;
+      if (roomRef.current?.match_id !== value.match_id) {
+        frameRef.current = null;
+        snapshots.reset();
+      }
       roomRef.current = value;
       setRoom(value);
       if (Array.isArray(value.chat)) setChat(value.chat.slice(-80));
@@ -178,12 +186,14 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         setRemaining(value.time_limit * 60);
       } else if (value.status === "finished") {
         setScore(value.score);
-        if (!frameRef.current) {
-          const preview = new FootballEngine(
-            value.members,
-            value.score_limit,
-            value.time_limit,
-          ).frame();
+        {
+          const preview =
+            frameRef.current ||
+            new FootballEngine(
+              value.members,
+              value.score_limit,
+              value.time_limit,
+            ).frame();
           preview.match_id = value.match_id || "";
           preview.score = value.score;
           preview.remaining = 0;
@@ -196,9 +206,24 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                 ? "red"
                 : "blue";
           frameRef.current = preview;
+          snapshots.reset();
           setRemaining(0);
         }
       }
+    };
+    const acceptFrame = (frame: GameFrame) => {
+      const current = roomRef.current;
+      if (
+        disposed ||
+        !current ||
+        current.host_id === identityRef.current?.id ||
+        frame.match_id !== current.match_id ||
+        current.status === "finished" ||
+        (frameRef.current && frame.seq <= frameRef.current.seq)
+      )
+        return;
+      frameRef.current = frame;
+      snapshots.enqueue(frame, performance.now());
     };
     const connect = async (initial = false) => {
       try {
@@ -231,13 +256,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
             signal: (target, payload) =>
               send({ type: "signal", target, payload }),
             input: (from, input) => engineRef.current?.input(from, input),
-            frame: (frame) => {
-              if (
-                !disposed &&
-                (!frameRef.current || frame.seq >= frameRef.current.seq)
-              )
-                frameRef.current = frame;
-            },
+            frame: acceptFrame,
             state: () => {
               if (!disposed) setDirectCount(peersRef.current?.connected() || 0);
             },
@@ -265,6 +284,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
               setConnection("online");
               setError("");
               frameRef.current = null;
+              snapshots.reset();
               acceptRoom(data.room);
             } else if (data.type === "room") acceptRoom(data.room);
             else if (data.type === "signal")
@@ -280,8 +300,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
               validFrame(data.frame) &&
               data.frame.match_id === roomRef.current?.match_id
             ) {
-              if (!frameRef.current || data.frame.seq >= frameRef.current.seq)
-                frameRef.current = data.frame;
+              acceptFrame(data.frame);
             } else if (data.type === "chat")
               setChat((before) => [...before, data.message].slice(-80));
             else if (data.type === "error")
@@ -366,6 +385,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       engineRef.current = null;
       roomRef.current = null;
       frameRef.current = null;
+      snapshots.reset();
       inputRef.current = zero();
     };
   }, [roomId, retry, send]);
@@ -375,6 +395,10 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     let previous = performance.now();
     let lastFrame = previous;
     let lastHud = previous;
+    let terminalPublished = "";
+    let renderer: FootballRenderer | null = null;
+    let renderedCanvas: HTMLCanvasElement | null = null;
+    const networkInterval = 1000 / 30;
     const results = new MatchResultDelivery();
     const tick = (now: number) => {
       const elapsed = Math.min((now - previous) / 1000, 0.2);
@@ -383,38 +407,65 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         identity = identityRef.current;
       const engine = engineRef.current;
       const host = room?.host_id === identity?.id;
-      if (host && engine && room) {
+      if (
+        host &&
+        engine &&
+        room &&
+        (room.status === "playing" || room.status === "paused")
+      ) {
         engine.input(identity!.id, inputRef.current);
         engine.advance(
           elapsed,
           room.status === "playing" &&
             socketRef.current?.readyState === WebSocket.OPEN,
         );
-        if (now - lastFrame >= 50) {
-          const frame = engine.frame();
-          frame.match_id = room.match_id || "";
-          frameRef.current = frame;
+        // Render the current simulation on every animation frame. Publishing
+        // snapshots has its own cadence and must never cap the host's display.
+        const frame = engine.frame();
+        frame.match_id = room.match_id || "";
+        frameRef.current = frame;
+        if (
+          now - lastFrame >= networkInterval ||
+          (frame.finished && terminalPublished !== frame.match_id)
+        ) {
           if (room.status === "playing" || room.status === "paused") {
             peersRef.current?.frame(frame);
             send({ type: "frame", frame });
           }
-          results.report(room, frame, now, send);
-          lastFrame = now;
+          if (frame.finished) terminalPublished = frame.match_id;
+          lastFrame = now - ((now - lastFrame) % networkInterval);
         }
+        results.report(room, frame, now, send);
       }
       const frame = frameRef.current;
       if (frame && canvasRef.current) {
-        drawFootball(canvasRef.current, frame, identity?.id || "");
+        if (renderedCanvas !== canvasRef.current) {
+          renderer?.destroy();
+          renderedCanvas = canvasRef.current;
+          renderer = new FootballRenderer(renderedCanvas);
+        }
+        const display = host
+          ? frame
+          : snapshotsRef.current.sample(now, room?.status === "playing") ||
+            frame;
+        renderer?.draw(display, identity?.id || "");
         if (now - lastHud > 150) {
-          setScore(frame.score);
-          setRemaining(frame.remaining);
+          setScore((current) =>
+            current.red === frame.score.red && current.blue === frame.score.blue
+              ? current
+              : frame.score,
+          );
+          setRemaining(Math.floor(frame.remaining));
           lastHud = now;
         }
       }
       animation = requestAnimationFrame(tick);
     };
     animation = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animation);
+    return () => {
+      cancelAnimationFrame(animation);
+      renderer?.destroy();
+    };
   }, [send]);
 
   useEffect(() => {
@@ -506,7 +557,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     window.addEventListener("blur", release);
     document.addEventListener("visibilitychange", visibility);
     document.addEventListener("focusin", focus);
-    const interval = setInterval(update, 50);
+    const interval = setInterval(update, 1000 / 30);
     const heartbeat = setInterval(() => send({ type: "ping" }), 15000);
     return () => {
       clearInterval(interval);
@@ -634,9 +685,9 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           ? "Соединение завершено"
           : "Подключаемся…";
   const teams: { team: Team; title: string }[] = [
-    { team: "red", title: "Розовая команда" },
-    { team: "blue", title: "Голубая команда" },
+    { team: "red", title: "Красная команда" },
     { team: "spectator", title: "Наблюдатели" },
+    { team: "blue", title: "Синяя команда" },
   ];
 
   return (
@@ -673,6 +724,16 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         <div className={styles.headerActions}>
           <button
             className={styles.iconButton}
+            onClick={() => setRoomMenuOpen((value) => !value)}
+            aria-label="Меню комнаты"
+            aria-expanded={roomMenuOpen}
+            aria-controls="qball-room-menu"
+            title="Меню комнаты"
+          >
+            <Menu size={20} />
+          </button>
+          <button
+            className={styles.iconButton}
             onClick={() => setHelp((v) => !v)}
             aria-label="Управление и правила"
             title="Управление и правила"
@@ -690,7 +751,10 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         </div>
       </header>
       {room && !needsJoin && online && (
-        <section className={styles.invitation} aria-label="Пригласить друга">
+        <details className={styles.invitation} aria-label="Пригласить друга">
+          <summary>
+            <Copy size={14} /> Пригласить друга
+          </summary>
           <label htmlFor="qball-invitation">Пригласить друга</label>
           <div>
             <input
@@ -717,7 +781,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
               страницы сайта открываются отдельно.
             </p>
           )}
-        </section>
+        </details>
       )}
       {help && (
         <div className={styles.help}>
@@ -800,7 +864,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
             <div className={styles.arena} ref={arenaRef}>
               <div className={styles.scoreboard}>
                 <span className={styles.pink}>
-                  Розовые <b>{score.red}</b>
+                  Красные <b>{score.red}</b>
                 </span>
                 <span className={styles.clock}>
                   {timeLabel(remaining)}
@@ -809,7 +873,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                   </small>
                 </span>
                 <span className={styles.blue}>
-                  <b>{score.blue}</b> Голубые
+                  <b>{score.blue}</b> Синие
                 </span>
               </div>
               <div className={styles.pitch}>
@@ -850,8 +914,8 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                                 ? score.red === score.blue
                                   ? "Боевая ничья"
                                   : score.red > score.blue
-                                    ? "Победа розовых"
-                                    : "Победа голубых"
+                                    ? "Победа красных"
+                                    : "Победа синих"
                                 : "Команды, на поле"}
                           </h2>
                           <p>
@@ -867,13 +931,14 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                               disabled={
                                 room?.status !== "paused" && !readyToStart
                               }
-                              onClick={() =>
+                              onClick={() => {
                                 command(
                                   room?.status === "paused"
                                     ? "resume"
                                     : "start",
-                                )
-                              }
+                                );
+                                setRoomMenuOpen(false);
+                              }}
                             >
                               <Play size={16} />
                               {room?.status === "paused"
@@ -947,9 +1012,9 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                     title={title}
                   >
                     {team === "red"
-                      ? "Розовые"
+                      ? "Красные"
                       : team === "blue"
-                        ? "Голубые"
+                        ? "Синие"
                         : "Наблюдать"}
                   </button>
                 ))}
@@ -995,131 +1060,161 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                 УДАР
               </button>
             </div>
-            {manage && (
-              <div className={styles.hostControls}>
-                <span>
-                  <ShieldCheck size={16} />
-                  Управление матчем
-                </span>
-                <div>
-                  {room?.status === "playing" ? (
-                    <button disabled={!online} onClick={() => command("pause")}>
-                      <Pause size={15} />
-                      Пауза
-                    </button>
-                  ) : (
-                    <button
-                      disabled={
-                        !online || (room?.status !== "paused" && !readyToStart)
-                      }
-                      onClick={() =>
-                        command(room?.status === "paused" ? "resume" : "start")
-                      }
-                    >
-                      <Play size={15} />
-                      {room?.status === "paused" ? "Продолжить" : "Начать"}
-                    </button>
-                  )}
-                  <button
-                    disabled={!online || room?.status === "lobby"}
-                    onClick={() => command("stop")}
-                  >
-                    <Square size={14} />
-                    Завершить
-                  </button>
-                  <button
-                    disabled={!online || room?.status === "playing"}
-                    onClick={() => command("reset")}
-                  >
-                    <RotateCcw size={14} />
-                    Сбросить
-                  </button>
-                </div>
-              </div>
-            )}
           </main>
-          <aside className={styles.sidebar}>
+          <aside
+            id="qball-room-menu"
+            className={`${styles.sidebar} ${roomMenuOpen ? "" : styles.menuClosed}`}
+            aria-label="Меню комнаты"
+          >
             <section className={styles.people}>
               <h2>
                 <Users size={17} />
                 Состав комнаты<span>{room?.members.length || 0}</span>
+                <button
+                  className={styles.iconButton}
+                  onClick={() => setRoomMenuOpen(false)}
+                  aria-label="Скрыть меню комнаты"
+                >
+                  <X size={17} />
+                </button>
               </h2>
-              {teams.map(({ team, title }) => (
-                <div key={team} className={styles.teamSection}>
-                  <h3
-                    className={
-                      team === "red"
-                        ? styles.pink
-                        : team === "blue"
-                          ? styles.blue
-                          : undefined
-                    }
-                  >
-                    {title}
-                  </h3>
-                  {room?.members
-                    .filter((m) => m.team === team)
-                    .map((m) => (
-                      <div className={styles.member} key={m.id}>
-                        <span
-                          className={`${styles.avatar} ${team === "red" ? styles.pinkAvatar : team === "blue" ? styles.blueAvatar : ""}`}
-                        >
-                          {m.name.slice(0, 1).toUpperCase()}
-                        </span>
-                        <span className={styles.memberName}>
-                          {m.name}
-                          {m.id === identity?.id && <small>вы</small>}
-                          <em>
-                            {m.is_host || m.id === room.host_id
-                              ? "Создатель"
-                              : m.connected
-                                ? "На связи"
-                                : "Подключается"}
-                          </em>
-                        </span>
-                        {manage && m.id !== identity?.id ? (
-                          <div className={styles.memberActions}>
-                            <select
-                              aria-label={`Команда игрока ${m.name}`}
-                              value={m.team}
-                              onChange={(e) =>
-                                command("team", m.id, e.target.value as Team)
-                              }
-                              disabled={!online}
-                            >
-                              <option value="red">Розовые</option>
-                              <option value="blue">Голубые</option>
-                              <option value="spectator">Зритель</option>
-                            </select>
-                            <button
-                              aria-label={`Исключить ${m.name}`}
-                              title="Исключить игрока"
-                              onClick={() => command("kick", m.id)}
-                              disabled={!online}
-                            >
-                              <X size={13} />
-                            </button>
-                          </div>
-                        ) : (
+              <div className={styles.playerColumns}>
+                {teams.map(({ team, title }) => (
+                  <div key={team} className={styles.teamSection}>
+                    <h3
+                      className={
+                        team === "red"
+                          ? styles.pink
+                          : team === "blue"
+                            ? styles.blue
+                            : undefined
+                      }
+                    >
+                      {title}
+                    </h3>
+                    {room?.members
+                      .filter((m) => m.team === team)
+                      .map((m) => (
+                        <div className={styles.member} key={m.id}>
                           <span
-                            className={
-                              m.connected ? styles.onlineDot : styles.offlineDot
-                            }
-                          />
-                        )}
-                      </div>
-                    ))}
-                  {!room?.members.some((m) => m.team === team) && (
-                    <p className={styles.emptyTeam}>Место для вашей команды</p>
-                  )}
+                            className={`${styles.avatar} ${team === "red" ? styles.pinkAvatar : team === "blue" ? styles.blueAvatar : ""}`}
+                          >
+                            {m.name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <span className={styles.memberName}>
+                            {m.name}
+                            {m.id === identity?.id && <small>вы</small>}
+                            <em>
+                              {m.is_host || m.id === room.host_id
+                                ? "Создатель"
+                                : m.connected
+                                  ? "На связи"
+                                  : "Подключается"}
+                            </em>
+                          </span>
+                          {manage && m.id !== identity?.id ? (
+                            <div className={styles.memberActions}>
+                              <select
+                                aria-label={`Команда игрока ${m.name}`}
+                                value={m.team}
+                                onChange={(e) =>
+                                  command("team", m.id, e.target.value as Team)
+                                }
+                                disabled={!online}
+                              >
+                                <option value="red">Красные</option>
+                                <option value="blue">Синие</option>
+                                <option value="spectator">Зритель</option>
+                              </select>
+                              <button
+                                aria-label={`Исключить ${m.name}`}
+                                title="Исключить игрока"
+                                onClick={() => command("kick", m.id)}
+                                disabled={!online}
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
+                          ) : (
+                            <span
+                              className={
+                                m.connected
+                                  ? styles.onlineDot
+                                  : styles.offlineDot
+                              }
+                            />
+                          )}
+                        </div>
+                      ))}
+                    {!room?.members.some((m) => m.team === team) && (
+                      <p className={styles.emptyTeam}>
+                        Место для вашей команды
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {manage && (
+                <div className={styles.hostControls}>
+                  <span>
+                    <ShieldCheck size={15} /> Управление матчем
+                  </span>
+                  <div>
+                    {room?.status === "playing" ? (
+                      <button
+                        disabled={!online}
+                        onClick={() => command("pause")}
+                      >
+                        <Pause size={15} />
+                        Пауза
+                      </button>
+                    ) : (
+                      <button
+                        disabled={
+                          !online ||
+                          (room?.status !== "paused" && !readyToStart)
+                        }
+                        onClick={() => {
+                          command(
+                            room?.status === "paused" ? "resume" : "start",
+                          );
+                          setRoomMenuOpen(false);
+                        }}
+                      >
+                        <Play size={15} />
+                        {room?.status === "paused" ? "Продолжить" : "Начать"}
+                      </button>
+                    )}
+                    <button
+                      disabled={!online || room?.status === "lobby"}
+                      onClick={() => command("stop")}
+                    >
+                      <Square size={14} />
+                      Стоп
+                    </button>
+                    <button
+                      disabled={!online || room?.status === "playing"}
+                      onClick={() => command("reset")}
+                    >
+                      <RotateCcw size={14} />
+                      Сбросить
+                    </button>
+                  </div>
                 </div>
-              ))}
+              )}
+              {!readyToStart &&
+                room?.status !== "playing" &&
+                room?.status !== "paused" && (
+                  <p className={styles.emptyTeam}>
+                    Для старта нужен подключённый игрок в каждой команде.
+                  </p>
+                )}
             </section>
             {sessionConfig?.chat_enabled !== false && (
-              <section className={styles.chat}>
-                <h2>
+              <details className={styles.chat}>
+                <summary>
                   Чат комнаты<span>LIVE</span>
-                </h2>
+                </summary>
                 <div className={styles.messages} aria-live="polite">
                   {chat.length === 0 && (
                     <p className={styles.emptyChat}>
@@ -1164,13 +1259,17 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                     <Send size={17} />
                   </button>
                 </form>
-              </section>
+              </details>
             )}
           </aside>
         </div>
       )}
       <div className={styles.bottomNote}>
-        <span>Играйте честно. Уважайте соперников.</span>
+        <span>
+          {online && room?.host_id === identity?.id
+            ? "Вы держите комнату. Не закрывайте эту вкладку."
+            : "Играйте честно. Уважайте соперников."}
+        </span>
         {online ? (
           <button
             className={styles.leaveButton}

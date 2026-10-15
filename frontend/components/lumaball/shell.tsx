@@ -16,7 +16,9 @@ export default function LumaShell({ children }: { children: ReactNode }) {
     ? { target: "_blank", rel: "noopener noreferrer" }
     : {};
   return (
-    <div className={`lb-site ${room ? "lb-site-room" : ""}`}>
+    <div
+      className={`lb-site ${room ? "lb-site-room" : ""} ${room || pathname === "/qball/play" ? "lb-site-original" : ""}`}
+    >
       <header className="lb-header">
         <div className="lb-header-inner">
           <LumaBrand newTab={preserveRoom} />

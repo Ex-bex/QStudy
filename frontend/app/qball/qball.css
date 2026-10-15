@@ -11,6 +11,49 @@
   color: var(--lb-ink);
   overflow: clip;
 }
+.lb-site-original {
+  --lb-background: #0f0b24;
+  --lb-ink: #e6e6fa;
+  --lb-muted: #a69bc7;
+  --lb-purple: #a69ff9;
+  --lb-line: #3c2c66;
+  background: #0f0b24;
+  color: #e6e6fa;
+}
+.lb-site-original .lb-header {
+  background: #0f0b24;
+  border-color: #3c2c66;
+}
+.lb-site-original .lb-header-inner {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.lb-site-original .lb-brand > span:last-child {
+  color: #e6e6fa;
+  font-size: 20px;
+}
+.lb-site-original .lb-brand small {
+  color: #9b87cd;
+}
+.lb-site-original .lb-nav,
+.lb-site-original .lb-qstudy-link {
+  color: #afa0d0;
+}
+.lb-site-original .lb-header-login {
+  color: #e6e6fa;
+  border-color: #5a43d9;
+  background: #2b1d53;
+}
+.lb-site-original .lb-identity {
+  background: #25174d;
+  color: #c3c3fb;
+  border-color: #5a43d9;
+}
+.lb-site-original .lb-footer {
+  border-color: #3c2c66;
+  background: #0f0b24;
+  color: #a69bc7;
+}
 .lb-site ::selection {
   color: #452186;
   background: #e5d9ff;
