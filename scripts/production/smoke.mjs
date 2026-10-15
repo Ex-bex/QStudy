@@ -66,7 +66,7 @@ for (const suppliedOrigin of [null, "null", "https://evil.example", oppositeProt
 const wrongHost = await request("/api/auth/login", {
   method: "POST", body: new URLSearchParams({ username: email, password }), suppliedHost: "evil.example:18080",
 });
-assert.equal(wrongHost.status, 403, "A valid public origin cannot be used with another Host");
+assert.equal(wrongHost.status, 421, "The private frontend rejects an unconfigured Host before BFF routing");
 
 const existing = process.argv.includes("--existing");
 const auth = await request(existing ? "/api/auth/login" : "/api/auth/register", {
