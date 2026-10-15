@@ -3,3 +3,5 @@
 *.Dockerfile text eol=lf
 deployment/Caddyfile text eol=lf
 deployment/*.yml text eol=lf
+# Downloaded hybrid CMD/PowerShell launcher must keep CRLF in GitHub raw files.
+assets/distribution/Update-QBall-Field.cmd -text whitespace=cr-at-eol
