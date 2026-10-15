@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+import anyio
 
 os.environ.setdefault("SECRET_KEY", "test-only-qstudy-secret-key-32-characters-long")
 
@@ -29,6 +30,18 @@ from app.routers import lumaball_identity, lumaball_rooms
 from app.services import lumaball_realtime as realtime
 from app.services import lumaball_rooms as room_service
 from app.services.lumaball_identity import Identity
+
+
+def receive_with_deadline(socket, seconds=12):
+    """Starlette's sync receive has no timeout, including during __enter__.
+
+    Cancel the actual async queue read in the existing TestClient portal rather
+    than leaving a blocked executor thread behind when an expected event fails.
+    """
+    async def receive():
+        with anyio.fail_after(seconds):
+            return await socket._send_rx.receive()
+    return socket.portal.call(receive)
 
 
 class LumaBallRealtimeTests(unittest.TestCase):
@@ -90,8 +103,12 @@ class LumaBallRealtimeTests(unittest.TestCase):
 
     def websocket(self, headers, room, *, ticket=None, origin="http://testserver", proof=None):
         ticket = ticket or self.session(headers)["ws_ticket"]
-        return self.client.websocket_connect("/api/lumaball/ws?ticket=" + ticket + "&room=" + room["id"],
+        socket = self.client.websocket_connect("/api/lumaball/ws?ticket=" + ticket + "&room=" + room["id"],
             headers={"Origin": origin, "X-QStudy-Proxy-Key": settings.BFF_PROXY_SECRET if proof is None else proof})
+        # __enter__ and receive_json both dispatch through receive(), so a
+        # missing handshake or event becomes a bounded test failure in CI.
+        socket.receive = lambda: receive_with_deadline(socket)
+        return socket
 
     def receive(self, socket, kind, predicate=lambda data: True):
         for _ in range(20):
@@ -135,6 +152,17 @@ class LumaBallRealtimeTests(unittest.TestCase):
                     pass
         with self.websocket(headers, room, ticket=ticket) as socket:
             self.assertEqual(self.receive(socket, "welcome")["identity"]["id"], identity["id"])
+
+    def test_missing_event_deadline_cancels_read_without_poisoning_the_connection(self):
+        headers, _ = self.guest()
+        room = self.room(headers)
+        with self.websocket(headers, room) as socket:
+            self.receive(socket, "welcome")
+            self.receive(socket, "room")
+            with self.assertRaises(TimeoutError):
+                receive_with_deadline(socket, seconds=0.03)
+            socket.send_json({"type": "ping"})
+            self.receive(socket, "pong")
 
     def _assert_disconnect_preserves_new_connection(self, *, same_room):
         host_headers, _ = self.guest()
