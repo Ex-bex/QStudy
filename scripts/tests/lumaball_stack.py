@@ -97,21 +97,63 @@ def stop_child(process):
         process.wait(timeout=5)
 
 
-def wait_healthy(url, process, *, seconds=90):
+def startup_category(log_path):
+    """Report only fixed categories from bounded, disposable child logs."""
+    if log_path is None:
+        return "not-collected"
+    try:
+        with Path(log_path).open("rb") as source:
+            source.seek(0, os.SEEK_END)
+            source.seek(max(0, source.tell() - 64 * 1024))
+            value = source.read(64 * 1024).decode("utf-8", errors="replace")
+    except OSError:
+        return "unavailable"
+    categories = (
+        (("EADDRINUSE",), "port-in-use"),
+        (("EACCES", "EPERM"), "permission-denied"),
+        (("ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND", "Cannot find module"), "module-not-found"),
+        (("ENOENT", "Could not find a production build", "BUILD_ID"), "build-file-missing"),
+        (("QStudy: frontend listener failed",), "listener-failed"),
+        (("QStudy: frontend could not start",), "frontend-prepare-failed"),
+        (("TypeError",), "type-error"),
+        (("ReferenceError",), "reference-error"),
+        (("Error", "Traceback"), "runtime-error"),
+    )
+    for markers, category in categories:
+        if any(marker in value for marker in markers):
+            return category
+    return "no-error-output"
+
+
+def wait_healthy(url, process, *, seconds=90, log_path=None):
     import httpx
     until = time.monotonic() + seconds
+    last_http = None
+    last_issue = "none"
+
+    def diagnostics():
+        exit_code = process.poll()
+        state = "alive" if exit_code is None else f"exit-{exit_code}"
+        return f"http={last_http}, issue={last_issue}, process={state}, child={startup_category(log_path)}"
+
     with httpx.Client(timeout=1, trust_env=False) as client:
         while time.monotonic() < until:
             if process.poll() is not None:
-                raise StackFailure("A disposable server exited during startup")
+                raise StackFailure("A disposable server exited during startup (" + diagnostics() + ")")
             try:
                 response = client.get(url)
-                if response.status_code == 200 and response.json().get("service") == "QStudy":
-                    return
-            except (httpx.HTTPError, ValueError):
-                pass
+                last_http = response.status_code
+                last_issue = "non-success-http" if last_http != 200 else "health-marker-mismatch"
+                if last_http == 200:
+                    payload = response.json()
+                    if isinstance(payload, dict) and payload.get("service") == "QStudy":
+                        return
+            except httpx.HTTPError as error:
+                last_issue = type(error).__name__
+            except ValueError:
+                last_issue = "non-json-health-response"
             time.sleep(0.2)
-    raise StackFailure("Disposable server health deadline exceeded")
+    raise StackFailure("Disposable server health deadline exceeded (" + diagnostics() + ")")
 
 
 def response_json(response, status=200):
@@ -199,7 +241,7 @@ def main():
                 process = subprocess.Popen(api_command, cwd=folder, env=environment, stdin=subprocess.DEVNULL,
                                            stdout=api_log, stderr=subprocess.STDOUT)
                 try:
-                    wait_healthy(api_url + "/api/health", process, seconds=30)
+                    wait_healthy(api_url + "/api/health", process, seconds=30, log_path=folder / "api.log")
                 except Exception:
                     stop_child(process)
                     raise
@@ -210,9 +252,11 @@ def main():
                 api = start_api()
                 stage = "starting production frontend"
                 frontend = subprocess.Popen([node, str(ROOT / "frontend" / "server.mjs"), "--hostname", "127.0.0.1", "--port", str(site_port)],
-                                            cwd=folder, env=environment, stdin=subprocess.DEVNULL,
+                                            # Match the real native launcher. Fresh Next builds
+                                            # may resolve runtime assets from process.cwd().
+                                            cwd=ROOT / "frontend", env=environment, stdin=subprocess.DEVNULL,
                                             stdout=node_log, stderr=subprocess.STDOUT)
-                wait_healthy(site_url + "/api/health", frontend)
+                wait_healthy(site_url + "/api/health", frontend, log_path=folder / "frontend.log")
                 host = stack.enter_context(httpx.Client(base_url=site_url, headers={"Origin": site_url}, timeout=12, trust_env=False))
                 peer = stack.enter_context(httpx.Client(base_url=site_url, headers={"Origin": site_url}, timeout=12, trust_env=False))
                 admin = stack.enter_context(httpx.Client(base_url=site_url, headers={"Origin": site_url}, timeout=12, trust_env=False))
@@ -307,7 +351,7 @@ def main():
                 stage = "restarting only the disposable API and verifying persistence"
                 stop_child(api); api = None
                 api = start_api()
-                wait_healthy(site_url + "/api/health", frontend, seconds=30)
+                wait_healthy(site_url + "/api/health", frontend, seconds=30, log_path=folder / "frontend.log")
                 restored = response_json(host.get("/api/lumaball/me"))
                 require(restored["identity"]["id"] == host_identity["id"], "Guest profile did not survive API restart")
                 require(restored["config"]["announcement"] == "Fixture persisted announcement", "Game settings did not survive API restart")
