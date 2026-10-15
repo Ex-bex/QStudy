@@ -131,15 +131,23 @@ function Test-QStudyNode([string]$Path) {
         if ($LASTEXITCODE -ne 0) { return $null }
         $info = ($result -join '') | ConvertFrom-Json
         $version = [version]$info.version
-        if ($version.Major -notin @(22, 24) -or ($version.Major -eq 22 -and $version -lt [version]'22.14.0') -or $info.arch -notin @('x64', 'arm64')) { return $null }
+        if ($version.Major -ne 24 -or $info.arch -notin @('x64', 'arm64')) { return $null }
         $npm = Join-Path (Split-Path -Parent $Path) 'node_modules\npm\bin\npm-cli.js'
         if (-not (Test-Path -LiteralPath $npm -PathType Leaf)) { return $null }
         return [PSCustomObject]@{ path = [IO.Path]::GetFullPath($Path); version = [string]$info.version; architecture = [string]$info.arch; npm = $npm }
     } catch { return $null }
 }
 
+function Get-QStudySettingsPath([string]$Root) {
+    $choicePath = Join-Path $Root '.local\launcher\data-choice.json'
+    $choice = Read-QStudyInstallJson $choicePath
+    $productionOnly = (Test-Path -LiteralPath (Join-Path $Root 'deployment\data\backend\studyhub.db') -PathType Leaf) -and -not (Test-Path -LiteralPath (Join-Path $Root 'backend\studyhub.db') -PathType Leaf)
+    if (($null -ne $choice -and (Get-QStudyInstallProperty $choice 'source' '') -ceq 'deployment') -or ($null -eq $choice -and $productionOnly)) { return Join-Path $Root 'deployment\.env' }
+    return Join-Path $Root 'backend\.env'
+}
+
 function Test-QStudySecret([string]$Root) {
-    $envPath = Join-Path $Root 'backend\.env'
+    $envPath = Get-QStudySettingsPath $Root
     if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { return $false }
     $text = [IO.File]::ReadAllText($envPath)
     $match = [regex]::Match($text, '(?m)^\s*SECRET_KEY\s*=\s*([^\r\n#]+)')
@@ -178,7 +186,7 @@ function Get-QStudyInstallationStatus([string]$RootPath = '') {
     if (-not $backendReady) { $reasons.Add('Окружение Python отсутствует, перенесено или требует обновления зависимостей.') }
     if (-not $frontendReady) { $reasons.Add('Окружение Node.js отсутствует, перенесено или требует npm ci.') }
     $secretReady = Test-QStudySecret $root
-    if (-not $secretReady) { $reasons.Add('Нет корректного локального SECRET_KEY в backend/.env.') }
+    if (-not $secretReady) { $reasons.Add('Нет корректного SECRET_KEY в выбранном файле настроек. Существующие настройки не заменены.') }
     return [PSCustomObject]@{
         ready = [bool]($backendReady -and $frontendReady -and $secretReady)
         reasons = @($reasons.ToArray()); moved = [bool]$moved
@@ -323,23 +331,43 @@ function Invoke-QStudyInstallCommand([string]$Executable, [string[]]$CommandArgu
 }
 
 function Initialize-QStudySecret([string]$Root) {
-    $path = Join-Path $Root 'backend\.env'
+    $path = Get-QStudySettingsPath $Root
     if (Test-Path -LiteralPath $path -PathType Leaf) {
-        if (-not (Test-QStudySecret $Root)) { throw 'Существующий backend/.env содержит пустой или шаблонный SECRET_KEY. Укажите случайный ключ не короче 32 символов; существующий файл сохранён.' }
+        if (-not (Test-QStudySecret $Root)) { throw 'Выбранный .env содержит пустой или шаблонный SECRET_KEY. Существующий файл и аккаунты сохранены; укажите корректный ключ.' }
         return
     }
+    $database = if ([string]::Equals($path, (Join-Path $Root 'deployment\.env'), [StringComparison]::OrdinalIgnoreCase)) { Join-Path $Root 'deployment\data\backend\studyhub.db' } else { Join-Path $Root 'backend\studyhub.db' }
+    if (Test-Path -LiteralPath $database -PathType Leaf) { throw 'QStudy: существующая база найдена, но её файл настроек .env отсутствует. Восстановите соответствующий файл настроек из своей копии. Новый ключ не создан, аккаунты и база сохранены.' }
     $random = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $bytes = New-Object byte[] 48; $random.GetBytes($bytes) }
     finally { $random.Dispose() }
     $secret = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
     $example = Join-Path $Root 'backend\.env.example'
     $text = if (Test-Path -LiteralPath $example) { [IO.File]::ReadAllText($example) } else { "DATABASE_URL=sqlite:///./studyhub.db`nUPLOAD_DIR=./uploads`n" }
     $text = [regex]::Replace($text, '(?m)^\s*SECRET_KEY\s*=.*(?:\r?\n|$)', '')
     $text = "SECRET_KEY=$secret`r`n" + $text
-    # CreateNew prevents overwriting another concurrent process's credentials.
-    $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-    try { $content = [Text.UTF8Encoding]::new($false).GetBytes($text); $stream.Write($content, 0, $content.Length) }
-    finally { $stream.Dispose() }
+    # Protect an empty temporary file before writing the first secret byte.
+    # Publishing it never replaces an existing settings file.
+    $temporary = Join-Path (Split-Path -Parent $path) ('.qstudy-env-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $empty = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $empty.Dispose()
+        $item = Get-Item -LiteralPath $temporary
+        $acl = $item.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleSpecific($rule) }
+        $owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $acl.SetOwner($owner)
+        foreach ($sid in @($owner, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
+            $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow))
+        }
+        $item.SetAccessControl($acl)
+        $stream = [IO.File]::Open($temporary, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $content = [Text.UTF8Encoding]::new($false).GetBytes($text); $stream.Write($content, 0, $content.Length); $stream.Flush($true) }
+        finally { $stream.Dispose() }
+        [IO.File]::Move($temporary, $path)
+    } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
     Write-Host 'Создан приватный backend/.env со случайным ключом.'
 }
 

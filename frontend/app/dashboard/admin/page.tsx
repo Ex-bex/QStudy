@@ -21,6 +21,7 @@ import {
 } from "@/components/academic";
 import type { Account, Group } from "@/types/academic";
 import OperationsPanel from "./OperationsPanel";
+import SystemPanel from "./SystemPanel";
 import { DeveloperDirectoryAdmin } from "@/components/developer-directory";
 import { BrandingAdmin } from "@/components/branding-admin";
 
@@ -90,7 +91,7 @@ export default function AdminPage() {
       <PageTitle
         eyebrow="АДМИНИСТРИРОВАНИЕ"
         title="Центр управления"
-        description="Аккаунты, доступ, резервные копии и история изменений."
+        description="Аккаунты, перенос проекта, настройки сайта и история изменений."
       >
         <RecordEditor
           title="Создать аккаунт"
@@ -125,6 +126,7 @@ export default function AdminPage() {
           </div>
         ))}
       </div>
+      <SystemPanel />
       <OperationsPanel />
       <BrandingAdmin />
       <DeveloperDirectoryAdmin />

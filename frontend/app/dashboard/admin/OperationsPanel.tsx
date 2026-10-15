@@ -218,8 +218,8 @@ export default function OperationsPanel() {
             </div>
           </div>
           <p className={styles.caption}>
-            В архив входят база и загруженные файлы. Настройки и секретные ключи
-            из backend/.env хранятся отдельно.
+            Здесь хранятся копии базы и загруженных файлов. Для полного переноса
+            вместе с настройками используйте «Скачать весь проект» выше.
           </p>
           {backupsLoading && !backups ? (
             <Loading />

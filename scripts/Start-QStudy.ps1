@@ -1,148 +1,141 @@
 ﻿param(
-    [ValidateRange(10, 600)][int]$TimeoutSeconds = 120,
-    [ValidateRange(1024, 65535)][int]$FrontendPort = 3000,
-    [ValidateRange(1024, 65535)][int]$BackendPort = 8000,
-    [string]$PythonPath = '',
-    [string]$NodePath = '',
-    [switch]$Lan,
-    [switch]$Local,
-    [switch]$Dev,
-    [switch]$Offline,
-    [switch]$Repair,
-    [switch]$NoBrowser,
-    [switch]$OpenBrowser,
-    [switch]$NoPause
+    [ValidateSet('install', 'local', 'lan', 'internet')][string]$Mode = 'local',
+    [ValidateRange(10, 600)][int]$TimeoutSeconds = 180,
+    [switch]$Offline, [switch]$Repair, [switch]$ForceRepair,
+    [switch]$NoBrowser, [switch]$NoPause,
+    [switch]$Lan, [switch]$Local
 )
-. (Join-Path $PSScriptRoot 'QStudy.Common.ps1')
-$lock = $null
-$state = $null
-$created = [Collections.Generic.List[object]]::new()
-$failed = $false
-$savedEnvironment = @{}
-foreach ($key in @('PYTHONUNBUFFERED', 'NODE_ENV', 'BACKEND_URL', 'CORS_ORIGINS', 'PUBLIC_BASE_URL')) {
-    $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-}
+. (Join-Path $PSScriptRoot 'launcher\Native.ps1')
+$root = $script:QStudyRoot
+$lock = $null; $failed = $false; $supervisor = $null; $state = $null
+$stage = 'выбор существующих данных'
 try {
-    if ($Lan -and $Local) { throw 'Параметры -Lan и -Local нельзя использовать вместе.' }
-    if ($NoBrowser -and $OpenBrowser) { throw 'Параметры -NoBrowser и -OpenBrowser нельзя использовать вместе.' }
+    if ($Lan -and $Local) { throw 'QStudy: выберите один режим запуска.' }
+    if ($Lan) { $Mode = 'lan' }; if ($Local) { $Mode = 'local' }
+    Initialize-QStudyNativeStorage $root
     $lock = Enter-QStudyLock
-    $state = Read-QStudyState
-    $useLan = if ($Lan) { $true } elseif ($Local) { $false } else { $state.mode -eq 'lan' }
-    $desiredBind = if ($useLan) { '0.0.0.0' } else { '127.0.0.1' }
-    $bothAlive = $null -ne $state.backend -and $null -ne $state.frontend -and
-        $null -ne (Get-QStudyOwnedProcess $state.backend.identity) -and
-        $null -ne (Get-QStudyOwnedProcess $state.frontend.identity)
-    $sameMode = $state.bind -eq $desiredBind
-    $samePorts = $true
-    if ($bothAlive) {
-        $samePorts = (-not $PSBoundParameters.ContainsKey('FrontendPort') -or $state.frontend.port -eq $FrontendPort) -and
-            (-not $PSBoundParameters.ContainsKey('BackendPort') -or $state.backend.port -eq $BackendPort)
-    }
-    if ($bothAlive -and $sameMode -and $samePorts -and -not $Repair) {
-        Wait-QStudyReady $state.backend $TimeoutSeconds
-        Wait-QStudyReady $state.frontend $TimeoutSeconds
-        Set-QStudyAddresses $state ([int]$state.frontend.port) $useLan
-        Write-QStudyState $state
-        Write-Host 'QStudy уже работает.'
-    } else {
-        # Stop a partial launch before dependency repair or data preflight.
-        # Every identity is checked; copied/reused PIDs are never terminated.
-        foreach ($name in @('frontend', 'backend')) {
-            if ($null -ne $state.$name) {
-                Stop-QStudyRecord $state.$name
-                $state.$name = $null
+    $dataset = Get-QStudyNativeDataset $root
+    Write-Host ('QStudy — ' + $(if ($Mode -ceq 'install') { 'установка окружения' } elseif ($Mode -ceq 'internet') { 'доступ из интернета' } elseif ($Mode -ceq 'lan') { 'локальная сеть' } else { 'этот компьютер' }))
+    Write-Host ('Активная база: ' + $dataset.database)
+    Write-Host 'Аккаунты, материалы и настройки сохраняются во всех режимах. Восстановление ZIP при запуске не выполняется.'
+    $networkScript = Join-Path $PSScriptRoot 'launcher_network.ps1'
+    if (-not (Test-Path -LiteralPath $networkScript -PathType Leaf)) { throw 'QStudy: отсутствует scripts/launcher_network.ps1. Скопируйте проект полностью.' }
+    . $networkScript
+    $state = Read-QStudyNativeState $root
+    $status = Get-QStudyInstallationStatus $root
+    $runtime = $status.runtime
+    $hash = Get-QStudyNativeBuildHash $root
+    $backendHash = Get-QStudyNativeBackendHash $root
+    $build = Read-QStudyInstallJson (Join-Path $root '.local\launcher\build.json')
+    $reuse = $Mode -cne 'install' -and -not $Repair -and -not $ForceRepair -and $null -ne $state -and $state.mode -ceq $Mode -and $state.data_source -ceq $dataset.source -and (Get-QStudyInstallProperty $state 'backend_hash' '') -ceq $backendHash -and $status.ready -and $null -ne $build -and $build.hash -ceq $hash -and $null -ne (Get-QStudyOwnedProcess $state.supervisor.identity)
+    if ($reuse) {
+        $context = Get-QStudyNativeNetworkContext -Root $root -Mode $Mode -Port ([int]$state.frontend_port)
+        $reuse = $context.site_url -ceq $state.site_url
+        if ($reuse) {
+            $managed = Read-QStudyInstallJson (Join-Path $root '.local\managed\status.json')
+            if ($null -eq $managed -or $managed.instance -cne $state.instance -or $managed.state -cne 'running') { $reuse = $false }
+            else {
+                $state.backend = New-QStudyNativeChildRecord 'backend' ([int]$managed.backend_pid) $root $state.instance ([int]$state.backend_port) '127.0.0.1'
+                $state.frontend = New-QStudyNativeChildRecord 'frontend' ([int]$managed.frontend_pid) $root $state.instance ([int]$state.frontend_port) $state.bind (($state.site_url -split '//', 2)[1])
+                Wait-QStudyReady $state.backend 10
+                Wait-QStudyReady $state.frontend 10
+                $refreshedStatePath = Join-Path $root '.local\launcher\state.json'
+                Write-QStudyInstallJson $refreshedStatePath $state
+                Protect-QStudyNativePath $refreshedStatePath
+                Write-Host 'QStudy уже работает. Используется та же база данных.'
             }
         }
-        Write-QStudyState $state
-        $installHelper = Join-Path $PSScriptRoot 'QStudy.Install.ps1'
-        if (-not (Test-Path -LiteralPath $installHelper -PathType Leaf)) { throw 'Отсутствует scripts/QStudy.Install.ps1. Скопируйте проект полностью.' }
-        . $installHelper
-        $runtime = Ensure-QStudyInstallation -Offline:$Offline -ForceRepair:$Repair
-        $python = if ($PythonPath) { Resolve-QStudyRuntime $PythonPath 'python' } else { [string]$runtime.python }
-        $node = if ($NodePath) { Resolve-QStudyRuntime $NodePath 'node' } else { [string]$runtime.node }
-        $backendEntry = Join-Path $PSScriptRoot 'qstudy_backend.py'
-        $nextEntry = Join-Path $script:QStudyRoot 'frontend\node_modules\next\dist\bin\next'
-        if (-not (Test-Path -LiteralPath $nextEntry -PathType Leaf)) { throw 'Не удалось подготовить зависимости frontend.' }
-        $preflight = Join-Path $PSScriptRoot 'qstudy_data.py'
-        if (-not (Test-Path -LiteralPath $preflight -PathType Leaf)) { throw 'Отсутствует scripts/qstudy_data.py. Скопируйте проект полностью.' }
-        $preflightArgs = @($preflight, '--project-root', $script:QStudyRoot, '--apply')
-        if ($state.previousWorkspace) { $preflightArgs += @('--previous-project-root', $state.previousWorkspace) }
-        $preflightOutput = @(& $python @preflightArgs 2>&1)
-        $preflightExit = $LASTEXITCODE
-        try { $dataReport = ($preflightOutput -join [Environment]::NewLine) | ConvertFrom-Json }
-        catch { throw 'Не удалось прочитать результат проверки данных QStudy.' }
-        [IO.File]::WriteAllText((Join-Path $script:QStudyLocal 'portability-report.json'), ($dataReport | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
-        if ($preflightExit -ne 0 -or -not $dataReport.ok) { throw 'Проверка переносимых данных не завершена. Подробности: .local/portability-report.json. Данные не удалены.' }
-        if (@($dataReport.warnings).Count -gt 0) { Write-Warning ('Проверка данных: предупреждений ' + @($dataReport.warnings).Count + '. Подробности доступны в отчёте переносимости.') }
-        $state.previousWorkspace = ''
-        Write-QStudyState $state
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            $created.Clear()
-            $selectedBackend = Find-QStudyFreePort $BackendPort '127.0.0.1'
-            $selectedFrontend = Find-QStudyFreePort $FrontendPort $desiredBind @($selectedBackend)
-            Set-QStudyAddresses $state $selectedFrontend $useLan
-            $state | Add-Member -NotePropertyName backendPort -NotePropertyValue $selectedBackend -Force
-            $state | Add-Member -NotePropertyName frontendPort -NotePropertyValue $selectedFrontend -Force
-            $env:PYTHONUNBUFFERED = '1'
-            $env:NODE_ENV = 'development'
-            $env:BACKEND_URL = 'http://127.0.0.1:' + $selectedBackend
-            $env:PUBLIC_BASE_URL = $state.siteUrl
-            $origins = @($state.localUrl, ('http://localhost:' + $selectedFrontend)) + @($state.lanUrls)
-            $env:CORS_ORIGINS = ($origins | Select-Object -Unique) -join ','
-            try {
-                $instance = [Guid]::NewGuid().ToString('N')
-                $record = Start-QStudyProcess -Name 'backend' -Executable $python -Arguments @($backendEntry, '--port', [string]$selectedBackend, '--qstudy-instance', $instance) -Directory (Join-Path $script:QStudyRoot 'backend') -Marker $backendEntry -Instance $instance -Port $selectedBackend -Url ($env:BACKEND_URL + '/api/health')
-                $created.Add($record); $state.backend = $record; Write-QStudyState $state
-                Wait-QStudyReady $record $TimeoutSeconds
-                $instance = [Guid]::NewGuid().ToString('N')
-                $record = Start-QStudyProcess -Name 'frontend' -Executable $node -Arguments @("--title=qstudy-$instance", $nextEntry, 'dev', '--hostname', $desiredBind, '--port', [string]$selectedFrontend) -Directory (Join-Path $script:QStudyRoot 'frontend') -Marker $nextEntry -Instance $instance -Port $selectedFrontend -Url ($state.localUrl + '/') -Bind $desiredBind
-                $created.Add($record); $state.frontend = $record; Write-QStudyState $state
-                Wait-QStudyReady $record $TimeoutSeconds
-                Write-QStudyState $state
-                Write-Host 'QStudy запущен в отдельных скрытых процессах.'
-                break
-            } catch {
-                $collision = $_.Exception.Message -like '*PORT_COLLISION:*'
-                if (-not $collision) {
-                    foreach ($record in $created) { if (Test-QStudyForeignListener $record) { $collision = $true } }
+    }
+    if (-not $reuse) {
+        $stage = 'завершение прежнего запуска'
+        if ($null -ne $state) {
+            Disable-QStudyNativeNetwork -Root $root
+            if ($null -eq $runtime) { throw 'QStudy: окружение действующего запуска не найдено. Процессы и данные сохранены.' }
+            Stop-QStudyNativeState $root $state $runtime
+        }
+        # Upgrade the original local launcher without guessing process ownership.
+        $legacy = Read-QStudyState
+        foreach ($name in @('frontend', 'backend')) { if ($null -ne $legacy.$name) { Stop-QStudyRecord $legacy.$name; $legacy.$name = $null } }
+        Write-QStudyState $legacy
+        $stage = 'установка зависимостей'
+        $runtime = Ensure-QStudyInstallation -RootPath $root -Offline:$Offline -ForceRepair:($Repair -or $ForceRepair)
+        Protect-QStudyNativePath $dataset.env_file
+        if ($dataset.source -ceq 'deployment') {
+            $stage = 'переход с прежнего контейнерного запуска'
+            & $runtime.python -I (Join-Path $root 'scripts\launcher\docker_migration.py') --root $root
+            if ($LASTEXITCODE -ne 0) { throw 'QStudy: прежняя установка может использовать выбранную базу. Остановите её в Docker Desktop и повторите кнопку; база не копировалась и не сбрасывалась.' }
+        }
+        $stage = 'сборка production-интерфейса'
+        Ensure-QStudyNativeBuild $root $runtime -Repair:($Repair -or $ForceRepair)
+        if ($Mode -ceq 'install') {
+            Write-Host 'Окружение и production-интерфейс готовы. Выберите Start-QStudy.cmd, Start-QStudy-LAN.cmd или Start-QStudy-Internet.cmd.'
+        } else {
+            $stage = 'выбор портов'
+            $backendPort = Find-QStudyFreePort 8000 '127.0.0.1'
+            $bind = if ($Mode -ceq 'local') { '127.0.0.1' } else { '0.0.0.0' }
+            if ($Mode -ceq 'internet') {
+                $frontendPort = 8080
+                if (-not (Test-QStudyPortUsable $frontendPort $bind)) { throw 'QStudy: TCP 8080 занят другим приложением. Закройте прежний сервер и повторите кнопку. Порт не заменён автоматически.' }
+            } else { $frontendPort = Find-QStudyFreePort 3000 $bind @($backendPort) }
+            $context = Get-QStudyNativeNetworkContext -Root $root -Mode $Mode -Port $frontendPort
+            $instance = [Guid]::NewGuid().ToString('N')
+            $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+            try { $secretBytes = New-Object byte[] 48; $random.GetBytes($secretBytes); $controlToken = [Convert]::ToBase64String($secretBytes) } finally { $random.Dispose() }
+            $config = @{ version = 1; root = $root; owner_sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value;
+                instance = $instance; mode = $Mode; data_source = $dataset.source; backend_port = $backendPort; frontend_port = $frontendPort;
+                site_url = $context.site_url; bind = $bind; node = $runtime.node; control_token = $controlToken; timeout_seconds = $TimeoutSeconds }
+            $configPath = Assert-QStudyNativePath $root (Join-Path $root '.local\launcher\launch.json')
+            Write-QStudyInstallJson $configPath $config
+            Protect-QStudyNativePath $configPath
+            $stage = 'проверка существующих аккаунтов'
+            & $runtime.python -I (Join-Path $root 'scripts\launcher\setup.py') --config $configPath
+            $setupExitCode = $LASTEXITCODE
+            if (Test-Path -LiteralPath $dataset.database -PathType Leaf) {
+                $choicePath = Join-Path $root '.local\launcher\data-choice.json'
+                Write-QStudyInstallJson $choicePath @{ version = 1; source = $dataset.source; had_database = $true }
+                Protect-QStudyNativePath $choicePath
+            }
+            if ($setupExitCode -ne 0) { throw 'QStudy: первый администратор не подтверждён. Сайт не опубликован; существующие аккаунты и настройки сохранены.' }
+            $stage = 'запуск приложения'
+            $entry = Join-Path $root 'scripts\launcher\supervisor.py'
+            $supervisor = Start-QStudyProcess -Name 'supervisor' -Executable $runtime.python -Arguments @('-I', $entry, '--config', $configPath, '--instance', $instance) -Directory $root -Marker $entry -Instance $instance -Port 0 -Url ''
+            $state = [PSCustomObject]@{ version = 3; root = $root; computer = (Get-QStudyComputerFingerprint); owner_sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value;
+                instance = $instance; mode = $Mode; data_source = $dataset.source; backend_hash = $backendHash; backend_port = $backendPort; frontend_port = $frontendPort;
+                site_url = $context.site_url; bind = $bind; supervisor = $supervisor; backend = $null; frontend = $null }
+            $statePath = Assert-QStudyNativePath $root (Join-Path $root '.local\launcher\state.json')
+            Write-QStudyInstallJson $statePath $state; Protect-QStudyNativePath $statePath
+            $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds * 2 + 20)
+            do {
+                if ($null -eq (Get-QStudyOwnedProcess $supervisor.identity)) { throw ('QStudy: приложение завершилось при запуске. Лог: ' + $supervisor.stderr) }
+                $managed = Read-QStudyInstallJson (Join-Path $root '.local\managed\status.json')
+                if ($null -ne $managed -and $managed.instance -ceq $instance) {
+                    if ($managed.state -ceq 'failed') { throw ('QStudy: приложение не прошло проверку. Причина: ' + $managed.message + '. Логи: .local/logs/backend-' + $instance + '.log и frontend-' + $instance + '.log') }
+                    if ($managed.state -ceq 'running') { break }
                 }
-                foreach ($record in $created) { Stop-QStudyRecord $record; $state.($record.name) = $null }
-                Write-QStudyState $state
-                if (-not $collision -or $attempt -eq 3) { throw }
-                Write-Host 'Выбранный порт успело занять другое приложение. Подбираю новые порты.'
-            }
+                if ([DateTime]::UtcNow -ge $deadline) { throw 'QStudy: превышено время запуска. Посмотрите отдельные логи API и интерфейса в .local/logs.' }
+                Start-Sleep -Milliseconds 500
+            } while ($true)
+            $state.backend = New-QStudyNativeChildRecord 'backend' ([int]$managed.backend_pid) $root $instance $backendPort '127.0.0.1'
+            $state.frontend = New-QStudyNativeChildRecord 'frontend' ([int]$managed.frontend_pid) $root $instance $frontendPort $bind (($context.site_url -split '//', 2)[1])
+            Wait-QStudyReady $state.backend 10; Wait-QStudyReady $state.frontend 10
+            Write-QStudyInstallJson $statePath $state; Protect-QStudyNativePath $statePath
+            $choicePath = Join-Path $root '.local\launcher\data-choice.json'
+            Write-QStudyInstallJson $choicePath @{ version = 1; source = $dataset.source; had_database = $true }; Protect-QStudyNativePath $choicePath
         }
     }
-    Write-Host ('Сайт: ' + $state.siteUrl)
-    Write-Host 'Это локальный запуск. Для доступа из интернета используйте Start-QStudy-Internet.cmd; внешний адрес выводится отдельным запуском.'
-    if ($state.siteUrl -ne $state.localUrl) { Write-Host ('На этом компьютере: ' + $state.localUrl) }
-    foreach ($url in @($state.lanUrls | Select-Object -Skip 1)) { Write-Host ('Другой сетевой адрес: ' + $url) }
-    if ($useLan -and @($state.lanUrls).Count -eq 0) { Write-Warning 'Активный сетевой IPv4-адрес не найден. Открываю локальный адрес.' }
-    Write-Host ('API:  ' + $state.backend.url)
-    Write-Host ('Логи: ' + (Join-Path $script:QStudyLocal 'logs'))
-    if (-not $NoBrowser -and ($OpenBrowser -or -not $NoPause)) {
-        try { Start-Process -FilePath $state.siteUrl | Out-Null }
-        catch { Write-Warning 'Не удалось открыть браузер. Откройте адрес сайта, указанный выше.' }
+    if ($Mode -cne 'install') {
+        $stage = 'настройка доступа'
+        Set-QStudyNativeNetwork -Root $root -Mode $Mode -Port ([int]$state.frontend_port) -PublicIP $context.public_ip -SiteUrl $state.site_url
+        Write-Host ('Сайт: ' + $state.site_url)
+        Write-Host ('Логи: ' + (Join-Path $root '.local\logs'))
+        if ($Mode -ceq 'internet') { Write-Host 'Проверьте адрес с телефона с выключенным Wi-Fi. HTTP передаёт данные без шифрования.' }
+        if (-not $NoBrowser) { Start-Process -FilePath $state.site_url | Out-Null }
     }
 } catch {
     $failed = $true
-    $failureMessage = $_.Exception.Message
-    foreach ($record in $created) {
-        try {
-            Stop-QStudyRecord $record
-            if ($null -ne $state) { $state.($record.name) = $null }
-        } catch { Write-Warning "Не удалось завершить $($record.name); состояние сохранено для Stop-QStudy.cmd." }
-    }
-    if ($null -ne $state -and $null -ne $lock) {
-        try { Write-QStudyState $state } catch { Write-Warning 'Не удалось сохранить состояние процессов.' }
-    }
-    Write-Host "Ошибка запуска QStudy: $failureMessage" -ForegroundColor Red
-} finally {
-    foreach ($key in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnvironment[$key], 'Process') }
-    if ($null -ne $lock) { $lock.Dispose() }
-}
-if ($failed) {
-    if (-not $NoPause) { [void](Read-Host 'Нажмите Enter, чтобы закрыть окно') }
-    exit 1
-}
+    Write-Host ('QStudy: этап «' + $stage + '» не завершён. ' + $_.Exception.Message) -ForegroundColor Red
+    Write-Host 'Аккаунты, база и настройки не сбрасывались. Повторите ту же кнопку после исправления причины.'
+} finally { if ($null -ne $lock) { $lock.Dispose() } }
+if (-not $NoPause) { [void](Read-Host 'Нажмите Enter, чтобы закрыть окно. Приложение продолжит работать.') }
+if ($failed) { exit 1 }
 exit 0

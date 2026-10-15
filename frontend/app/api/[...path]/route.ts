@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sameSiteMutation, sessionCookieOptions, trustedClientIp } from "@/lib/proxy-security";
+import {
+  sameSiteMutation,
+  sessionCookieOptions,
+  trustedClientIp,
+} from "@/lib/proxy-security";
+import {
+  boundedUploadBody,
+  isSystemImport,
+  MAX_SYSTEM_ARCHIVE_BYTES,
+} from "@/lib/system-upload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +20,7 @@ async function proxy(
   context: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await context.params;
+  const systemImport = isSystemImport(request.method, path);
   const backupDownload =
     request.method === "GET" &&
     path.length === 4 &&
@@ -33,7 +43,11 @@ async function proxy(
         path[1] === "departments" &&
         /^[1-9][0-9]*$/.test(path[2]) &&
         path[3] === "logo"));
-  const bodyLimit = brandingUpload ? 2 * 1024 * 1024 + 64 * 1024 : MAX_BODY;
+  const bodyLimit = systemImport
+    ? MAX_SYSTEM_ARCHIVE_BYTES
+    : brandingUpload
+      ? 2 * 1024 * 1024 + 64 * 1024
+      : MAX_BODY;
   if (
     !backupDownload &&
     !brandingAsset &&
@@ -49,6 +63,7 @@ async function proxy(
     process.env.PUBLIC_BASE_URL,
     process.env.ALLOW_PUBLIC_HTTP,
     process.env.NODE_ENV,
+    process.env.QSTUDY_ACCESS_MODE,
   );
   if (mutation && !originMatches) {
     return NextResponse.json(
@@ -58,12 +73,28 @@ async function proxy(
   }
   if (Number(request.headers.get("content-length") || 0) > bodyLimit) {
     return NextResponse.json(
-      { detail: brandingUpload ? "PNG должен занимать не более 2 МБ" : "Файл слишком большой (максимум 25 МБ)" },
+      {
+        detail: systemImport
+          ? "Архив должен занимать не более 2 ГБ"
+          : brandingUpload
+            ? "PNG должен занимать не более 2 МБ"
+            : "Файл слишком большой (максимум 25 МБ)",
+      },
       { status: 413 },
     );
   }
-  let body: ArrayBuffer | undefined;
-  if (mutation && request.body) {
+  if (systemImport && !request.cookies.get(COOKIE)?.value) {
+    return NextResponse.json(
+      { detail: "Войдите в аккаунт администратора" },
+      { status: 401 },
+    );
+  }
+  let body: ArrayBuffer | ReadableStream<Uint8Array> | undefined;
+  let importBody: ReturnType<typeof boundedUploadBody> | undefined;
+  if (systemImport && request.body) {
+    importBody = boundedUploadBody(request.body);
+    body = importBody.body;
+  } else if (mutation && request.body) {
     const reader = request.body.getReader();
     const chunks: Uint8Array[] = [];
     let size = 0;
@@ -123,12 +154,14 @@ async function proxy(
     process.env.NODE_ENV,
     process.env.PUBLIC_BASE_URL,
     process.env.ALLOW_PUBLIC_HTTP,
+    process.env.QSTUDY_ACCESS_MODE,
   );
-  const clearSession = (response: NextResponse) => response.cookies.set(COOKIE, "", {
-    ...cookieOptions,
-    maxAge: 0,
-    expires: new Date(0),
-  });
+  const clearSession = (response: NextResponse) =>
+    response.cookies.set(COOKIE, "", {
+      ...cookieOptions,
+      maxAge: 0,
+      expires: new Date(0),
+    });
   try {
     const upstream = await fetch(
       `${backend}/api/${endpoint}${request.nextUrl.search}`,
@@ -138,8 +171,12 @@ async function proxy(
         body,
         cache: "no-store",
         redirect: "error",
-        signal: AbortSignal.timeout(180_000),
-      },
+        signal: AbortSignal.any([
+          request.signal,
+          AbortSignal.timeout(systemImport ? 30 * 60_000 : 180_000),
+        ]),
+        ...(systemImport && body ? { duplex: "half" } : {}),
+      } as RequestInit & { duplex?: "half" },
     );
     const isAuth = ["auth/login", "auth/register", "auth/password"].includes(
       endpoint,
@@ -189,6 +226,12 @@ async function proxy(
       clearSession(response);
     return response;
   } catch {
+    if (importBody?.tooLarge) {
+      return NextResponse.json(
+        { detail: "Архив должен занимать не более 2 ГБ" },
+        { status: 413 },
+      );
+    }
     const response = NextResponse.json(
       {
         detail:

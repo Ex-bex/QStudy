@@ -131,6 +131,10 @@ class BodySizeLimitMiddleware:
         received = 0
         content_type = dict(scope.get('headers', [])).get(b'content-type', b'')
         limit = settings.MAX_UPLOAD_BYTES + 1024 * 1024 if b'multipart/form-data' in content_type else 1024 * 1024
+        if scope.get('method') == 'POST' and scope.get('path') == '/api/admin/system/imports':
+            # Only the administrator transfer endpoint accepts a large raw ZIP.
+            # Its handler authenticates before consuming this bounded stream.
+            limit = settings.MAX_TRANSFER_BYTES
         if scope.get('method') == 'PUT' and scope.get('path', '').startswith('/api/branding/'):
             from app.services.branding import MAX_LOGO_BYTES
             # One logo plus bounded multipart overhead, including streamed requests.

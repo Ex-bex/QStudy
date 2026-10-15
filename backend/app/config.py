@@ -5,6 +5,7 @@ from sqlalchemy.engine import make_url
 from typing import Literal
 from urllib.parse import urlsplit
 import ipaddress
+import os
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     WEB_RESEARCH_MAX_SOURCES: int = Field(default=8, ge=1, le=8)
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
     MAX_UPLOAD_BYTES: int = Field(default=25 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
+    MAX_TRANSFER_BYTES: int = Field(default=2 * 1024 ** 3, ge=1024, le=2 * 1024 ** 3)
     REGISTRATION_ENABLED: bool = True
     RATE_LIMIT_ENABLED: bool = True
     # Private BFF-to-API authentication for proxy IP limits; empty disables forwarding locally.
@@ -48,7 +50,9 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = ""
     SMTP_SECURITY: Literal["starttls", "ssl"] = "starttls"
-    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
+    # The native supervisor supplies the selected store's validated environment.
+    # Reading another backend/.env here would mix two installations' settings.
+    model_config = SettingsConfigDict(env_file=None if os.environ.get("QSTUDY_MANAGED_RUNTIME") == "1" else BACKEND_DIR / ".env", extra="ignore")
 
     @field_validator("UPLOAD_DIR")
     @classmethod

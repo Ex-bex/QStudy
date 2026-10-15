@@ -6,9 +6,13 @@ function siteOrigin(value: string | null | undefined): URL | null {
     const url = new URL(value);
     if (
       !["http:", "https:"].includes(url.protocol) ||
-      url.username || url.password || url.search || url.hash ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
       url.pathname !== "/"
-    ) return null;
+    )
+      return null;
     return url;
   } catch {
     return null;
@@ -28,12 +32,18 @@ export function publicHttpOrigin(
   allowPublicHttp: string | undefined,
 ): URL | null {
   if (allowPublicHttp !== "true" || !publicBaseUrl) return null;
-  const literal = /^http:\/\/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([1-9][0-9]{0,4})\/?$/.exec(publicBaseUrl);
+  const literal =
+    /^http:\/\/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([1-9][0-9]{0,4})\/?$/.exec(
+      publicBaseUrl,
+    );
   if (!literal || isIP(literal[1]) !== 4) return null;
   const [a, b, c, d] = literal[1].split(".").map(Number);
   // Match IPv4 global-address rules, also excluding multicast and reserved ranges.
   if (
-    a === 0 || a === 10 || a === 127 || a >= 224 ||
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
@@ -44,7 +54,32 @@ export function publicHttpOrigin(
     (a === 198 && (b === 18 || b === 19)) ||
     (a === 198 && b === 51 && c === 100) ||
     (a === 203 && b === 0 && c === 113)
-  ) return null;
+  )
+    return null;
+  return siteOrigin(publicBaseUrl);
+}
+
+/** The native launcher explicitly selects a local or RFC1918 LAN listener.
+ * Docker/public HTTP retain their separate global IPv4 opt-in above. */
+export function nativeHttpOrigin(
+  publicBaseUrl: string | undefined,
+  accessMode: string | undefined,
+): URL | null {
+  if (!["local", "lan"].includes(accessMode || "") || !publicBaseUrl)
+    return null;
+  const literal =
+    /^http:\/\/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([1-9][0-9]{0,4})\/?$/.exec(
+      publicBaseUrl,
+    );
+  if (!literal || isIP(literal[1]) !== 4 || Number(literal[2]) > 65535)
+    return null;
+  const [a, b] = literal[1].split(".").map(Number);
+  if (accessMode === "local" && literal[1] !== "127.0.0.1") return null;
+  if (
+    accessMode === "lan" &&
+    !(a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168))
+  )
+    return null;
   return siteOrigin(publicBaseUrl);
 }
 
@@ -56,16 +91,24 @@ export function sameSiteMutation(
   publicBaseUrl?: string,
   allowPublicHttp?: string,
   nodeEnv?: string,
+  nativeAccessMode?: string,
 ): boolean {
   const supplied = siteOrigin(origin);
   if (!supplied || !host) return false;
   if (publicBaseUrl) {
     const trusted = siteOrigin(publicBaseUrl);
     if (
-      nodeEnv === "production" && trusted?.protocol === "http:" &&
-      !publicHttpOrigin(publicBaseUrl, allowPublicHttp)
-    ) return false;
-    return !!trusted && supplied.origin === trusted.origin && matchesOriginHost(trusted, host);
+      nodeEnv === "production" &&
+      trusted?.protocol === "http:" &&
+      !publicHttpOrigin(publicBaseUrl, allowPublicHttp) &&
+      !nativeHttpOrigin(publicBaseUrl, nativeAccessMode)
+    )
+      return false;
+    return (
+      !!trusted &&
+      supplied.origin === trusted.origin &&
+      matchesOriginHost(trusted, host)
+    );
   }
   if (nodeEnv === "production") return false;
   return matchesOriginHost(supplied, host) && supplied.protocol === protocol;
@@ -78,12 +121,21 @@ export function sessionCookieOptions(
   nodeEnv: string | undefined,
   publicBaseUrl: string | undefined,
   allowPublicHttp: string | undefined,
+  nativeAccessMode?: string,
 ) {
-  const publicHttp = publicHttpOrigin(publicBaseUrl, allowPublicHttp);
-  const configuredHttpRequest = !!publicHttp && !!host && matchesOriginHost(publicHttp, host) && protocol === "http:";
+  const publicHttp =
+    publicHttpOrigin(publicBaseUrl, allowPublicHttp) ||
+    nativeHttpOrigin(publicBaseUrl, nativeAccessMode);
+  const configuredHttpRequest =
+    !!publicHttp &&
+    !!host &&
+    matchesOriginHost(publicHttp, host) &&
+    protocol === "http:";
   return {
     httpOnly: true,
-    secure: protocol === "https:" || (nodeEnv === "production" && !configuredHttpRequest),
+    secure:
+      protocol === "https:" ||
+      (nodeEnv === "production" && !configuredHttpRequest),
     sameSite: "strict" as const,
     path: "/",
   };
@@ -97,8 +149,13 @@ export function trustedClientIp(
   proxySecret: string | undefined,
 ): string | null {
   if (
-    trustProxyHeaders !== "true" || nodeEnv !== "production" ||
-    !proxySecret || proxySecret.length < 32 || !realIp || !isIP(realIp)
-  ) return null;
+    trustProxyHeaders !== "true" ||
+    nodeEnv !== "production" ||
+    !proxySecret ||
+    proxySecret.length < 32 ||
+    !realIp ||
+    !isIP(realIp)
+  )
+    return null;
   return realIp;
 }

@@ -242,6 +242,8 @@ function Wait-QStudyReady($Record, [int]$TimeoutSeconds) {
             $request = [Net.HttpWebRequest]::Create($Record.url)
             $request.Proxy = $null
             $request.Timeout = 3000
+            $request.AllowAutoRedirect = $false
+            if ($null -ne $Record.PSObject.Properties['host'] -and $Record.host) { $request.Host = [string]$Record.host }
             $response = $request.GetResponse()
             try {
                 $statusCode = [int]$response.StatusCode

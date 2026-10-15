@@ -12,7 +12,7 @@ from app import operational_models
 from app.services import background, backups
 from app.services.audit import initialize_operations
 from app.routers import (auth_routes, admin, academic, subjects, notes, files, tasks, chat,
-                         exam, cards, search, tests, notifications, lectures, learning, developers, branding)
+                         exam, cards, search, tests, notifications, lectures, learning, developers, branding, system)
 
 
 def initialize_database():
@@ -74,6 +74,10 @@ def initialize_database():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # A killed explicit import may leave a partial transaction. Never initialize
+    # a replacement empty database, replay a ZIP or roll back at normal startup.
+    from app.services.transfers import assert_no_incomplete_imports
+    assert_no_incomplete_imports()
     await asyncio.to_thread(backups.create_pre_upgrade_backup)
     initialize_database()
     initialize_operations(engine)
@@ -100,6 +104,8 @@ app.add_middleware(CORSMiddleware,
 async def request_security(request: Request, call_next):
     from app.services.branding import IMMUTABLE_CACHE, MAX_LOGO_BYTES
     limit = settings.MAX_UPLOAD_BYTES + 1024 * 1024
+    if request.method == "POST" and request.url.path == "/api/admin/system/imports":
+        limit = settings.MAX_TRANSFER_BYTES
     if request.method == "PUT" and request.url.path.startswith("/api/branding/"):
         limit = min(limit, MAX_LOGO_BYTES + 64 * 1024)
     length = request.headers.get("content-length")
@@ -127,7 +133,7 @@ async def request_security(request: Request, call_next):
 
 
 for router in (lectures, auth_routes, admin, academic, subjects, notes, files, tasks, chat,
-               exam, cards, search, tests, notifications, learning, developers, branding):
+               exam, cards, search, tests, notifications, learning, developers, branding, system):
     app.include_router(router.router, prefix="/api")
 
 
