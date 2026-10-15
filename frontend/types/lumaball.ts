@@ -5,6 +5,7 @@ export type LumaConfig = {
   announcement: string;
   rules: string;
   logo_url: string | null;
+  public_base_url?: string;
   guests_enabled: boolean;
   guest_create_rooms: boolean;
   max_rooms: number;

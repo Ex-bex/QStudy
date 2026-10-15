@@ -229,6 +229,22 @@ class LumaBallRoomTests(unittest.TestCase):
             for action in ("start", "pause", "resume", "reset", "team", "kick"):
                 self.assertIn("lumaball.room." + action, actions)
 
+    def test_reserved_opponent_cannot_start_match_before_their_game_connection_is_ready(self):
+        room, host_headers, host, other_headers, other = self.connected_room()
+        with self.sessions() as db:
+            opponent = service.member(db, room["id"], other["id"])
+            opponent.connected = False
+            db.commit()
+        response = self.command(room, "start")
+        self.assertEqual(response.status_code, 409, response.text)
+        with self.sessions() as db:
+            record = db.get(LumaBallRoom, room["id"])
+            self.assertEqual(record.status, "lobby")
+            self.assertIsNone(record.match_id)
+            service.member(db, room["id"], other["id"]).connected = True
+            db.commit()
+        self.assertEqual(self.command(room, "start").json()["status"], "playing")
+
     def test_admin_chat_clear_is_scoped_and_logged_without_chat_contents(self):
         headers, host = self.guest(); second_headers, other = self.guest()
         room = self.create(headers); second = self.create(second_headers)

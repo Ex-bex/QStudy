@@ -1,4 +1,4 @@
-/** LumaBall's fixed-step disc football simulation. No browser or network state. */
+/** QBall's fixed-step disc football simulation. No browser or network state. */
 export type Team = "red" | "blue" | "spectator";
 export type Input = { x: number; y: number; kick: boolean };
 export type Member = {
@@ -47,6 +47,18 @@ const EMPTY_INPUT: Input = { x: 0, y: 0, kick: false };
 const FIXED_STEP = 1 / 60;
 const clamp = (n: number, low: number, high: number) =>
   Math.max(low, Math.min(high, n));
+
+function spawn(team: "red" | "blue", index: number, count: number) {
+  const columns = Math.ceil(count / 8);
+  const rows = Math.ceil(count / columns);
+  const column = Math.floor(index / rows);
+  const row = index % rows;
+  const columnRows = Math.min(rows, count - column * rows);
+  return {
+    x: team === "red" ? 350 - column * 62 : 850 + column * 62,
+    y: 350 + (row - (columnRows - 1) / 2) * 62,
+  };
+}
 
 export function normalizeInput(value: unknown): Input {
   if (!value || typeof value !== "object") return { ...EMPTY_INPUT };
@@ -185,8 +197,7 @@ export class FootballEngine {
         id: m.id,
         name: m.name,
         team,
-        x: team === "red" ? 350 : 850,
-        y: 350 + (teammates.indexOf(m) - (teammates.length - 1) / 2) * 62,
+        ...spawn(team, teammates.indexOf(m), teammates.length),
         vx: 0,
         vy: 0,
         kicking: false,
@@ -220,8 +231,7 @@ export class FootballEngine {
       const players = this.players.filter((p) => p.team === team);
       players.forEach((p, i) =>
         Object.assign(p, {
-          x: team === "red" ? 350 : 850,
-          y: 350 + (i - (players.length - 1) / 2) * 62,
+          ...spawn(team, i, players.length),
           vx: 0,
           vy: 0,
           kicking: false,

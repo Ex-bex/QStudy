@@ -115,3 +115,31 @@ test("network frames reject unbounded, malformed or non-finite game objects", ()
     false,
   );
 });
+
+test("large uneven teams spawn on the pitch without overlapping, including after a goal", () => {
+  const roster = Array.from({ length: 16 }, (_, index) => ({
+    id: String(index),
+    name: `Player ${index}`,
+    connected: true,
+    team: index === 15 ? "blue" : "red",
+  }));
+  const engine = new FootballEngine(roster);
+  const check = (frame) => {
+    assert.equal(frame.players.length, 16);
+    for (const player of frame.players) {
+      assert.ok(player.y >= FIELD.top + FIELD.playerRadius);
+      assert.ok(player.y <= FIELD.bottom - FIELD.playerRadius);
+      assert.ok(player.x >= FIELD.left + FIELD.playerRadius);
+      assert.ok(player.x <= FIELD.right - FIELD.playerRadius);
+      for (const other of frame.players)
+        if (other.id !== player.id)
+          assert.ok(Math.hypot(other.x - player.x, other.y - player.y) >= 40);
+    }
+  };
+  check(engine.frame());
+  advance(engine, 1.5);
+  engine.ball = { x: FIELD.right - 2, y: 350, vx: 600, vy: 0 };
+  advance(engine, 0.15);
+  assert.equal(engine.frame().score.red, 1);
+  check(engine.frame());
+});

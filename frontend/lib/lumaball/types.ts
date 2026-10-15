@@ -22,7 +22,12 @@ export type Room = {
 export type Session = {
   identity: Identity;
   ws_ticket: string;
-  config: { chat_enabled: boolean; enabled: boolean; announcement?: string };
+  config: {
+    chat_enabled: boolean;
+    enabled: boolean;
+    announcement?: string;
+    public_base_url?: string;
+  };
   ice_servers: RTCIceServer[];
 };
 export type ChatMessage = {

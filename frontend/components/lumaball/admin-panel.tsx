@@ -228,9 +228,7 @@ export default function LumaAdminPanel() {
   ];
   if (user.role !== "admin")
     return (
-      <p className="muted">
-        Управление QBall доступно администратору QStudy.
-      </p>
+      <p className="muted">Управление QBall доступно администратору QStudy.</p>
     );
 
   return (
@@ -758,7 +756,11 @@ function SettingsForm({
         throw new Error(
           "Число игроков по умолчанию не должно превышать максимум для площадки.",
         );
-      const { logo_url: _logo, ...payload } = form;
+      const {
+        logo_url: _logo,
+        public_base_url: _publicBase,
+        ...payload
+      } = form;
       const result = await api<AdminSettings>("/admin/lumaball/settings", {
         method: "PATCH",
         body: JSON.stringify({ ...payload, ice_servers: servers }),

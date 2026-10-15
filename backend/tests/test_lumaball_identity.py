@@ -127,6 +127,16 @@ class LumaBallIdentityTests(unittest.TestCase):
             self.assertNotIn(token, str(record.__dict__))
             self.assertEqual(db.query(User).count(), 2)
 
+    def test_invite_address_comes_from_active_launcher_not_request_host_or_editable_settings(self):
+        address = "http://94.125.99.135:8080"
+        with patch.object(settings, "PUBLIC_BASE_URL", address + "/"):
+            response = self.client.get("/api/lumaball/config", headers={"Host": "untrusted.example"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["public_base_url"], address)
+            self.assertEqual(self.create_guest()["config"]["public_base_url"], address)
+        self.as_user(admin=True)
+        self.assertEqual(self.client.patch("/api/admin/lumaball/settings", json={"public_base_url": "https://untrusted.example"}).status_code, 422)
+
     def test_independent_guests_receive_unique_random_numbers_without_qstudy_accounts(self):
         guests = [self.create_guest() for _ in range(8)]
         names = [guest["identity"]["name"] for guest in guests]

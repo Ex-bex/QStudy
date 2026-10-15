@@ -7,15 +7,18 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+import hashlib
 import json
 import os
 from pathlib import Path
+import queue
 import secrets
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from urllib.parse import urlencode
 
@@ -183,6 +186,119 @@ def send(connection, value):
     connection.send(json.dumps(value, separators=(",", ":")))
 
 
+class BrowserPhysics:
+    """Use the shipped TS engine, with inputs received from the real WS relay."""
+
+    def __init__(self, node, room, environment, log):
+        self.process = subprocess.Popen(
+            [node, str(ROOT / "scripts" / "tests" / "qball_physics_fixture.mjs")],
+            cwd=ROOT, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=log, text=True, encoding="utf-8", bufsize=1)
+        self.messages = queue.Queue()
+
+        def read():
+            try:
+                for line in self.process.stdout:
+                    self.messages.put(line)
+            finally:
+                self.messages.put(None)
+
+        self.reader = threading.Thread(target=read, daemon=True)
+        self.reader.start()
+        self.expected_source = hashlib.sha256(
+            (ROOT / "frontend" / "lib" / "lumaball" / "engine.ts").read_bytes()).hexdigest()
+        try:
+            self.initial = self.request({"action": "start", "room": room})
+        except BaseException:
+            self.close()
+            raise
+
+    def request(self, command):
+        self.process.stdin.write(json.dumps(command, separators=(",", ":")) + "\n")
+        self.process.stdin.flush()
+        try:
+            line = self.messages.get(timeout=8)
+        except queue.Empty:
+            raise StackFailure("The actual browser physics helper did not answer") from None
+        require(line is not None, "The actual browser physics helper exited")
+        value = json.loads(line)
+        require("error" not in value and value.get("source_sha256") == self.expected_source,
+                "Physics fixture did not use the current shipped browser engine")
+        return value["frame"]
+
+    def step(self, inputs, seconds=0.05):
+        return self.request({"action": "step", "inputs": inputs, "seconds": seconds})
+
+    def close(self):
+        if self.process.stdin:
+            self.process.stdin.close()
+        stop_child(self.process)
+        self.reader.join(timeout=1)
+        if self.process.stdout:
+            self.process.stdout.close()
+
+
+def play_engine_match(node, environment, log, playing, host_ws, peer_ws,
+                      host_identity, peer_identity):
+    """Complete a score-limit match without setting any engine private state."""
+    physics = BrowserPhysics(node, playing, environment, log)
+    try:
+        frame = physics.initial
+        starting = {player["id"]: dict(player) for player in frame["players"]}
+        require(set(starting) == {host_identity["id"], peer_identity["id"]},
+                "The match did not start with both connected players in the real engine")
+        moved_host = moved_peer = kicked_ball = False
+        delivered_count = 0
+        deadline = time.monotonic() + 18
+        while not frame["finished"] and time.monotonic() < deadline:
+            tick_at = time.monotonic()
+            defender = next(player for player in frame["players"] if player["id"] == peer_identity["id"])
+            peer_input = {"x": 0, "y": -1 if defender["y"] > 130 else 0, "kick": False}
+            # Input belongs to the peer's actual connection, even if a hostile
+            # client supplies somebody else's ID. Physics consumes the relay's
+            # authenticated `from` value rather than the command's fake field.
+            send(peer_ws, {"type": "input", "from": host_identity["id"], "input": peer_input})
+            received = receive(host_ws, "input")
+            require(received["from"] == peer_identity["id"] and received["input"] == peer_input,
+                    "Peer movement was not relayed with the authenticated identity")
+            frame = physics.step([
+                {"id": host_identity["id"], "input": {"x": 1, "y": 0, "kick": True}},
+                {"id": received["from"], "input": received["input"]},
+            ])
+            attacker = next(player for player in frame["players"] if player["id"] == host_identity["id"])
+            defender = next(player for player in frame["players"] if player["id"] == peer_identity["id"])
+            moved_host |= attacker["x"] > starting[attacker["id"]]["x"] + 100
+            moved_peer |= defender["y"] < starting[defender["id"]]["y"] - 100
+            kicked_ball |= (attacker["kicking"] and frame["ball"]["vx"] > 400
+                            and abs(frame["ball"]["x"] - attacker["x"]) < 90)
+            send(host_ws, {"type": "frame", "frame": frame})
+            delivered = receive(peer_ws, "frame", lambda event: event["frame"]["seq"] == frame["seq"])["frame"]
+            require(delivered == frame,
+                    "The other client did not receive the exact real-engine snapshot")
+            delivered_count += 1
+            # Stay below the production input/frame ceilings and exercise live
+            # heartbeats during a real wall-clock match rather than a burst.
+            delay = 0.05 - (time.monotonic() - tick_at)
+            if delay > 0:
+                time.sleep(delay)
+        require(moved_host and moved_peer, "Both players did not move from actual engine input")
+        require(kicked_ball, "Actual engine input never kicked and accelerated the ball")
+        require(frame["finished"] and frame["winner"] == "red"
+                and frame["score"] == {"red": playing["score_limit"], "blue": 0},
+                "The actual physics did not finish at the configured goal limit")
+        require(frame["ball"]["x"] > 1139 and 0 < frame["elapsed"] < playing["time_limit"] * 60,
+                "The winning goal did not cross the goal line before the timer")
+        require(delivered_count > 20, "Too few live snapshots reached the other client")
+        send(host_ws, {"type": "result", "match_id": playing["match_id"],
+                       "red": frame["score"]["red"], "blue": frame["score"]["blue"],
+                       "duration_seconds": round(frame["elapsed"])})
+        finished = receive(peer_ws, "room", lambda event: event["room"]["status"] == "finished")["room"]
+        require(finished["score"] == frame["score"], "Published result differed from the real final frame")
+        return frame, delivered_count
+    finally:
+        physics.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true", help="Explicitly run the disposable production integration")
@@ -232,6 +348,7 @@ def main():
             })
             api_log = stack.enter_context((folder / "api.log").open("wb"))
             node_log = stack.enter_context((folder / "frontend.log").open("wb"))
+            physics_log = stack.enter_context((folder / "physics.log").open("wb"))
             api = None
             frontend = None
             api_command = [sys.executable, "-m", "uvicorn", "stack_fixture:app", "--host", "127.0.0.1", "--port", str(api_port),
@@ -271,6 +388,8 @@ def main():
                 require(host.get("/branding/qball-logo.png").status_code == 200, "Bundled QBall PNG logo is missing")
                 host_session, host_response = session(host)
                 peer_session, peer_response = session(peer)
+                require(host_session["config"].get("public_base_url") == site_url,
+                        "Invitation address did not use the configured shared site origin")
                 host_identity, peer_identity = host_session["identity"], peer_session["identity"]
                 require(host_identity["kind"] == peer_identity["kind"] == "guest", "Anonymous play did not create guest identities")
                 require(host_identity["id"] != peer_identity["id"] and host_identity["name"] != peer_identity["name"], "Guest identities were not unique")
@@ -298,11 +417,28 @@ def main():
                 require(student.get("/api/admin/lumaball/settings").status_code == 403, "Student gained administrator privileges")
                 response_json(admin.patch("/api/admin/lumaball/settings", json={"announcement": "Fixture persisted announcement"}))
 
-                stage = "creating and joining a password-protected room through BFF"
-                room = response_json(host.post("/api/lumaball/rooms", json={"name": "Stack arena", "password": "fixture-room", "max_players": 4}), 201)
-                require(peer.post("/api/lumaball/rooms/" + room["id"] + "/join", json={"password": "wrong"}).status_code == 403,
+                stage = "checking password enforcement before the open invitation match"
+                locked = response_json(host.post("/api/lumaball/rooms", json={"name": "Protected fixture", "password": "fixture-room", "max_players": 4}), 201)
+                require(peer.post("/api/lumaball/rooms/" + locked["id"] + "/join", json={"password": "wrong"}).status_code == 403,
                         "Room password was not enforced")
-                response_json(peer.post("/api/lumaball/rooms/" + room["id"] + "/join", json={"password": "fixture-room"}))
+                response_json(peer.post("/api/lumaball/rooms/" + locked["id"] + "/join", json={"password": "fixture-room"}))
+                response_json(host.post("/api/lumaball/rooms/" + locked["id"] + "/leave"))
+
+                stage = "opening an invitation from another independent guest client"
+                room = response_json(host.post("/api/lumaball/rooms", json={"name": "Friends arena", "max_players": 4, "score_limit": 1}), 201)
+                invitation = peer.get("/qball/room/" + room["id"])
+                require(invitation.status_code == 200 and "QBall" in invitation.text,
+                        "The friend's direct invitation page did not render")
+                listing = response_json(peer.get("/api/lumaball/rooms"))
+                require(any(item["id"] == room["id"] and item["name"] == "Friends arena"
+                            and item["locked"] is False for item in listing["items"]),
+                        "The created room was not visible in the other client's shared list")
+                before_join = response_json(peer.get("/api/lumaball/rooms/" + room["id"]))
+                require(before_join["is_member"] is False and before_join["password_required"] is False,
+                        "An open invitation incorrectly required registration or a room password")
+                joined = response_json(peer.post("/api/lumaball/rooms/" + room["id"] + "/join", json={}))
+                require(joined["is_member"] and len(joined["members"]) == 2,
+                        "The invited guest did not join the same shared room")
                 host_ticket = session(host)[0]["ws_ticket"]
                 peer_ticket = session(peer)[0]["ws_ticket"]
                 ws_root = site_url.replace("http://", "ws://") + "/api/lumaball/ws?"
@@ -319,36 +455,34 @@ def main():
                     host_ws = connections.enter_context(connect(ws_root + urlencode({"ticket": host_ticket, "room": room["id"]}),
                         origin=site_url, open_timeout=8, close_timeout=2, max_size=24 * 1024, proxy=None))
                     require(receive(host_ws, "welcome")["identity"]["id"] == host_identity["id"], "WebSocket host identity did not match cookie session")
+                    send(host_ws, {"type": "command", "action": "start"})
+                    waiting = receive(host_ws, "error")
+                    require("подключения" in waiting.get("detail", "")
+                            and response_json(host.get("/api/lumaball/rooms/" + room["id"]))["status"] == "lobby",
+                            "The host started while the invited opponent had not connected")
                     peer_ws = connections.enter_context(connect(ws_root + urlencode({"ticket": peer_ticket, "room": room["id"]}),
                         origin=site_url, open_timeout=8, close_timeout=2, max_size=24 * 1024, proxy=None))
                     require(receive(peer_ws, "welcome")["identity"]["id"] == peer_identity["id"], "WebSocket peer identity did not match cookie session")
 
-                    stage = "round-tripping signaling, input, frames, chat and result"
+                    stage = "checking same-port signaling and chat"
                     send(host_ws, {"type": "signal", "target": peer_identity["id"], "payload": {"description": {"type": "offer", "sdp": "fixture-offer"}}})
                     require(receive(peer_ws, "signal")["from"] == host_identity["id"], "Host signaling was not delivered to the right peer")
                     send(peer_ws, {"type": "signal", "target": host_identity["id"], "payload": {"description": {"type": "answer", "sdp": "fixture-answer"}}})
                     require(receive(host_ws, "signal")["payload"]["description"]["type"] == "answer", "Peer signaling answer was not delivered")
+                    send(peer_ws, {"type": "chat", "text": "Fixture good game"})
+                    require(receive(host_ws, "chat")["message"]["text"] == "Fixture good game", "Chat did not cross the production WS tunnel")
+
+                    stage = "playing real engine movement, kick and a winning goal through the production relay"
                     send(host_ws, {"type": "command", "action": "start"})
                     playing = receive(host_ws, "room", lambda value: value["room"]["status"] == "playing")["room"]
                     receive(peer_ws, "room", lambda value: value["room"]["status"] == "playing")
-                    send(peer_ws, {"type": "input", "from": host_identity["id"], "input": {"x": 1, "y": 0, "kick": True}})
-                    require(receive(host_ws, "input")["from"] == peer_identity["id"], "Client-supplied player ID bypassed server identity")
-                    frame = {"seq": 1, "match_id": playing["match_id"], "width": 1200, "height": 700,
-                        "players": [{"id": member["id"], "name": "FORGED_NAME", "team": member["team"],
-                            "x": 350 if member["team"] == "red" else 850, "y": 350, "vx": 0, "vy": 0, "kicking": False}
-                            for member in playing["members"] if member["team"] != "spectator"],
-                        "ball": {"x": 600, "y": 350, "vx": 0, "vy": 0}, "score": {"red": 0, "blue": 0},
-                        "elapsed": 0, "remaining": playing["time_limit"] * 60, "kickoff": 1, "finished": False, "winner": None}
-                    send(host_ws, {"type": "frame", "frame": frame})
-                    delivered = receive(peer_ws, "frame")["frame"]
-                    require(delivered["match_id"] == playing["match_id"] and "FORGED_NAME" not in json.dumps(delivered),
-                            "Frame relay did not validate the room roster")
-                    send(peer_ws, {"type": "chat", "text": "Fixture good game"})
-                    require(receive(host_ws, "chat")["message"]["text"] == "Fixture good game", "Chat did not cross the production WS tunnel")
-                    send(host_ws, {"type": "result", "match_id": playing["match_id"], "red": 5, "blue": 2, "duration_seconds": 72})
-                    require(receive(peer_ws, "room", lambda value: value["room"]["status"] == "finished")["room"]["score"] == {"red": 5, "blue": 2},
-                            "Finished result was not published")
-                    require(response_json(peer.get("/api/lumaball/matches"))["total"] == 1, "Finished result was not stored in SQLite")
+                    final_frame, delivered_count = play_engine_match(
+                        node, environment, physics_log, playing, host_ws, peer_ws,
+                        host_identity, peer_identity)
+                    history = response_json(peer.get("/api/lumaball/matches"))
+                    require(history["total"] == 1 and history["items"][0]["id"] == playing["match_id"]
+                            and history["items"][0]["score"] == final_frame["score"],
+                            "The actual engine's finished result was not stored in SQLite")
                     host_ws.close()
                     require(receive(peer_ws, "closed")["reason"] == "host_left", "Creator departure did not notify the peer")
 
@@ -360,10 +494,16 @@ def main():
                 require(restored["identity"]["id"] == host_identity["id"], "Guest profile did not survive API restart")
                 require(restored["config"]["announcement"] == "Fixture persisted announcement", "Game settings did not survive API restart")
                 results = response_json(peer.get("/api/lumaball/matches"))
-                require(results["total"] == 1 and results["items"][0]["red_score"] == 5, "Match history did not survive API restart")
+                require(results["total"] == 1 and results["items"][0]["id"] == playing["match_id"]
+                        and results["items"][0]["score"] == final_frame["score"],
+                        "The real engine's match history did not survive API restart")
                 require(response_json(peer.get("/api/lumaball/rooms"))["total"] == 0, "A browser-owned room incorrectly resumed after server restart")
                 require(response_json(student.get("/api/auth/me"))["email"] == "stack-student@example.com", "QStudy account login did not survive API restart")
-                print("PASS: production frontend/BFF, HttpOnly guests, shared accounts, room passwords, same-port WebSocket signaling/input/frame/chat/results, moderation and SQLite restart persistence.")
+                print("PASS: production frontend/BFF, two HttpOnly guests, direct invitation and shared room list, "
+                      "password checks, real shipped FootballEngine movement/kick/winning goal, "
+                      f"{delivered_count} exact snapshots over the same-port WebSocket relay, "
+                      "published final score and SQLite/account/settings persistence after restart. "
+                      "This fixture verifies the server relay and engine; it does not emulate browser rendering or WebRTC ICE.")
                 return 0
             finally:
                 stop_child(frontend)

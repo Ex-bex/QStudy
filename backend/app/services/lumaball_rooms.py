@@ -195,8 +195,8 @@ def room_command(db, room_id, identity, data, *, commit=True):
         if host is None or not host.connected:
             raise HTTPException(409, "Дождитесь подключения создателя комнаты")
         roster = active_members(db, room.id)
-        if not any(m.team == "red" for m, _ in roster) or not any(m.team == "blue" for m, _ in roster):
-            raise HTTPException(409, "Добавьте хотя бы одного игрока в каждую команду")
+        if not any(m.connected and m.team == "red" for m, _ in roster) or not any(m.connected and m.team == "blue" for m, _ in roster):
+            raise HTTPException(409, "Дождитесь подключения хотя бы одного игрока в каждой команде")
         room.match_id = uuid.uuid4().hex
         room.match_started_at = datetime.utcnow()
         room.red_score = room.blue_score = 0

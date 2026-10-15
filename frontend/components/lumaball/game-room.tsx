@@ -13,6 +13,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CircleHelp,
+  Copy,
   Expand,
   Flag,
   LoaderCircle,
@@ -37,6 +38,11 @@ import {
   type Team,
 } from "@/lib/lumaball/engine";
 import { GamePeers } from "@/lib/lumaball/peers";
+import {
+  MatchResultDelivery,
+  roomInvitationUrl,
+  teamsReady,
+} from "@/lib/lumaball/room-state";
 import { drawFootball } from "@/lib/lumaball/render";
 import {
   gameRequest,
@@ -87,6 +93,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const [stick, setStick] = useState({ x: 0, y: 0 });
   const [kicking, setKicking] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [inviteNotice, setInviteNotice] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
   const roomRef = useRef<RoomView | null>(null);
   const identityRef = useRef<Identity | null>(null);
@@ -99,14 +106,22 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const arenaRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const invitationRef = useRef<HTMLInputElement>(null);
 
   const send = useCallback((value: unknown) => {
     const socket = socketRef.current;
     if (
       socket?.readyState === WebSocket.OPEN &&
       socket.bufferedAmount < 128 * 1024
-    )
-      socket.send(JSON.stringify(value));
+    ) {
+      try {
+        socket.send(JSON.stringify(value));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }, []);
 
   useEffect(() => {
@@ -184,6 +199,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         identityRef.current = session.identity;
         setIdentity(session.identity);
         setSessionConfig(session.config);
+        if (initial) window.dispatchEvent(new Event("lumaball:updated"));
         if (initial) {
           const info = await gameRequest<RoomView>(
             "/rooms/" + encodeURIComponent(roomId),
@@ -351,7 +367,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     let previous = performance.now();
     let lastFrame = previous;
     let lastHud = previous;
-    let resultSent = "";
+    const results = new MatchResultDelivery();
     const tick = (now: number) => {
       const elapsed = Math.min((now - previous) / 1000, 0.2);
       previous = now;
@@ -374,21 +390,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
             peersRef.current?.frame(frame);
             send({ type: "frame", frame });
           }
-          const match = room.match_id || room.id;
-          if (
-            frame.finished &&
-            resultSent !== match &&
-            room.status === "playing"
-          ) {
-            resultSent = match;
-            send({
-              type: "result",
-              red: frame.score.red,
-              blue: frame.score.blue,
-              match_id: room.match_id,
-              duration_seconds: Math.round(frame.elapsed),
-            });
-          }
+          results.report(room, frame, now, send);
           lastFrame = now;
         }
       }
@@ -425,7 +427,15 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           keys.has("ShiftLeft") ||
           keys.has("ShiftRight"),
       });
-      if (roomRef.current?.host_id !== identityRef.current?.id) {
+      const currentRoom = roomRef.current;
+      const ownId = identityRef.current?.id;
+      if (
+        currentRoom?.status === "playing" &&
+        currentRoom.host_id !== ownId &&
+        currentRoom.members.some(
+          (member) => member.id === ownId && member.team !== "spectator",
+        )
+      ) {
         peersRef.current?.input(inputRef.current);
         send({ type: "input", input: inputRef.current });
       }
@@ -450,8 +460,14 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         target?.closest("input,textarea,select,[contenteditable=true]")
       )
         return;
+      if (event.code === "Space" && target?.closest("button,a,[role=button]")) {
+        keysRef.current.delete(event.code);
+        update();
+        return;
+      }
       if (!allowed.has(event.code)) return;
       event.preventDefault();
+      if (pressed && keysRef.current.has(event.code)) return;
       if (pressed) keysRef.current.add(event.code);
       else keysRef.current.delete(event.code);
       update();
@@ -469,17 +485,29 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     const visibility = () => {
       if (document.hidden) release();
     };
+    const focus = (event: FocusEvent) => {
+      if (
+        (event.target as HTMLElement | null)?.closest(
+          "input,textarea,select,[contenteditable=true]",
+        )
+      )
+        release();
+    };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", release);
     document.addEventListener("visibilitychange", visibility);
+    document.addEventListener("focusin", focus);
     const interval = setInterval(update, 50);
+    const heartbeat = setInterval(() => send({ type: "ping" }), 15000);
     return () => {
       clearInterval(interval);
+      clearInterval(heartbeat);
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", release);
       document.removeEventListener("visibilitychange", visibility);
+      document.removeEventListener("focusin", focus);
     };
   }, [send]);
 
@@ -492,7 +520,9 @@ export default function GameRoom({ roomId }: { roomId: string }) {
 
   const command = (action: Command["action"], target?: string, team?: Team) => {
     setError("");
-    send({ type: "command", action, target, team });
+    if (!send({ type: "command", action, target, team }))
+      setError("Соединение занято. Повторите действие через несколько секунд.");
+    else canvasRef.current?.focus({ preventScroll: true });
   };
   const join = async () => {
     setJoining(true);
@@ -533,6 +563,29 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   };
   const me = room?.members.find((m) => m.id === identity?.id);
   const manage = identity?.is_admin || room?.host_id === identity?.id;
+  const readyToStart = !!room && teamsReady(room.members);
+  const invitation =
+    typeof window === "undefined"
+      ? ""
+      : roomInvitationUrl(
+          sessionConfig?.public_base_url,
+          window.location.origin,
+          roomId,
+        );
+  const copyInvitation = async () => {
+    if (!invitation) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("manual-copy");
+      await navigator.clipboard.writeText(invitation);
+      setInviteNotice("Ссылка скопирована. Отправьте её другу.");
+    } catch {
+      invitationRef.current?.focus();
+      invitationRef.current?.select();
+      setInviteNotice(
+        "Ссылка выделена. Скопируйте её через Ctrl+C или меню телефона.",
+      );
+    }
+  };
   const online = connection === "online";
   const showOverlay = !online || room?.status !== "playing";
   const connectionLabel =
@@ -591,6 +644,30 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           </span>
         </div>
       </header>
+      {room && !needsJoin && online && (
+        <section className={styles.invitation} aria-label="Пригласить друга">
+          <label htmlFor="qball-invitation">Пригласить друга</label>
+          <div>
+            <input
+              id="qball-invitation"
+              ref={invitationRef}
+              value={invitation}
+              readOnly
+              onFocus={(event) => event.currentTarget.select()}
+              aria-label="Ссылка на комнату"
+            />
+            <button onClick={() => void copyInvitation()}>
+              <Copy size={15} /> Скопировать
+            </button>
+          </div>
+          <p role="status">
+            {inviteNotice ||
+              (room.locked
+                ? "Отправьте ссылку другу, а пароль комнаты сообщите отдельно."
+                : "Друг сможет войти по ссылке как гость, если гостевой вход разрешён.")}
+          </p>
+        </section>
+      )}
       {help && (
         <div className={styles.help}>
           <strong>Как играть</strong>
@@ -685,7 +762,11 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                 </span>
               </div>
               <div className={styles.pitch}>
-                <canvas ref={canvasRef} aria-label="Футбольное поле QBall" />
+                <canvas
+                  ref={canvasRef}
+                  tabIndex={0}
+                  aria-label="Футбольное поле QBall"
+                />
                 {showOverlay && (
                   <div className={styles.overlay}>
                     <div className={styles.overlayCard}>
@@ -732,6 +813,9 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                           {manage && (
                             <button
                               className={styles.primary}
+                              disabled={
+                                room?.status !== "paused" && !readyToStart
+                              }
                               onClick={() =>
                                 command(
                                   room?.status === "paused"
@@ -748,6 +832,14 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                                   : "Начать матч"}
                             </button>
                           )}
+                          {manage &&
+                            room?.status !== "paused" &&
+                            !readyToStart && (
+                              <p>
+                                Дождитесь хотя бы одного подключённого игрока в
+                                каждой команде.
+                              </p>
+                            )}
                         </>
                       )}
                     </div>
@@ -794,7 +886,12 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                   <button
                     key={team}
                     className={`${styles.teamButton} ${me?.team === team ? styles.teamSelected : ""}`}
-                    disabled={!online}
+                    disabled={
+                      !online ||
+                      (!manage &&
+                        room?.status !== "lobby" &&
+                        room?.status !== "finished")
+                    }
                     onClick={() => command("team", identity?.id, team)}
                     title={title}
                   >
@@ -861,7 +958,9 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                     </button>
                   ) : (
                     <button
-                      disabled={!online}
+                      disabled={
+                        !online || (room?.status !== "paused" && !readyToStart)
+                      }
                       onClick={() =>
                         command(room?.status === "paused" ? "resume" : "start")
                       }
@@ -990,8 +1089,11 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                   className={styles.chatForm}
                   onSubmit={(e) => {
                     e.preventDefault();
-                    if (text.trim() && online) {
-                      send({ type: "chat", text: text.trim() });
+                    if (
+                      text.trim() &&
+                      online &&
+                      send({ type: "chat", text: text.trim() })
+                    ) {
                       setText("");
                     }
                   }}

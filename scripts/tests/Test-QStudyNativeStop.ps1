@@ -51,6 +51,9 @@ function Save-StopState([string]$Root = $fixture) {
 try {
     [IO.Directory]::CreateDirectory((Join-Path $fixture '.local\launcher')) | Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $fixture 'backend')) | Out-Null
+    # Startup explicitly assigns the user's SID. Elevated Windows runners may
+    # otherwise inherit Administrators as the owner of a newly created folder.
+    Initialize-QStudyNativeStorage $fixture
     $database = Join-Path $fixture 'backend\studyhub.db'
     $settings = Join-Path $fixture 'backend\.env'
     $choice = Join-Path $fixture '.local\launcher\data-choice.json'

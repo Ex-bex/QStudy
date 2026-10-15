@@ -17,6 +17,7 @@ from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import get_current_user
+from app.config import settings
 from app.lumaball_models import (LumaBallGuestCredential, LumaBallProfile,
                                  LumaBallSettings, LumaBallTicket, utcnow)
 from app.models import AcademicSetting, BrandingAsset, User
@@ -121,6 +122,8 @@ def get_config(db) -> dict:
     values = get_settings(db).model_dump(exclude={"ice_servers"})
     asset = db.get(BrandingAsset, "lumaball")
     values["logo_url"] = f"/api/lumaball/logo?v={asset.digest}" if asset else None
+    # Invite links must use the launcher's address, never a browser-supplied Host.
+    values["public_base_url"] = settings.PUBLIC_BASE_URL.rstrip("/")
     return values
 
 

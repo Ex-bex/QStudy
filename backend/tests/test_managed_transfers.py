@@ -207,6 +207,51 @@ class TransferTests(TransferFixture):
         with closing(sqlite3.connect(self.database)) as db:
             self.assertEqual(db.execute("SELECT filepath FROM materials").fetchone()[0], str(self.document))
 
+    def test_portable_export_contains_integrated_game_source_branding_and_shared_data(self):
+        game_files = {
+            "frontend/app/qball/page.tsx": b"fixture shared game homepage",
+            "frontend/app/qball/room/[roomId]/page.tsx": b"fixture shared game room",
+            "frontend/components/lumaball/game-room.tsx": b"fixture game controls",
+            "frontend/lib/lumaball/engine.ts": b"fixture game physics",
+            "frontend/lib/lumaball/peers.ts": b"fixture WebRTC transport",
+            "frontend/lib/lumaball/render.ts": b"fixture game renderer",
+            "frontend/public/branding/qball-logo.png": b"fixture built-in game logo",
+            "assets/brand/source/qforcelogo_lumaball.png": b"fixture original game logo",
+            "frontend/server.mjs": b"fixture same-origin server",
+            "frontend/lib/lumaball-ws-proxy.mjs": b"fixture same-port WebSocket proxy",
+            "backend/app/services/lumaball_realtime.py": b"fixture game signaling",
+            "scripts/launcher/NetworkStop.ps1": b"fixture network cleanup",
+            "scripts/Stop-QStudy.ps1": b"fixture stop control",
+        }
+        for relative, content in game_files.items():
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        separate = self.root / "LumaBall" / "legacy-server.js"
+        separate.parent.mkdir()
+        separate.write_text("unneeded separate game server", encoding="utf-8")
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.executescript("""CREATE TABLE lumaball_profiles(id TEXT PRIMARY KEY,user_id INTEGER,name TEXT);
+            INSERT INTO lumaball_profiles VALUES('player1',1,'fixture game player');
+            CREATE TABLE lumaball_settings(id INTEGER PRIMARY KEY,settings_json TEXT);
+            INSERT INTO lumaball_settings VALUES(1,'{"title":"QBall"}');
+            CREATE TABLE lumaball_matches(id TEXT PRIMARY KEY,red_score INTEGER,blue_score INTEGER);
+            INSERT INTO lumaball_matches VALUES('match1',5,2);
+            CREATE TABLE branding_assets(key TEXT PRIMARY KEY,content BLOB);""")
+            db.execute("INSERT INTO branding_assets VALUES('lumaball',?)", (b"fixture uploaded logo",))
+        archive = transfers.export_project()
+        with zipfile.ZipFile(archive) as source:
+            for relative, expected in game_files.items():
+                self.assertEqual(source.read("QStudy/" + relative), expected)
+            self.assertFalse(any(name.startswith("QStudy/LumaBall/") for name in source.namelist()))
+            with closing(sqlite3.connect(":memory:")) as snapshot:
+                snapshot.deserialize(source.read("QStudy/backend/studyhub.db"))
+                self.assertEqual(snapshot.execute("SELECT user_id FROM lumaball_profiles").fetchone()[0], 1)
+                self.assertEqual(snapshot.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
+                self.assertEqual(snapshot.execute("SELECT settings_json FROM lumaball_settings").fetchone()[0], '{"title":"QBall"}')
+                self.assertEqual(snapshot.execute("SELECT red_score,blue_score FROM lumaball_matches").fetchone(), (5, 2))
+                self.assertEqual(snapshot.execute("SELECT content FROM branding_assets WHERE key='lumaball'").fetchone()[0], b"fixture uploaded logo")
+
     def test_standard_backup_stages_without_replacing_and_explicit_apply_is_once(self):
         archive = self.standard_archive()
         preview = self.upload(archive)
