@@ -173,6 +173,8 @@ class GameHub:
         while True:
             await asyncio.sleep(3)
             for connection in list(self.connections.values()):
+                if self.connections.get(connection.id) is not connection:
+                    continue
                 try:
                     self.check(connection)
                 except HTTPException:
@@ -223,7 +225,11 @@ class GameHub:
     async def depart(self, connection, *, forced=False):
         if not forced and self.connections.get(connection.id) is not connection:
             return  # An old tab must not disconnect the tab that replaced it.
-        self.connections.pop(connection.id, None)
+        replacement = self.connections.get(connection.id)
+        if replacement is not None and replacement is not connection and replacement.room_id == connection.room_id:
+            return  # The same membership now belongs to a newer connection.
+        if self.connections.get(connection.id) is connection:
+            self.connections.pop(connection.id, None)
         with self.sessions() as db:
             room = db.get(LumaBallRoom, connection.room_id)
             if room is None:
@@ -252,11 +258,26 @@ class GameHub:
             await self.close_room(room_id)
             return
         for connection in list(self.connections.values()):
-            if connection.room_id == room_id and connection.id not in valid_ids:
+            if (self.connections.get(connection.id) is connection
+                    and connection.room_id == room_id and connection.id not in valid_ids):
                 await self.disconnect_profile(connection.id, "removed")
+        # Closing sockets yields: another player may join before cleanup ends.
+        # Publish the resulting membership rather than the earlier snapshot.
+        with self.sessions() as db:
+            room = db.get(LumaBallRoom, room_id)
+            if room is None or room.status == "closed":
+                payload = None
+            else:
+                payload = rooms.public_room(db, room)
+                payload["is_member"] = True
+        if payload is None:
+            await self.close_room(room_id)
+            return
         await self.broadcast(room_id, {"type": "room", "room": payload})
 
     async def receive(self, connection, data):
+        if self.connections.get(connection.id) is not connection:
+            return
         if not isinstance(data, dict) or not isinstance(data.get("type"), str):
             raise ValueError("Некорректное сообщение")
         kind = data["type"]

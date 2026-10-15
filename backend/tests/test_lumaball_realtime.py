@@ -3,6 +3,7 @@
 Every record and socket belongs to a temporary fixture. Never open project data.
 """
 from contextlib import ExitStack
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,8 @@ from app.lumaball_models import LumaBallProfile
 from app.lumaball_room_models import LumaBallMatch, LumaBallRoom
 from app.routers import lumaball_identity, lumaball_rooms
 from app.services import lumaball_realtime as realtime
+from app.services import lumaball_rooms as room_service
+from app.services.lumaball_identity import Identity
 
 
 class LumaBallRealtimeTests(unittest.TestCase):
@@ -132,6 +135,55 @@ class LumaBallRealtimeTests(unittest.TestCase):
                     pass
         with self.websocket(headers, room, ticket=ticket) as socket:
             self.assertEqual(self.receive(socket, "welcome")["identity"]["id"], identity["id"])
+
+    def _assert_disconnect_preserves_new_connection(self, *, same_room):
+        host_headers, _ = self.guest()
+        player_headers, player = self.guest()
+        old_room = self.room(host_headers)
+        self.join(player_headers, old_room)
+        if same_room:
+            new_room = old_room
+        else:
+            other_host, _ = self.guest()
+            new_room = self.room(other_host)
+        with self.sessions() as db:
+            identity = Identity(db.get(LumaBallProfile, player["id"]), False)
+            room_service.leave_room(db, old_room["id"], player["id"])
+
+        class Socket:
+            def __init__(self, on_send=None):
+                self.on_send = on_send
+
+            async def send_json(self, value):
+                if self.on_send:
+                    self.on_send()
+
+            async def close(self, code):
+                pass
+
+        replacement = realtime.Connection(Socket(), identity, new_room["id"])
+        def reconnect_during_close():
+            with self.sessions() as db:
+                room_service.join_room(db, new_room["id"], identity)
+                room_service.member(db, new_room["id"], player["id"]).connected = True
+                db.commit()
+            self.hub.connections[player["id"]] = replacement
+        old = realtime.Connection(Socket(reconnect_during_close), identity, old_room["id"])
+        self.hub.connections[player["id"]] = old
+        # send_json yields while the old socket closes. A new tab/join may win
+        # that scheduling gap; the old cleanup must not remove its membership.
+        asyncio.run(self.hub.disconnect_profile(player["id"], "left_room"))
+        self.assertIs(self.hub.connections[player["id"]], replacement)
+        with self.sessions() as db:
+            current = room_service.member(db, new_room["id"], player["id"])
+            self.assertIsNotNone(current)
+            self.assertTrue(current.connected)
+
+    def test_old_departure_preserves_a_new_connection_in_another_room(self):
+        self._assert_disconnect_preserves_new_connection(same_room=False)
+
+    def test_old_departure_preserves_rejoined_membership_in_the_same_room(self):
+        self._assert_disconnect_preserves_new_connection(same_room=True)
 
     def test_ticket_requires_membership_and_is_single_use_without_exposing_credentials(self):
         host_headers, _ = self.guest()
