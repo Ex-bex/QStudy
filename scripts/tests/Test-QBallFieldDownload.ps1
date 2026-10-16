@@ -1,10 +1,11 @@
-﻿param([ValidateSet('field', 'physics')][string]$Variant = 'field', [switch]$SimulateEnglishOem)
+﻿param([ValidateSet('field', 'physics', 'maps')][string]$Variant = 'field', [switch]$SimulateEnglishOem)
 # PowerShell 5.1 fixtures for the pinned downloaders. No download, runtime, or live data.
 $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $physics = $Variant -ceq 'physics'
-$cmdName = if ($physics) { 'Update-QBall-Physics.cmd' } else { 'Update-QBall-Field.cmd' }
-$archiveName = if ($physics) { 'QStudy-QBall-Original-Physics.zip' } else { 'QStudy-QBall-Browser-Fix.zip' }
+$maps = $Variant -ceq 'maps'
+$cmdName = if ($maps) { 'Update-QBall-Maps.cmd' } elseif ($physics) { 'Update-QBall-Physics.cmd' } else { 'Update-QBall-Field.cmd' }
+$archiveName = if ($maps) { 'QStudy-QBall-Maps-Fix.zip' } elseif ($physics) { 'QStudy-QBall-Original-Physics.zip' } else { 'QStudy-QBall-Browser-Fix.zip' }
 $bootstrapRelative = 'assets/distribution/' + $cmdName
 $bootstrapPath = Join-Path $workspace $bootstrapRelative
 $bootstrap = [IO.File]::ReadAllText($bootstrapPath)
@@ -30,8 +31,8 @@ function Assert-FieldThrows([scriptblock]$Operation, [string]$Message) {
     Assert-Field $failed $Message
 }
 function Assert-FieldChildText([string]$Actual, [string]$Russian, [string]$Ascii, [string]$Message) {
-    $checkRussian = $physics
-    if (-not $physics) {
+    $checkRussian = $physics -or $maps
+    if (-not $checkRussian) {
         $oem = [Text.Encoding]::GetEncoding([int][QBallFieldConsoleEncoding]::GetOEMCP())
         $checkRussian = $oem.GetString($oem.GetBytes($Russian)) -ceq $Russian
         if (-not $checkRussian) {
@@ -92,8 +93,11 @@ try {
     Install-QBallFieldPackage $project $archive $actualHash
     Assert-Field (Test-Path -LiteralPath (Join-Path $project '.qstudy-fix/Apply.ps1') -PathType Leaf) 'real package prepares the preserving apply helper'
     Assert-Field (Test-Path -LiteralPath (Join-Path $project 'Apply-QBall-Fix.cmd') -PathType Leaf) 'real package prepares its manual retry button'
-    $expectedHelperHash = if ($physics) {
+    $expectedHelperHash = if ($maps) {
         (Get-FileHash -LiteralPath (Join-Path $workspace 'scripts/maintenance/Apply-QBallFix.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+    } elseif ($physics) {
+        # Original physics stays pinned to its reviewed immutable release helper.
+        '9c6ce201bb743b7217f28addfa4a75419770d11307e0a2bccae69e53eae3c19b'
     } else {
         # The field launcher pins the unchanged d3fc338c729ab0845831b8038c0e77613bcc2dce release.
         # Later source-updater revisions must not silently change that immutable payload.

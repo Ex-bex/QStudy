@@ -6,6 +6,7 @@ deployment/*.yml text eol=lf
 # Downloaded hybrid CMD/PowerShell launcher must keep CRLF in GitHub raw files.
 assets/distribution/Update-QBall-Field.cmd -text whitespace=cr-at-eol
 assets/distribution/Update-QBall-Physics.cmd -text whitespace=cr-at-eol
+assets/distribution/Update-QBall-Maps.cmd -text whitespace=cr-at-eol
 # Keep the original physics oracle byte-identical on Windows and Linux.
 frontend/lib/fixtures/lumaball-original/*.ts.txt text eol=lf
 scripts/maintenance/Apply-QBallFix.ps1 text eol=crlf
