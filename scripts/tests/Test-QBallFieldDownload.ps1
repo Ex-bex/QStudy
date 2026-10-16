@@ -1,4 +1,4 @@
-﻿param([ValidateSet('field', 'physics')][string]$Variant = 'field')
+﻿param([ValidateSet('field', 'physics')][string]$Variant = 'field', [switch]$SimulateEnglishOem)
 # PowerShell 5.1 fixtures for the pinned downloaders. No download, runtime, or live data.
 $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
@@ -13,6 +13,11 @@ $offset = $bootstrap.LastIndexOf($marker, [StringComparison]::Ordinal)
 if ($offset -lt 0) { throw 'Missing QBall field downloader marker.' }
 . ([scriptblock]::Create($bootstrap.Substring($offset + $marker.Length))) -Library
 Add-Type -AssemblyName System.IO.Compression
+if ($SimulateEnglishOem) {
+    # A fixture-only OEM437 provider proves UTF-8 physics output does not depend
+    # on the Windows system language. No console or OS code-page setting changes.
+    Add-Type -TypeDefinition 'public static class QBallFieldConsoleEncoding { public static uint GetOEMCP() { return 437; } }'
+}
 $prefix = [IO.Path]::GetFullPath((Join-Path $workspace '.local/field-download-tests'))
 $fixture = Join-Path $prefix ([Guid]::NewGuid().ToString('N'))
 $script:fieldChecks = 0; $script:fieldArchiveNumber = 0
@@ -23,6 +28,19 @@ function Assert-Field([bool]$Condition, [string]$Message) {
 function Assert-FieldThrows([scriptblock]$Operation, [string]$Message) {
     $failed = $false; try { & $Operation } catch { $failed = $true }
     Assert-Field $failed $Message
+}
+function Assert-FieldChildText([string]$Actual, [string]$Russian, [string]$Ascii, [string]$Message) {
+    $checkRussian = $physics
+    if (-not $physics) {
+        $oem = [Text.Encoding]::GetEncoding([int][QBallFieldConsoleEncoding]::GetOEMCP())
+        $checkRussian = $oem.GetString($oem.GetBytes($Russian)) -ceq $Russian
+        if (-not $checkRussian) {
+            Write-Host ('Legacy field OEM ' + $oem.CodePage + ' cannot represent Cyrillic; its ASCII output and exit status are verified instead.')
+        }
+    }
+    $valid = $Actual.Contains($Ascii) -and (-not $checkRussian -or $Actual.Contains($Russian)) -and -not $Actual.Contains('#< CLIXML')
+    if (-not $valid) { Write-Host ('Fixture child output: ' + $Actual) }
+    Assert-Field $valid $Message
 }
 function New-FieldProject([string]$Name) {
     $project = Join-Path $fixture $Name
@@ -114,16 +132,18 @@ try {
         Assert-FieldThrows { Resolve-QBallFieldPath $project $relative } ('standalone resolver rejects outside path: ' + $relative)
     }
     # Execute only this tiny fixture child, never the package's real Apply or
-    # any runtime. It proves module discovery, OEM output and exit propagation.
-    $invokeProject = New-FieldProject 'invoke child Кириллица с пробелом'
+    # any runtime. It proves module discovery, text encoding and exit propagation.
+    $invokeProject = New-FieldProject 'invoke child ''Кириллица $literal; с пробелом'
     [IO.Directory]::CreateDirectory((Join-Path $invokeProject '.qstudy-fix')) | Out-Null
     $fakeApply = @'
 param([string]$Root, [switch]$NoPause)
 $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
 if (-not $NoPause -or -not (Test-Path -LiteralPath (Join-Path $Root 'frontend/existing-source.ts'))) { exit 22 }
 [void](Get-Command Get-FileHash -ErrorAction Stop)
+Write-Host 'QBALL_FIXTURE_GET_FILE_HASH_OK'
 Write-Host 'Обновление поля завершено. Аккаунты сохранены.'
 if (Test-Path -LiteralPath (Join-Path $Root 'expected-failure.fixture')) {
+    [Console]::Error.WriteLine('QBALL_FIXTURE_EXPECTED_FAILURE_SETTINGS_SAFE')
     [Console]::Error.WriteLine('Проверка ожидаемого отказа. Настройки сохранены.')
     exit 19
 }
@@ -134,13 +154,13 @@ exit 0
     $success = @(Invoke-QBallFieldApply $invokeProject 6>&1)
     $successText = ($success | ForEach-Object { $_.ToString() }) -join "`n"
     Assert-Field ($success[-1] -is [int] -and $success[-1] -eq 0) 'sanitized nested PS5.1 resolves Get-FileHash and returns success'
-    Assert-Field ($successText.Contains('Обновление поля завершено. Аккаунты сохранены.')) 'NoWindow child Russian stdout is decoded without corruption'
+    Assert-FieldChildText $successText 'Обновление поля завершено. Аккаунты сохранены.' 'QBALL_FIXTURE_GET_FILE_HASH_OK' 'NoWindow child stdout retains its ASCII marker and every representable Russian character'
     Assert-Field ($env:PSModulePath -ceq $modulePathBefore) 'module path sanitization affects only the child process environment'
     [IO.File]::WriteAllText((Join-Path $invokeProject 'expected-failure.fixture'), 'fixture only')
     $failure = @(Invoke-QBallFieldApply $invokeProject 6>&1)
     $failureText = ($failure | ForEach-Object { $_.ToString() }) -join "`n"
     Assert-Field ($failure[-1] -is [int] -and $failure[-1] -eq 19) 'nonzero child exit remains a failure for the downloader'
-    Assert-Field ($failureText.Contains('Проверка ожидаемого отказа. Настройки сохранены.')) 'Russian child stderr is also decoded correctly on failure'
+    Assert-FieldChildText $failureText 'Проверка ожидаемого отказа. Настройки сохранены.' 'QBALL_FIXTURE_EXPECTED_FAILURE_SETTINGS_SAFE' 'child stderr retains its ASCII marker and every representable Russian character on failure'
     Assert-FieldOriginal $invokeProject
 
     $descendantProject = New-FieldProject 'descendant holds inherited output'

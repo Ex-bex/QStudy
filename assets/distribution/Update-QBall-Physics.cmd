@@ -12,8 +12,8 @@ param([string]$Root = '', [switch]$Library)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$script:QBallFieldHash = 'b5b2faf78cd6505f25e5eb0540232ec84299cc2700e0c663c25e04135aef034d'
-$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/16ba0070b212e890daa9eacdc83ff3db74a9799c/assets/distribution/QStudy-QBall-Original-Physics.zip'
+$script:QBallFieldHash = '8da6ae9df672aa112bdaf52c5c5b1ddd9f659d378d39b7b3304fed33dfcc6013'
+$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/5a3541d8aebc6b18e826b63b2bab2731b66e61ca/assets/distribution/QStudy-QBall-Original-Physics.zip'
 
 function Resolve-QBallFieldPath([string]$Base, [string]$Relative = '') {
     $basePath = [IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
@@ -78,16 +78,18 @@ function Install-QBallFieldPackage([string]$Project, [string]$Archive, [string]$
 }
 
 function Invoke-QBallFieldApply([string]$Project) {
-    if (-not ('QBallFieldConsoleEncoding' -as [type])) {
-        Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class QBallFieldConsoleEncoding { [DllImport("kernel32.dll")] public static extern uint GetOEMCP(); }'
-    }
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
     $apply = Resolve-QBallFieldPath $Project '.qstudy-fix/Apply.ps1'
-    $info.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $apply + '" -Root "' + $Project + '" -NoPause'
+    # A NoWindow PS5.1 child otherwise uses its system OEM code page, which
+    # can replace Cyrillic with '?' on English Windows before we can decode it.
+    # Single-quote literal paths so quotes, dollars and backticks stay filename
+    # data. Windows filenames cannot contain the outer argument's double quote.
+    $command = '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); & ''' + $apply.Replace("'", "''") + ''' -Root ''' + $Project.Replace("'", "''") + ''' -NoPause; exit $LASTEXITCODE'
+    $info.Arguments = '-NoProfile -OutputFormat Text -ExecutionPolicy Bypass -Command "' + $command + '"'
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
-    $encoding = [Text.Encoding]::GetEncoding([int][QBallFieldConsoleEncoding]::GetOEMCP())
+    $encoding = [Text.UTF8Encoding]::new($false)
     $info.StandardOutputEncoding = $encoding; $info.StandardErrorEncoding = $encoding
     # A PS7 parent can pass Core-only module paths into nested Windows PS5.1.
     # Let this child discover its own built-in modules; do not change host settings.
