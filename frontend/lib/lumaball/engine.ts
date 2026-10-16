@@ -296,13 +296,22 @@ export class FootballEngine {
     const player = this.players.find((p) => p.id === id);
     if (!player) return;
     const input = normalizeInput(value);
+    // RTC and WebSocket delivery can cross: an old release must not cancel a
+    // newer armed press or replace its movement/freshness record.
+    if (
+      input.kick_seq !== undefined &&
+      input.kick_seq < player.lastKickSequence
+    )
+      return;
+    const newPress =
+      input.kick_seq !== undefined && input.kick_seq > player.lastKickSequence;
+    if (input.kick_seq !== undefined) player.lastKickSequence = input.kick_seq;
     const before = this.inputs.get(id)?.input;
     if (!input.kick) player.kicking = false;
     else if (input.kick_seq === undefined) {
       if (!before?.kick) player.kicking = true;
-    } else if (input.kick_seq > player.lastKickSequence) {
+    } else if (newPress) {
       player.kicking = true;
-      player.lastKickSequence = input.kick_seq;
     }
     this.inputs.set(id, { input, at: this.clock });
   }

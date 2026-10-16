@@ -237,3 +237,54 @@ test("an armed distant kick waits for contact and is cancelled on release", () =
   assert.equal(engine.frame().players[0].kicking, false);
   assert.equal(PHYSICS.kickImpulse, 0.23);
 });
+
+test("an older transport release cannot cancel a newer pending kick or overwrite its input", () => {
+  const engine = new FootballEngine(members);
+  advance(engine, 3.1);
+  putBall(engine, 400, 100);
+  engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 11 });
+  engine.advance(1 / 60);
+  const pending = engine.inputs.get("red");
+  assert.equal(engine.frame().players[0].kicking, true);
+  engine.input("red", { x: -1, y: 1, kick: false, kick_seq: 10 });
+  assert.equal(engine.frame().players[0].kicking, true);
+  assert.equal(engine.inputs.get("red"), pending);
+
+  const red = engine.players.find((player) => player.id === "red");
+  red.body.setPosition(Vec2(2.5, 2.5));
+  red.body.setLinearVelocity(Vec2(0, 0));
+  putBall(engine, 228, 200);
+  engine.advance(1 / 60);
+  assert.ok(
+    engine.frame().ball.vx > 580,
+    "the newer pending press still kicks on contact",
+  );
+
+  engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 12 });
+  assert.equal(engine.frame().players[0].kicking, true);
+  engine.input("red", { x: 0, y: 0, kick: false, kick_seq: 12 });
+  assert.equal(engine.frame().players[0].kicking, false);
+  engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 12 });
+  assert.equal(
+    engine.frame().players[0].kicking,
+    false,
+    "same-sequence duplicate after release cannot re-arm",
+  );
+});
+
+test("a newer release delivered before its press closes that sequence without re-arming", () => {
+  const engine = new FootballEngine(members);
+  engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 11 });
+  assert.equal(engine.frame().players[0].kicking, true);
+  engine.input("red", { x: 0, y: 0, kick: false, kick_seq: 12 });
+  assert.equal(engine.frame().players[0].kicking, false);
+  assert.equal(engine.players[0].lastKickSequence, 12);
+  engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 12 });
+  assert.equal(engine.frame().players[0].kicking, false);
+  engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 13 });
+  assert.equal(
+    engine.frame().players[0].kicking,
+    true,
+    "a genuinely newer press still arms normally",
+  );
+});
