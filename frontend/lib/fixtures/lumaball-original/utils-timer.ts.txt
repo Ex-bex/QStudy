@@ -1,0 +1,38 @@
+import type * as t_t from "~/types/timer";
+export default class {
+	private start_time: number = 0;
+	private interval_id: number | null = null;
+	//private max_time: number = 5 * 60;
+	public start(): void {
+		if (this.interval_id != null) return;
+		this.interval_id = window.setInterval(() => this.tick(), 1000);
+	}
+	public stop(): void {
+		if (!this.interval_id) return;
+		clearInterval(this.interval_id);
+		this.interval_id = null;
+	}
+	private tick(): void {
+		this.start_time += 1;
+		// if (this.start_time >= this.max_time) {
+		// 	this.stop();
+		// }
+		this.send_timer_for_client();
+	}
+	public send_timer_for_client(): void {
+		const { $owebrtc } = useNuxtApp();
+		$owebrtc.send_data_for_host_peers("init_datas", {
+			action: "init_timer",
+			data: this.get_time(),
+		});
+	}
+	public reset(): void {
+		this.start_time = 0;
+	}
+	public get_time(): t_t.timer {
+		return {
+			minute: (this.start_time / 60) | 0,
+			seconds: this.start_time % 60,
+		};
+	}
+}

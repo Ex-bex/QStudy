@@ -15,6 +15,9 @@ ACTIVE = ("lobby", "playing", "paused", "finished")
 TEAMS = ("red", "blue", "spectator")
 _lock = threading.RLock()
 _ID = re.compile(r"^[a-f0-9]{32}$")
+# Keep unlimited casual matches within the integer storage/wire range. These
+# are validation bounds, not gameplay limits or automatic finish conditions.
+MAX_MATCH_VALUE = 2**31 - 1
 
 
 def clean_text(value, limit, *, empty=False):
@@ -102,14 +105,21 @@ def initialize_rooms(db):
 
 
 def _limits(data, config):
-    maximum = data.get("max_players", config.get("default_players", min(8, config["max_players"])))
+    maximum = data.get("max_players", config.get("default_players", min(2, config["max_players"])))
     score = data.get("score_limit", config["score_limit"])
     minutes = data.get("time_limit", config["time_limit"])
     if type(maximum) is not int or not 2 <= maximum <= config["max_players"]:
         raise HTTPException(422, "Количество игроков превышает разрешённый предел")
-    if type(score) is not int or not 1 <= score <= 20 or type(minutes) is not int or not 1 <= minutes <= 30:
-        raise HTTPException(422, "Допустимо 1–20 голов и 1–30 минут")
+    if type(score) is not int or not 0 <= score <= 20 or type(minutes) is not int or not 0 <= minutes <= 30:
+        raise HTTPException(422, "Допустимо 0–20 голов и 0–30 минут; 0 — без ограничения")
     return maximum, score, minutes
+
+
+def match_bounds(room):
+    """Shared validation for snapshots/results, including original free play."""
+    return (room.score_limit or MAX_MATCH_VALUE,
+            room.time_limit * 60 + 120 if room.time_limit else MAX_MATCH_VALUE,
+            room.time_limit * 60)
 
 
 def create_room(db, identity, data):
@@ -195,8 +205,8 @@ def room_command(db, room_id, identity, data, *, commit=True):
         if host is None or not host.connected:
             raise HTTPException(409, "Дождитесь подключения создателя комнаты")
         roster = active_members(db, room.id)
-        if not any(m.connected and m.team == "red" for m, _ in roster) or not any(m.connected and m.team == "blue" for m, _ in roster):
-            raise HTTPException(409, "Дождитесь подключения хотя бы одного игрока в каждой команде")
+        # The original game permits training with one player, or a host
+        # spectating an empty pitch. Only its simulation host must be ready.
         room.match_id = uuid.uuid4().hex
         room.match_started_at = datetime.utcnow()
         room.red_score = room.blue_score = 0
@@ -251,7 +261,8 @@ def save_result(db, room, identity, data):
         raise HTTPException(409, "Матч не запущен")
     red, blue = data.get("red"), data.get("blue")
     duration = data.get("duration_seconds", 0)
-    if type(red) is not int or type(blue) is not int or not 0 <= red <= room.score_limit or not 0 <= blue <= room.score_limit or type(duration) is not int or not 0 <= duration <= room.time_limit * 60 + 120:
+    max_score, max_duration, _ = match_bounds(room)
+    if type(red) is not int or type(blue) is not int or not 0 <= red <= max_score or not 0 <= blue <= max_score or type(duration) is not int or not 0 <= duration <= max_duration:
         raise HTTPException(422, "Недопустимый результат")
     room.status, room.red_score, room.blue_score = "finished", red, blue
     result = LumaBallMatch(id=match_id, room_id=room.id, room_name=room.name, host_id=room.host_id,

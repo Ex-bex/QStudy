@@ -85,7 +85,7 @@ class LumaBallRoomTests(unittest.TestCase):
     def connected_room(self):
         host_headers, host = self.guest()
         other_headers, other = self.guest()
-        room = self.create(host_headers)
+        room = self.create(host_headers, max_players=4, score_limit=5, time_limit=5)
         self.assertEqual(self.join(room, other_headers).status_code, 200)
         with self.sessions() as db:
             db.query(LumaBallRoomMember).filter_by(room_id=room["id"]).update({"connected": True}); db.commit()
@@ -110,7 +110,7 @@ class LumaBallRoomTests(unittest.TestCase):
     def test_create_requires_identity_and_valid_server_limits(self):
         self.assertEqual(self.client.post("/api/lumaball/rooms", json={"name": "x"}).status_code, 401)
         headers, _ = self.guest()
-        for changes in [{"max_players": 1}, {"max_players": 17}, {"score_limit": 21}, {"time_limit": 31},
+        for changes in [{"max_players": 1}, {"max_players": 21}, {"score_limit": -1}, {"time_limit": -1}, {"score_limit": 21}, {"time_limit": 31},
                         {"max_players": "4"}, {"name": " "}, {"host_id": "a" * 32}]:
             response = self.client.post("/api/lumaball/rooms", headers=headers, json={"name": "Поле", **changes})
             self.assertEqual(response.status_code, 422, response.text)
@@ -229,21 +229,62 @@ class LumaBallRoomTests(unittest.TestCase):
             for action in ("start", "pause", "resume", "reset", "team", "kick"):
                 self.assertIn("lumaball.room." + action, actions)
 
-    def test_reserved_opponent_cannot_start_match_before_their_game_connection_is_ready(self):
+    def test_original_training_can_start_without_an_opponent_connection(self):
         room, host_headers, host, other_headers, other = self.connected_room()
         with self.sessions() as db:
             opponent = service.member(db, room["id"], other["id"])
             opponent.connected = False
             db.commit()
         response = self.command(room, "start")
-        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
         with self.sessions() as db:
             record = db.get(LumaBallRoom, room["id"])
-            self.assertEqual(record.status, "lobby")
-            self.assertIsNone(record.match_id)
+            self.assertEqual(record.status, "playing")
+            self.assertIsNotNone(record.match_id)
             service.member(db, room["id"], other["id"]).connected = True
             db.commit()
-        self.assertEqual(self.command(room, "start").json()["status"], "playing")
+        self.assertEqual(self.command(room, "start").status_code, 409)
+
+    def test_original_training_can_start_with_connected_host_as_spectator(self):
+        headers, host = self.guest()
+        room = self.create(headers)
+        self.assertEqual(self.command(room, "start").status_code, 409)
+        with self.sessions() as db:
+            member = service.member(db, room["id"], host["id"])
+            member.connected, member.team = True, "spectator"
+            db.commit()
+        response = self.command(room, "start")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "playing")
+
+    def test_new_rooms_support_original_twenty_player_capacity_and_unlimited_rules(self):
+        headers, _ = self.guest()
+        room = self.create(headers, max_players=20, score_limit=0, time_limit=0)
+        self.assertEqual((room["max_players"], room["score_limit"], room["time_limit"]), (20, 0, 0))
+        response = self.client.patch("/api/admin/lumaball/rooms/" + room["id"], headers=self.admin_headers,
+                                     json={"score_limit": 5, "time_limit": 5})
+        self.assertEqual(response.status_code, 200, response.text)
+        response = self.client.patch("/api/admin/lumaball/rooms/" + room["id"], headers=self.admin_headers,
+                                     json={"score_limit": 0, "time_limit": 0})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((response.json()["score_limit"], response.json()["time_limit"]), (0, 0))
+
+    def test_unlimited_result_accepts_long_original_match_and_rejects_invalid_numbers(self):
+        room, headers, host, _, _ = self.connected_room()
+        response = self.client.patch("/api/admin/lumaball/rooms/" + room["id"], headers=self.admin_headers,
+                                     json={"score_limit": 0, "time_limit": 0})
+        self.assertEqual(response.status_code, 200, response.text)
+        started = self.command(room, "start").json()
+        with self.sessions() as db:
+            identity = resolve_identity(Request({"type": "http", "headers": [(b"x-lumaball-session", headers["X-LumaBall-Session"].encode())]}), db)
+            record = service.room_by_id(db, room["id"])
+            payload = {"match_id": started["match_id"], "red": 27, "blue": 22, "duration_seconds": 7200}
+            for changes in ({"red": -1}, {"blue": True}, {"red": 2**31}, {"duration_seconds": -1},
+                            {"duration_seconds": 2**31}, {"duration_seconds": float("inf")}):
+                with self.assertRaises(HTTPException):
+                    service.save_result(db, record, identity, {**payload, **changes})
+            result = service.save_result(db, record, identity, payload)
+            self.assertEqual((result.red_score, result.blue_score, result.duration_seconds), (27, 22, 7200))
 
     def test_admin_chat_clear_is_scoped_and_logged_without_chat_contents(self):
         headers, host = self.guest(); second_headers, other = self.guest()

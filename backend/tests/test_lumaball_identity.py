@@ -242,7 +242,7 @@ class LumaBallIdentityTests(unittest.TestCase):
         self.as_user(admin=True)
         response = self.client.patch("/api/admin/lumaball/settings", json={"title": "Purple pitch", "max_players": 6})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["default_players"], 4)
+        self.assertEqual(response.json()["default_players"], 2)
         for values in [{"default_players": 7}, {"max_players": 1}, {"enabled": None}, {"enabled": "false"},
                        {"surprise": True}, {"ice_servers": [{"urls": ["https://example.com"]}]},
                        {"ice_servers": [{"urls": ["turn:user:password@example.com:3478"]}]}]:
@@ -253,6 +253,28 @@ class LumaBallIdentityTests(unittest.TestCase):
             audit = db.query(AuditLog).one()
             self.assertEqual(json.loads(audit.fields_json), ["max_players", "title"])
             self.assertNotIn("Purple pitch", audit.fields_json + audit.metadata_json)
+
+    def test_original_free_play_defaults_and_saved_administrator_limits_are_preserved(self):
+        defaults = self.client.get("/api/lumaball/config").json()
+        self.assertEqual((defaults["max_players"], defaults["default_players"],
+                          defaults["score_limit"], defaults["time_limit"]), (20, 2, 0, 0))
+        stored = {"max_players": 8, "default_players": 4, "score_limit": 5,
+                  "time_limit": 5, "announcement": "Saved custom rules"}
+        with self.sessions() as db:
+            raw = json.dumps(stored)
+            db.add(LumaBallSettings(key="site", value_json=raw))
+            db.commit()
+            values = get_config(db)
+            self.assertEqual({key: values[key] for key in stored}, stored)
+            self.assertEqual(db.get(LumaBallSettings, "site").value_json, raw)
+        self.as_user(admin=True)
+        response = self.client.patch("/api/admin/lumaball/settings", json={"max_players": 20,
+                       "default_players": 20, "score_limit": 0, "time_limit": 0})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["announcement"], stored["announcement"])
+        for invalid in ({"max_players": 21}, {"default_players": 21}, {"score_limit": -1},
+                        {"time_limit": -1}, {"score_limit": False}, {"time_limit": "0"}):
+            self.assertEqual(self.client.patch("/api/admin/lumaball/settings", json=invalid).status_code, 422)
 
     def test_maintenance_and_guest_settings_take_effect_for_existing_identities(self):
         guest = self.create_guest()

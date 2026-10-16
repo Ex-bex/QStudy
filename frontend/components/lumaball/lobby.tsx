@@ -48,8 +48,8 @@ export default function LumaLobby() {
   const [createError, setCreateError] = useState("");
   const [roomName, setRoomName] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(0);
-  const [scoreLimit, setScoreLimit] = useState(0);
-  const [timeLimit, setTimeLimit] = useState(0);
+  const [scoreLimit, setScoreLimit] = useState<number | null>(null);
+  const [timeLimit, setTimeLimit] = useState<number | null>(null);
   const [password, setPassword] = useState("");
   const modal = useRef<HTMLElement>(null);
 
@@ -185,8 +185,8 @@ export default function LumaLobby() {
           name: roomName.trim() || `Комната ${player.name}`,
           password,
           max_players: maxPlayers || config.default_players,
-          score_limit: scoreLimit || config.score_limit,
-          time_limit: timeLimit || config.time_limit,
+          score_limit: scoreLimit ?? config.score_limit,
+          time_limit: timeLimit ?? config.time_limit,
         }),
       });
       router.push(`/qball/room/${encodeURIComponent(room.id)}`);
@@ -268,7 +268,13 @@ export default function LumaLobby() {
                         <strong>{room.name}</strong>
                         <small>
                           {room.host_name} · {statusLabels[room.status]} ·{" "}
-                          {room.score_limit} голов / {room.time_limit} мин
+                          {room.score_limit
+                            ? `${room.score_limit} голов`
+                            : "Без лимита голов"}{" "}
+                          /{" "}
+                          {room.time_limit
+                            ? `${room.time_limit} мин`
+                            : "без лимита времени"}
                         </small>
                       </td>
                       <td>
@@ -490,9 +496,9 @@ export default function LumaLobby() {
                     <input
                       className="lb-input"
                       type="number"
-                      min={1}
+                      min={0}
                       max={20}
-                      value={scoreLimit || config.score_limit}
+                      value={scoreLimit ?? config.score_limit}
                       onChange={(event) =>
                         setScoreLimit(Number(event.target.value))
                       }
@@ -505,9 +511,9 @@ export default function LumaLobby() {
                   <input
                     className="lb-input"
                     type="number"
-                    min={1}
+                    min={0}
                     max={30}
-                    value={timeLimit || config.time_limit}
+                    value={timeLimit ?? config.time_limit}
                     onChange={(event) =>
                       setTimeLimit(Number(event.target.value))
                     }
@@ -528,7 +534,8 @@ export default function LumaLobby() {
                   />
                 </label>
                 <p className="lb-form-note">
-                  Комната работает, пока её создатель находится в игре.
+                  0 голов и 0 минут — без лимитов, как в оригинале. Комната
+                  работает, пока её создатель находится в игре.
                 </p>
                 {createError && (
                   <div role="alert" className="lb-error">

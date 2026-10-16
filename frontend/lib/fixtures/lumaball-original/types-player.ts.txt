@@ -1,0 +1,25 @@
+import planck from "planck";
+import { Config } from "~/utils/config_game";
+export type red = 1;
+export type blue = 2;
+export type spectator = 0;
+export type player_team = spectator | red | blue; // spectator red blue
+export type player_active_team = red | blue; // red blue
+export interface player_param {
+	id: string;
+	name: string;
+	team: player_team;
+	connection_id: string;
+}
+
+export enum State {
+	Up = "Up",
+	Down = "Down",
+	Left = "Left",
+	Right = "Right",
+	Kick = "Kick",
+}
+
+export type States = Record<State, boolean>;
+
+export type Move = Exclude<State, State.Kick>;

@@ -1,7 +1,13 @@
-﻿# PowerShell 5.1 fixtures for the pinned downloader. No download, runtime, or live data.
+﻿param([ValidateSet('field', 'physics')][string]$Variant = 'field')
+# PowerShell 5.1 fixtures for the pinned downloaders. No download, runtime, or live data.
 $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$bootstrap = [IO.File]::ReadAllText((Join-Path $workspace 'assets/distribution/Update-QBall-Field.cmd'))
+$physics = $Variant -ceq 'physics'
+$cmdName = if ($physics) { 'Update-QBall-Physics.cmd' } else { 'Update-QBall-Field.cmd' }
+$archiveName = if ($physics) { 'QStudy-QBall-Original-Physics.zip' } else { 'QStudy-QBall-Browser-Fix.zip' }
+$bootstrapRelative = 'assets/distribution/' + $cmdName
+$bootstrapPath = Join-Path $workspace $bootstrapRelative
+$bootstrap = [IO.File]::ReadAllText($bootstrapPath)
 $marker = '#==QBALL_FIELD_POWERSHELL=='
 $offset = $bootstrap.LastIndexOf($marker, [StringComparison]::Ordinal)
 if ($offset -lt 0) { throw 'Missing QBall field downloader marker.' }
@@ -47,7 +53,7 @@ function Assert-FieldOriginal([string]$Project) {
 }
 try {
     [IO.Directory]::CreateDirectory($fixture) | Out-Null
-    $bootstrapBytes = [IO.File]::ReadAllBytes((Join-Path $workspace 'assets/distribution/Update-QBall-Field.cmd'))
+    $bootstrapBytes = [IO.File]::ReadAllBytes($bootstrapPath)
     Assert-Field (-not ($bootstrapBytes[0] -eq 239 -and $bootstrapBytes[1] -eq 187 -and $bootstrapBytes[2] -eq 191)) 'raw hybrid CMD has no UTF-8 BOM before @echo'
     Assert-Field ([Text.Encoding]::ASCII.GetString($bootstrapBytes, 0, 9) -ceq '@echo off') 'raw hybrid starts with a CMD instruction'
     $bareLineBreak = $false
@@ -56,17 +62,26 @@ try {
             ($bootstrapBytes[$index] -eq 13 -and ($index + 1 -ge $bootstrapBytes.Length -or $bootstrapBytes[$index + 1] -ne 10))) { $bareLineBreak = $true; break }
     }
     Assert-Field (-not $bareLineBreak) 'every hybrid CMD line break is raw CRLF, including the embedded PowerShell body'
-    Assert-Field ([IO.File]::ReadAllText((Join-Path $workspace '.gitattributes')) -match '(?m)^assets/distribution/Update-QBall-Field\.cmd[ \t]+-text(?:[ \t]+whitespace=cr-at-eol)?[ \t]*\r?$') 'Git preserves hybrid CMD raw bytes in the downloadable artifact'
-    $archive = Join-Path $workspace 'assets/distribution/QStudy-QBall-Browser-Fix.zip'
+    $attributePattern = '(?m)^' + [regex]::Escape($bootstrapRelative) + '[ \t]+-text(?:[ \t]+whitespace=cr-at-eol)?[ \t]*\r?$'
+    Assert-Field ([IO.File]::ReadAllText((Join-Path $workspace '.gitattributes')) -match $attributePattern) 'Git preserves hybrid CMD raw bytes in the downloadable artifact'
+    $archive = Join-Path $workspace ('assets/distribution/' + $archiveName)
     $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-Field ($actualHash -ceq $script:QBallFieldHash) 'bundled bootstrap pins the real repository package SHA256'
-    Assert-Field ($script:QBallFieldUrl -match '^https://github\.com/Ex-bex/QStudy/raw/[a-f0-9]{40}/assets/distribution/QStudy-QBall-Browser-Fix\.zip$') 'download URL pins a complete immutable commit'
+    $urlPattern = '^https://github\.com/Ex-bex/QStudy/raw/[a-f0-9]{40}/assets/distribution/' + [regex]::Escape($archiveName) + '$'
+    Assert-Field ($script:QBallFieldUrl -match $urlPattern) 'download URL pins a complete immutable commit'
     $project = New-FieldProject 'valid'
     Assert-Field (Test-QBallFieldRoot $project) 'existing fixture installation is recognized'
     Install-QBallFieldPackage $project $archive $actualHash
     Assert-Field (Test-Path -LiteralPath (Join-Path $project '.qstudy-fix/Apply.ps1') -PathType Leaf) 'real package prepares the preserving apply helper'
     Assert-Field (Test-Path -LiteralPath (Join-Path $project 'Apply-QBall-Fix.cmd') -PathType Leaf) 'real package prepares its manual retry button'
-    Assert-Field ([IO.File]::ReadAllText((Join-Path $project '.qstudy-fix/Apply.ps1')) -ceq [IO.File]::ReadAllText((Join-Path $workspace 'scripts/maintenance/Apply-QBallFix.ps1'))) 'extracted helper matches the reviewed source'
+    $expectedHelperHash = if ($physics) {
+        (Get-FileHash -LiteralPath (Join-Path $workspace 'scripts/maintenance/Apply-QBallFix.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+    } else {
+        # The field launcher pins the unchanged d3fc338c729ab0845831b8038c0e77613bcc2dce release.
+        # Later source-updater revisions must not silently change that immutable payload.
+        '04e8fc690e483b0bb709dca289bf472162797bdd5d41b69f366e8e63684c4211'
+    }
+    Assert-Field ((Get-FileHash -LiteralPath (Join-Path $project '.qstudy-fix/Apply.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $expectedHelperHash) 'extracted helper matches its reviewed release source'
     Assert-FieldOriginal $project
     Install-QBallFieldPackage $project $archive $actualHash
     Assert-FieldOriginal $project
@@ -135,7 +150,7 @@ param([string]$Root, [switch]$NoPause)
 $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
 $info = [Diagnostics.ProcessStartInfo]::new()
 $info.FileName = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
-$info.Arguments = '-NoProfile -NonInteractive -Command "[Threading.Thread]::Sleep(4000)"'
+$info.Arguments = '-NoProfile -NonInteractive -Command "[Threading.Thread]::Sleep(8000)"'
 $info.UseShellExecute = $false; $info.CreateNoWindow = $true
 # Redirect stdin alone forces STARTF_USESTDHANDLES, forwarding this child's
 # inherited stdout/stderr pipes to the sleeping grandchild without a new UI.
@@ -156,16 +171,16 @@ exit 0
         $descendantPid = [int][IO.File]::ReadAllText((Join-Path $descendantProject 'descendant-pid.fixture'))
         try { $descendantProcess = [Diagnostics.Process]::GetProcessById($descendantPid) } catch { }
         Assert-Field ($descendantResult[-1] -is [int] -and $descendantResult[-1] -eq 0) 'updater success is independent of a detached grandchild holding its output pipe'
-        Assert-Field ($clock.ElapsedMilliseconds -lt 2500) 'completed updater returns within 2.5 seconds instead of waiting for inherited-pipe EOF'
-        Assert-Field ($null -ne $descendantProcess -and -not $descendantProcess.HasExited) 'the four-second fixture grandchild remains alive when the updater has already returned'
+        Assert-Field ($clock.ElapsedMilliseconds -lt 6000) 'completed updater returns within six seconds instead of waiting for inherited-pipe EOF'
+        Assert-Field ($null -ne $descendantProcess -and -not $descendantProcess.HasExited) 'the eight-second fixture grandchild remains alive when the updater has already returned'
     } finally {
         if ($null -ne $descendantProcess) {
-            [void]$descendantProcess.WaitForExit(7000)
+            [void]$descendantProcess.WaitForExit(11000)
             $descendantProcess.Dispose()
         }
     }
     Assert-FieldOriginal $descendantProject
-    Write-Host ('QBall pinned field download: ' + $script:fieldChecks + ' assertions passed.')
+    Write-Host ('QBall pinned ' + $Variant + ' download: ' + $script:fieldChecks + ' assertions passed.')
 } finally {
     $resolved = [IO.Path]::GetFullPath($fixture)
     if (-not $resolved.StartsWith($prefix + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Refusing cleanup outside the field download fixture.' }

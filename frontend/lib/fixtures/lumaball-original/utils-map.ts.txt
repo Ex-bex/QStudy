@@ -1,0 +1,105 @@
+import type * as m_t from "~/types/map";
+import planck from "planck";
+export const default_map_size: m_t.map_size = { width: 10, height: 5 };
+export const max_map_size: m_t.map_size = { width: 30, height: 15 };
+export default class {
+	private different: m_t.different = {
+		x: 2,
+		y: 1.5,
+	};
+	private map_size: m_t.map_size = {
+		width: default_map_size.width,
+		height: default_map_size.height,
+	};
+	private map_param: m_t.map_param = {
+		inner_width: 0,
+		inner_height: 0,
+		goal_height: 0,
+		goal_depth: 0.5,
+	};
+	private goal_param: m_t.goal_param = {
+		start_y: 0,
+		end_y: 0,
+		start_x: 0,
+		end_x: 0,
+	};
+	constructor() {
+		this.init_map_param();
+	}
+	public send_mapsize_for_client(): void {
+		const { $owebrtc } = useNuxtApp();
+		$owebrtc.send_data_for_host_peers("init_datas", {
+			action: "init_map",
+			data: this.get_size(),
+		});
+	}
+	get_size(): m_t.map_size {
+		return { ...this.map_size };
+	}
+	get_param(): m_t.map_param {
+		return { ...this.map_param };
+	}
+	change_size(param: m_t.map_size): void {
+		this.map_size.width = param.width;
+		this.map_size.height = param.height;
+		this.init_map_param();
+		this.send_mapsize_for_client();
+	}
+	init_map_param(): void {
+		this.map_param.inner_width = this.map_size.width - this.different.x;
+		this.map_param.inner_height = this.map_size.height - this.different.y;
+		this.map_param.goal_height = this.map_param.inner_height * 0.4; // 0.4/40% goal height by inner_height
+		this.init_goal_param();
+	}
+	init_goal_param(): void {
+		this.goal_param.start_y =
+			this.map_size.height / 2 - this.map_param.goal_height / 2;
+		this.goal_param.end_y =
+			this.goal_param.start_y + this.map_param.goal_height;
+		this.goal_param.start_x = this.different.x / 2;
+		this.goal_param.end_x = this.map_size.width - this.different.x / 2;
+	}
+
+	reset(): void {
+		this.change_size(default_map_size);
+	}
+
+	get width(): number {
+		return this.map_size.width;
+	}
+
+	get height(): number {
+		return this.map_size.height;
+	}
+
+	get goal(): m_t.goal_param {
+		return this.goal_param;
+	}
+	get goal_depth(): number {
+		return this.map_param.goal_depth;
+	}
+
+	get spawn_player_red(): planck.Vec2 {
+		return new planck.Vec2(
+			this.map_size.width / 4,
+			this.map_size.height / 2
+		);
+	}
+	get spawn_player_blue(): planck.Vec2 {
+		return new planck.Vec2(
+			this.map_size.width / 2 + this.map_size.width / 4,
+			this.map_size.height / 2
+		);
+	}
+
+	get gspawn_player_red(): planck.Vec2 {
+		return new planck.Vec2(0.1, this.map_size.height / 2);
+	}
+
+	get gspawn_player_blue(): planck.Vec2 {
+		return new planck.Vec2(
+			this.map_size.width - 0.1,
+			this.map_size.height / 2
+		);
+	}
+}

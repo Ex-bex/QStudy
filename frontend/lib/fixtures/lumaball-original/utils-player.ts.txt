@@ -1,0 +1,93 @@
+import * as p_t from "~/types/player";
+import { State } from "~/types/player";
+import { Config } from "~/utils/config_game";
+import planck from "planck";
+export default class {
+	private parameters: p_t.player_param | undefined = undefined;
+	private game_body: planck.Body | undefined = undefined;
+	private states: p_t.States = Object.values(State).reduce((acc, s) => {
+		acc[s] = false;
+		return acc;
+	}, {} as p_t.States);
+	constructor(param: p_t.player_param) {
+		this.parameters = param;
+	}
+	public init_body(body: planck.Body) {
+		this.game_body = body;
+		this.game_body.setUserData({
+			type: "player",
+			team: this.parameters?.team,
+		});
+		this.refresh_states();
+	}
+	public destroy_body(): void {
+		this.game_body = undefined;
+	}
+
+	public refresh_states(): void {
+		for (const state in State) {
+			this.states[state as p_t.State] = false;
+		}
+	}
+
+	public get_states() {
+		return this.states;
+	}
+
+	public move(move: p_t.Move): void {
+		if (!this.game_body) return;
+		const direction = Config.directions[move as p_t.Move].clone();
+		this.game_body.applyForce(direction, this.game_body.getWorldCenter());
+	}
+
+	public active_state(state: p_t.State, bool: boolean): void {
+		this.states[state] = bool;
+	}
+	public get_state(state: p_t.State): boolean {
+		return this.states[state];
+	}
+	public move_state(ball?: planck.Body | null): void {
+		//todo type guard
+		for (const state in this.states) {
+			const s = state as p_t.State;
+			if (!this.states[s]) continue;
+			if (s == State.Kick) {
+				if (ball && this.game_body) {
+					const player_pos = this.game_body.getPosition();
+					const ball_pos = ball.getPosition();
+					const distance = planck.Vec2.distance(player_pos, ball_pos);
+					if (distance < Config.RADIUS_KICK) {
+						const direction = ball_pos.clone().sub(player_pos);
+						direction.normalize();
+						ball.applyLinearImpulse(
+							direction.clone().mul(Config.BALL_SPEED),
+							ball.getWorldCenter()
+						);
+						this.states[State.Kick] = false;
+					}
+				}
+			} else {
+				this.move(s as p_t.Move);
+			}
+		}
+	}
+
+	get name(): string | undefined {
+		return this.parameters?.name;
+	}
+	get team(): p_t.player_team | undefined {
+		return this.parameters?.team;
+	}
+	get body(): planck.Body | undefined {
+		return this.game_body;
+	}
+	get id(): string | undefined {
+		return this.parameters?.id;
+	}
+	get connection_id(): string | undefined {
+		return this.parameters?.connection_id;
+	}
+	set team(team: p_t.player_team) {
+		this.parameters!.team = team;
+	}
+}

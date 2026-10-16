@@ -347,8 +347,14 @@ export default function LumaAdminPanel() {
                       <h3>{room.name}</h3>
                       <p>
                         {room.host_name} · {room.players}/{room.max_players}{" "}
-                        игроков · {room.time_limit} мин · до {room.score_limit}{" "}
-                        голов
+                        игроков ·{" "}
+                        {room.time_limit
+                          ? `${room.time_limit} мин`
+                          : "без лимита времени"}{" "}
+                        ·{" "}
+                        {room.score_limit
+                          ? `до ${room.score_limit} голов`
+                          : "без лимита голов"}
                       </p>
                       <span className={styles.status}>
                         {
@@ -379,20 +385,20 @@ export default function LumaAdminPanel() {
                                   label: "Максимум игроков",
                                   type: "number" as const,
                                   min: Math.max(2, room.players),
-                                  max: settings?.max_players || 16,
+                                  max: settings?.max_players || 20,
                                 },
                                 {
                                   name: "score_limit",
-                                  label: "До скольких голов",
+                                  label: "До скольких голов (0 — без лимита)",
                                   type: "number" as const,
-                                  min: 1,
+                                  min: 0,
                                   max: 20,
                                 },
                                 {
                                   name: "time_limit",
-                                  label: "Минут в матче",
+                                  label: "Минут в матче (0 — без лимита)",
                                   type: "number" as const,
-                                  min: 1,
+                                  min: 0,
                                   max: 30,
                                 },
                                 {
@@ -892,7 +898,7 @@ function SettingsForm({
                   key: "max_players",
                   label: "Максимум игроков в комнате",
                   min: 2,
-                  max: 16,
+                  max: 20,
                 },
                 {
                   key: "default_players",
@@ -902,14 +908,14 @@ function SettingsForm({
                 },
                 {
                   key: "score_limit",
-                  label: "Голов для победы",
-                  min: 1,
+                  label: "Голов для победы (0 — без лимита)",
+                  min: 0,
                   max: 20,
                 },
                 {
                   key: "time_limit",
-                  label: "Время матча, минут",
-                  min: 1,
+                  label: "Время матча, минут (0 — без лимита)",
+                  min: 0,
                   max: 30,
                 },
               ] as const

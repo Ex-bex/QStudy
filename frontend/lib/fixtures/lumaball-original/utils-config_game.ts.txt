@@ -1,0 +1,95 @@
+import { Settings } from "planck";
+import planck from "planck";
+import type * as g_t from "~/types/game_param";
+import type * as p_t from "~/types/player";
+import { State } from "~/types/player";
+export function definePlanckSettings(): void {
+	Settings.velocityThreshold = 0.5;
+}
+export class Config {
+	static SPAWN_SPACING: number = 1; //meters
+	static GAME_RESTART_TIME: number = 2500; //ms
+	static GAME_KICKOFF_TIME: number = 3000; //ms
+	static CATEGORY_PLAYER: number = 0b001;
+	static CATEGORY_INNER_WALL: number = 0b010;
+	static CATEGORY_OUTER_WALL: number = 0b111;
+	static CATEGORY_BALL: number = 0b100;
+	static CATEGORY_CENTERLINE: number = 0b011;
+
+	static WORLD_STEP_COUNT: number = 60;
+	static METER_TO_PIXEL: number = 80;
+	static PLAYER_RADIUS: number = 0.22;
+
+	static PLAYER_SPEED: number = 1.5;
+	static PLAYER_PARAMETERS: g_t.body_param = {
+		body: {
+			type: "dynamic",
+			linearDamping: 1.5,
+			fixedRotation: true,
+			allowSleep: false,
+		},
+		fixture: {
+			shape: new planck.Circle(this.PLAYER_RADIUS),
+			density: 3,
+			restitution: 0.1,
+			friction: 0.3,
+			filterCategoryBits: this.CATEGORY_PLAYER,
+			filterMaskBits: this.CATEGORY_BALL | this.CATEGORY_OUTER_WALL,
+		},
+	};
+	static BALL_RADIUS: number = 0.1;
+	static BALL_SPEED: number = 0.23;
+	static BALL_KICKOFF_SPEED: number = 0.1;
+	static BALL_PARAMETERS: g_t.body_param = {
+		body: {
+			type: "dynamic",
+			linearDamping: 1,
+			angularDamping: 1,
+			bullet: true,
+			allowSleep: false,
+		},
+		fixture: {
+			shape: new planck.Circle(this.BALL_RADIUS),
+			density: 1,
+			friction: 0.1,
+			restitution: 0.4,
+			filterCategoryBits: this.CATEGORY_BALL,
+			filterMaskBits: this.CATEGORY_INNER_WALL | this.CATEGORY_PLAYER,
+		},
+	};
+	static EDGE_USER_DATA: g_t.body_user_data = { type: "wall" };
+	static PLAYER_USER_DATA: g_t.body_user_data = { type: "player" };
+	static BALL_USER_DATA: g_t.body_user_data = { type: "ball" };
+	static RADIUS_KICK: number = this.PLAYER_RADIUS + 0.15;
+	static PLAYER_DIRECTION_CIRCLE_RADIUS: number = this.RADIUS_KICK + 0.0625;
+	static INNER_WALL_FIXTURE: g_t.wall_fixture = {
+		filterCategoryBits: this.CATEGORY_INNER_WALL,
+		filterMaskBits: this.CATEGORY_BALL,
+		restitution: 0.1,
+	};
+	static OUTER_WALL_FIXTURE: g_t.wall_fixture = {
+		filterCategoryBits: this.CATEGORY_OUTER_WALL,
+		filterMaskBits: this.CATEGORY_PLAYER | this.CATEGORY_BALL,
+	};
+	static CENTERLINE_FIXTURE: g_t.wall_fixture = {
+		filterCategoryBits: this.CATEGORY_CENTERLINE,
+		filterMaskBits: this.CATEGORY_PLAYER,
+	};
+
+	static direct_circle: Record<string, number> = {
+		["up"]: (3 * Math.PI) / 2,
+		["down"]: Math.PI / 2,
+		["left"]: Math.PI,
+		["right"]: 0,
+		["up_left"]: (5 * Math.PI) / 4,
+		["up_right"]: (7 * Math.PI) / 4,
+		["down_left"]: (3 * Math.PI) / 4,
+		["down_right"]: Math.PI / 4,
+	};
+	static directions: Record<p_t.Move, planck.Vec2> = {
+		[State.Up]: new planck.Vec2(0, -Config.PLAYER_SPEED),
+		[State.Down]: new planck.Vec2(0, Config.PLAYER_SPEED),
+		[State.Left]: new planck.Vec2(-Config.PLAYER_SPEED, 0),
+		[State.Right]: new planck.Vec2(Config.PLAYER_SPEED, 0),
+	};
+}

@@ -1,0 +1,42 @@
+{
+  "description": "Unmodified original LumaBall source used only by parity tests; Nuxt/WebRTC/timers are stubbed by the test harness. Runtime QBall uses engine.ts.",
+  "source": "LumaBall/LumaBall_frontend",
+  "planck": "1.4.2",
+  "files": [
+    {
+      "source": "utils/game.ts",
+      "fixture": "utils-game.ts.txt",
+      "sha256": "fb4e0d29620c576d67e2bd7b6d1d30c303594c8cd043d859a92ca3441b4265cd"
+    },
+    {
+      "source": "utils/player.ts",
+      "fixture": "utils-player.ts.txt",
+      "sha256": "a9c02ae63332df8558f28b4128887f07b385b3af0735c53e4116df49e32ff9ea"
+    },
+    {
+      "source": "utils/map.ts",
+      "fixture": "utils-map.ts.txt",
+      "sha256": "793300280fd072279465e82f9ad07a1ef92e37697b966fb69db3d4d32557c6c3"
+    },
+    {
+      "source": "utils/config_game.ts",
+      "fixture": "utils-config_game.ts.txt",
+      "sha256": "386445af54f49720ba43b7f0fc934e8acb8d12eef43ebf645784d89cf6ea4921"
+    },
+    {
+      "source": "utils/timer.ts",
+      "fixture": "utils-timer.ts.txt",
+      "sha256": "f8e718b95bb0f9d33ae6794dc85018b31f939342faa1ab19b6536d258716c82f"
+    },
+    {
+      "source": "utils/utils.ts",
+      "fixture": "utils-utils.ts.txt",
+      "sha256": "f8e274690b9b8531fa4da78594be97458b1c139ccd2e8e1064f05ad41dcc0adb"
+    },
+    {
+      "source": "types/player.ts",
+      "fixture": "types-player.ts.txt",
+      "sha256": "6ad69a5971e3e2d83546a9d1b6cb751759acdadc0539b81a947b8514bbd46c2a"
+    }
+  ]
+}

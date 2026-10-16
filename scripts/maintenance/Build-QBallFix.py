@@ -7,19 +7,35 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD = (
+    'frontend/package.json',
+    'frontend/package-lock.json',
     'frontend/app/api/[...path]/route.ts',
     'frontend/app/qball/qball.css',
     'frontend/components/lumaball/brand.tsx',
     'frontend/components/lumaball/context.tsx',
+    'frontend/components/lumaball/admin-panel.tsx',
     'frontend/components/lumaball/game-room.module.css',
     'frontend/components/lumaball/game-room.tsx',
     'frontend/components/lumaball/lobby.tsx',
     'frontend/components/lumaball/original-lobby.css',
     'frontend/components/lumaball/shell.tsx',
+    'frontend/lib/lumaball/engine.ts',
+    'frontend/lib/lumaball/room-state.ts',
     'frontend/lib/lumaball/render.ts',
     'frontend/lib/lumaball/snapshot-interpolator.ts',
     'frontend/lib/lumaball-snapshots.test.mjs',
     'frontend/lib/lumaball-render.test.mjs',
+    'frontend/lib/lumaball.test.mjs',
+    'frontend/lib/lumaball-parity.test.mjs',
+    'frontend/lib/lumaball-room-state.test.mjs',
+    'frontend/lib/fixtures/lumaball-original/provenance.json',
+    'frontend/lib/fixtures/lumaball-original/utils-game.ts.txt',
+    'frontend/lib/fixtures/lumaball-original/utils-player.ts.txt',
+    'frontend/lib/fixtures/lumaball-original/utils-map.ts.txt',
+    'frontend/lib/fixtures/lumaball-original/utils-config_game.ts.txt',
+    'frontend/lib/fixtures/lumaball-original/utils-timer.ts.txt',
+    'frontend/lib/fixtures/lumaball-original/utils-utils.ts.txt',
+    'frontend/lib/fixtures/lumaball-original/types-player.ts.txt',
     'frontend/lib/game-csp.mjs',
     'frontend/lib/game-csp.test.mjs',
     'frontend/lib/lumaball/session-queue.ts',
@@ -27,7 +43,17 @@ PAYLOAD = (
     'frontend/lib/native-server.integration.mjs',
     'frontend/server.mjs',
     'scripts/launcher/data.py',
+    'scripts/tests/qball_physics_fixture.mjs',
+    'scripts/tests/lumaball_stack.py',
+    'backend/app/lumaball_room_models.py',
+    'backend/app/routers/lumaball_rooms.py',
+    'backend/app/services/lumaball_identity.py',
+    'backend/app/services/lumaball_rooms.py',
     'backend/app/services/lumaball_realtime.py',
+    'backend/tests/test_lumaball_identity.py',
+    'backend/tests/test_lumaball_realtime.py',
+    'backend/tests/test_lumaball_relay_performance.py',
+    'backend/tests/test_lumaball_rooms.py',
 )
 STOP_HELPERS = (
     'scripts/launcher/Stop-Previous.ps1', 'scripts/launcher/Native.ps1',
@@ -42,7 +68,7 @@ chcp 65001 >nul
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0.qstudy-fix\\Apply.ps1" -Root "%~dp0." %*
 exit /b %errorlevel%
 '''.replace('\n', '\r\n').encode('ascii')
-README = '''QStudy / QBall: плавность игры и исходный интерфейс комнат
+README = '''QStudy / QBall: оригинальная физика LumaBall, текущий дизайн QBall
 
 1. Распакуйте СОДЕРЖИМОЕ ZIP в существующую папку работающего QStudy
    на Windows-хосте рядом с Start-QStudy-Internet.cmd.
@@ -55,8 +81,10 @@ README = '''QStudy / QBall: плавность игры и исходный ин
    Создайте комнату и отправьте ссылку из «Пригласить друга».
 
 Помощник проверяет пакет, штатно останавливает эту установку, сохраняет
-изменяемые исходники, обновляет интерфейс, игровой сетевой канал и запись статуса,
-затем запускает прежний режим.
+изменяемые исходники, возвращает движок Planck и игровые правила оригинального
+LumaBall, затем запускает прежний режим. Зелёное поле и дизайн QBall сохраняются.
+Необходимая версия Planck устанавливается автоматически через штатный стартер
+по зафиксированному package-lock.json. Самостоятельно вводить npm-команды не нужно.
 База, аккаунты, документы, логотипы в базе, .env, ключи и пароли не входят
 в этот ZIP и не заменяются. Импорт резервной копии не нужен.
 Во время обновления сайт и активные комнаты будут остановлены.
@@ -71,6 +99,12 @@ README = '''QStudy / QBall: плавность игры и исходный ин
 Для остальных игроков сглаживаются сетевые снимки; передача ограничена
 30 снимками в секунду, управление отправляется сразу при нажатии клавиш.
 Восстановлены компактная таблица комнат и меню команд исходного LumaBall.
+Оригинальные размеры поля, силы движения и удара, столкновения и отскоки,
+свободное движение игроков за разметкой, центральный барьер при начальном
+розыгрыше и задержки после гола перенесены из исходного проекта.
+Нулевой лимит времени или счёта означает отсутствие такого ограничения.
+Параметры уже существующих комнат и глобальные настройки не перезаписываются;
+нужные лимиты администратор выбирает внутри QStudy.
 '''
 
 
@@ -78,7 +112,7 @@ def build(output: Path, mode: str) -> dict:
     files = [{'path': path, 'sha256': hashlib.sha256((ROOT / path).read_bytes()).hexdigest()}
              for path in PAYLOAD]
     identifier = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:12]
-    manifest = {'version': 1, 'id': 'qball-browser-' + identifier,
+    manifest = {'version': 1, 'id': 'qball-original-physics-' + identifier,
                 'target_mode': mode, 'files': files}
     entries = {
         'Apply-QBall-Fix.cmd': WRAPPER,
@@ -110,7 +144,7 @@ def build(output: Path, mode: str) -> dict:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / '.local/handover/QStudy-QBall-Browser-Fix.zip')
+    parser.add_argument('--output', type=Path, default=ROOT / '.local/handover/QStudy-QBall-Original-Physics.zip')
     parser.add_argument('--mode', choices=('local', 'lan', 'internet'), default='internet')
     options = parser.parse_args()
     print(json.dumps(build(options.output, options.mode)))

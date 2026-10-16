@@ -135,11 +135,11 @@ class LumaBallRealtimeTests(unittest.TestCase):
         return room
 
     def frame(self, room):
-        return {"seq": 1, "match_id": room["match_id"], "width": 1200, "height": 700,
+        return {"seq": 1, "match_id": room["match_id"], "width": 800, "height": 400,
             "players": [{"id": member["id"], "name": "FORGED_NAME", "team": member["team"],
-                         "x": 350 if member["team"] == "red" else 850, "y": 350, "vx": 0, "vy": 0, "kicking": False}
+                         "x": 200 if member["team"] == "red" else 600, "y": 200, "vx": 0, "vy": 0, "kicking": False}
                         for member in room["members"] if member["team"] != "spectator"],
-            "ball": {"x": 600, "y": 350, "vx": 0, "vy": 0}, "score": {"red": 0, "blue": 0},
+            "ball": {"x": 400, "y": 200, "vx": 0, "vy": 0}, "score": {"red": 0, "blue": 0},
             "elapsed": 0, "remaining": room["time_limit"] * 60, "kickoff": 1, "finished": False, "winner": None}
 
     def test_origin_and_private_proxy_proof_are_checked_before_accepting_a_ticket(self):
@@ -271,6 +271,78 @@ class LumaBallRealtimeTests(unittest.TestCase):
             with self.sessions() as db:
                 self.assertEqual(db.query(LumaBallMatch).count(), 0)
                 self.assertEqual(db.get(LumaBallRoom, room["id"]).status, "playing")
+
+    def test_original_unlimited_snapshots_and_goal_pause_reach_peers(self):
+        with ExitStack() as stack:
+            host, peer, _, _, _, _, _ = self.connect_pair(stack)
+            room = self.start(host, peer)
+            frame = self.frame(room)
+            frame.update(elapsed=7200, remaining=0, goal_pause=2.5, score={"red": 27, "blue": 22})
+            host.send_json({"type": "frame", "frame": frame})
+            delivered = self.receive(peer, "frame")["frame"]
+            self.assertEqual((delivered["width"], delivered["height"]), (800, 400))
+            self.assertEqual((delivered["elapsed"], delivered["goal_pause"]), (7200, 2.5))
+            self.assertEqual(delivered["score"], {"red": 27, "blue": 22})
+            for changes in ({"goal_pause": 2.51}, {"goal_pause": True}, {"elapsed": 2**31},
+                            {"remaining": 1}, {"width": 1200}, {"score": {"red": 2**31, "blue": 0}}):
+                host.send_json({"type": "frame", "frame": {**frame, **changes}})
+                self.receive(host, "error")
+            host.send_json({"type": "frame", "frame": {**frame, "seq": 2, "goal_pause": 0}})
+            self.assertEqual(self.receive(peer, "frame")["frame"]["seq"], 2)
+
+    def test_keydown_sequence_is_forwarded_exactly_without_spoofing_or_invalid_integers(self):
+        with ExitStack() as stack:
+            host, peer, _, _, _, host_identity, peer_identity = self.connect_pair(stack)
+            self.start(host, peer)
+            controls = {"x": -1, "y": 1, "kick": True, "kick_seq": 2**53 - 1}
+            peer.send_json({"type": "input", "from": host_identity["id"], "input": controls})
+            delivered = self.receive(host, "input")
+            self.assertEqual(delivered["from"], peer_identity["id"])
+            self.assertEqual(delivered["input"], controls)
+            for invalid in (-1, True, 1.5, 2**53, "1", None):
+                peer.send_json({"type": "input", "input": {**controls, "kick_seq": invalid}})
+                self.receive(peer, "error")
+            peer.send_json({"type": "input", "input": {"x": 0, "y": 0, "kick": False}})
+            self.assertNotIn("kick_seq", self.receive(host, "input")["input"])
+
+    def test_host_changes_teams_during_play_and_pause_without_accepting_an_old_roster(self):
+        with ExitStack() as stack:
+            host, peer, _, _, _, host_identity, peer_identity = self.connect_pair(stack)
+            room = self.start(host, peer)
+            host.send_json({"type": "frame", "frame": self.frame(room)})
+            self.receive(peer, "frame")
+            for target in (peer_identity["id"], host_identity["id"]):
+                peer.send_json({"type": "command", "action": "team", "target": target, "team": "red"})
+                self.receive(peer, "error")
+            host.send_json({"type": "command", "action": "team", "target": peer_identity["id"], "team": "spectator"})
+            updated = self.receive(host, "room", lambda event: any(
+                member["id"] == peer_identity["id"] and member["team"] == "spectator"
+                for member in event["room"]["members"]))["room"]
+            self.receive(peer, "room", lambda event: any(
+                member["id"] == peer_identity["id"] and member["team"] == "spectator"
+                for member in event["room"]["members"]))
+            self.assertEqual(updated["status"], "playing")
+            host.send_json({"type": "frame", "frame": {**self.frame(room), "seq": 2}})
+            self.receive(host, "error")
+            host.send_json({"type": "frame", "frame": {**self.frame(updated), "seq": 3}})
+            fresh = self.receive(peer, "frame")["frame"]
+            self.assertEqual(fresh["seq"], 3)
+            self.assertEqual([player["id"] for player in fresh["players"]], [host_identity["id"]])
+            host.send_json({"type": "command", "action": "pause"})
+            self.receive(host, "room", lambda event: event["room"]["status"] == "paused")
+            self.receive(peer, "room", lambda event: event["room"]["status"] == "paused")
+            peer.send_json({"type": "command", "action": "team", "team": "blue"})
+            self.receive(peer, "error")
+            host.send_json({"type": "command", "action": "team", "target": peer_identity["id"], "team": "blue"})
+            updated = self.receive(host, "room", lambda event: any(
+                member["id"] == peer_identity["id"] and member["team"] == "blue"
+                for member in event["room"]["members"]))["room"]
+            self.receive(peer, "room", lambda event: any(
+                member["id"] == peer_identity["id"] and member["team"] == "blue"
+                for member in event["room"]["members"]))
+            self.assertEqual(updated["status"], "paused")
+            host.send_json({"type": "frame", "frame": {**self.frame(updated), "seq": 4}})
+            self.assertEqual(self.receive(peer, "frame")["frame"]["seq"], 4)
 
     def test_signaling_cannot_escape_a_room_and_invalid_frames_do_not_break_the_host(self):
         with ExitStack() as stack:

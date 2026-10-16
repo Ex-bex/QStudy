@@ -11,9 +11,11 @@
   "dependencies": {
     "lucide-react": "^1.37.0",
     "next": "^16.4.0",
+    "planck": "1.4.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "stage-js": "1.0.0-alpha.17"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

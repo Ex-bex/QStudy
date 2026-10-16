@@ -1,11 +1,9 @@
 import type { GameFrame, Member } from "./engine";
 import type { Room } from "./types";
 
-/** Reserved seats are not yet players: both teams must actually be connected. */
+/** Original rooms also support solo practice and a host watching the field. */
 export function teamsReady(members: Member[]): boolean {
-  return ["red", "blue"].every((team) =>
-    members.some((member) => member.connected && member.team === team),
-  );
+  return members.some((member) => member.connected);
 }
 
 /** Keep room passwords and session credentials out of invitations. */

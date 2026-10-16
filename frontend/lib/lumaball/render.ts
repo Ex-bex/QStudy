@@ -93,18 +93,24 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
   ctx.lineTo(FIELD.width / 2, FIELD.bottom);
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(600, 350, 82, 0, Math.PI * 2);
+  ctx.arc(
+    FIELD.width / 2,
+    FIELD.height / 2,
+    FIELD.centerRadius,
+    0,
+    Math.PI * 2,
+  );
   ctx.stroke();
   ctx.fillStyle = "#d8e7dd";
   ctx.beginPath();
-  ctx.arc(600, 350, 3, 0, Math.PI * 2);
+  ctx.arc(FIELD.width / 2, FIELD.height / 2, 3, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = "rgba(232,245,236,.46)";
   for (const left of [true, false]) {
     const goalLine = left ? FIELD.left : FIELD.right;
     for (const [depth, top, bottom] of [
-      [150, 174, 526],
-      [55, 220, 480],
+      [width * 0.14, FIELD.top + height * 0.2, FIELD.bottom - height * 0.2],
+      [width * 0.05, FIELD.goalTop - 10, FIELD.goalBottom + 10],
     ]) {
       const inside = goalLine + (left ? depth : -depth);
       ctx.beginPath();
@@ -116,8 +122,8 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
     }
     ctx.beginPath();
     ctx.arc(
-      left ? FIELD.left + 112 : FIELD.right - 112,
-      350,
+      left ? FIELD.left + width * 0.105 : FIELD.right - width * 0.105,
+      FIELD.height / 2,
       2.5,
       0,
       Math.PI * 2,
@@ -134,6 +140,13 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
     ctx.arc(x, y, 14, start, start + Math.PI / 2);
     ctx.stroke();
   }
+  ctx.fillStyle = "#d8e7dd";
+  for (const x of [FIELD.left, FIELD.right])
+    for (const y of [FIELD.goalTop, FIELD.goalBottom]) {
+      ctx.beginPath();
+      ctx.arc(x, y, FIELD.postRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
 }
 
 /** Cache the static pitch and measure layout only when its size actually changes. */
@@ -272,7 +285,11 @@ export class FootballRenderer {
       ctx.fillStyle = "#fff1b2";
       ctx.font = "700 58px system-ui";
       ctx.textAlign = "center";
-      ctx.fillText(String(Math.ceil(frame.kickoff)), 600, 350);
+      ctx.fillText(
+        String(Math.ceil(frame.kickoff)),
+        FIELD.width / 2,
+        FIELD.height / 2,
+      );
     }
   }
 

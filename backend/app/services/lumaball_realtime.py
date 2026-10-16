@@ -78,7 +78,7 @@ def validate_frame(frame, room, members):
     if (not isinstance(frame, dict) or frame.get("match_id") != room.match_id or not room.match_id
             or type(frame.get("seq")) is not int or not 0 <= frame["seq"] <= 2**53 - 1):
         raise ValueError("Некорректный кадр")
-    if frame.get("width") != 1200 or frame.get("height") != 700:
+    if frame.get("width") != 800 or frame.get("height") != 400:
         raise ValueError("Некорректный размер поля")
     players = frame.get("players")
     if not isinstance(players, list) or len(players) > room.max_players:
@@ -92,27 +92,31 @@ def validate_frame(frame, room, members):
         member, profile = roster[player["id"]]
         if member.team not in ("red", "blue") or player.get("team") != member.team:
             raise ValueError("Команда игрока изменилась")
-        if (not all(finite(player.get(key), -150, maximum) for key, maximum in (("x", 1350), ("y", 850)))
+        if (not all(finite(player.get(key), -150, maximum) for key, maximum in (("x", 950), ("y", 550)))
                 or not all(finite(player.get(key), -6000, 6000) for key in ("vx", "vy"))
                 or type(player.get("kicking")) is not bool):
             raise ValueError("Некорректная позиция игрока")
         safe_players.append({key: player[key] for key in ("id", "team", "x", "y", "vx", "vy", "kicking")} | {"name": profile.name})
     ball = frame.get("ball")
-    if (not isinstance(ball, dict) or not finite(ball.get("x"), -150, 1350) or not finite(ball.get("y"), -150, 850)
+    if (not isinstance(ball, dict) or not finite(ball.get("x"), -150, 950) or not finite(ball.get("y"), -150, 550)
             or not all(finite(ball.get(key), -10000, 10000) for key in ("vx", "vy"))):
         raise ValueError("Некорректная позиция мяча")
     score = frame.get("score")
-    if not isinstance(score, dict) or not all(type(score.get(team)) is int and 0 <= score[team] <= room.score_limit for team in ("red", "blue")):
+    max_score, max_elapsed, max_remaining = rooms.match_bounds(room)
+    if not isinstance(score, dict) or not all(type(score.get(team)) is int and 0 <= score[team] <= max_score for team in ("red", "blue")):
         raise ValueError("Некорректный счёт")
-    if (not finite(frame.get("elapsed"), 0, room.time_limit * 60 + 120)
-            or not finite(frame.get("remaining"), 0, room.time_limit * 60)
+    if (not finite(frame.get("elapsed"), 0, max_elapsed)
+            or not finite(frame.get("remaining"), 0, max_remaining)
             or not finite(frame.get("kickoff"), 0, 10)
             or type(frame.get("finished")) is not bool
             or frame.get("winner") not in (None, "red", "blue", "draw")):
         raise ValueError("Некорректное состояние матча")
-    return {"seq": frame["seq"], "match_id": room.match_id, "width": 1200, "height": 700, "players": safe_players,
+    if "goal_pause" in frame and not finite(frame["goal_pause"], 0, 2.5):
+        raise ValueError("Некорректная пауза после гола")
+    return {"seq": frame["seq"], "match_id": room.match_id, "width": 800, "height": 400, "players": safe_players,
             "ball": {key: ball[key] for key in ("x", "y", "vx", "vy")},
             "score": {team: score[team] for team in ("red", "blue")},
+            **({"goal_pause": frame["goal_pause"]} if "goal_pause" in frame else {}),
             **{key: frame[key] for key in ("elapsed", "remaining", "kickoff", "finished", "winner")}}
 
 
@@ -366,11 +370,16 @@ class GameHub:
                 value = data.get("input")
                 if not isinstance(value, dict) or not all(finite(value.get(key), -1, 1) for key in ("x", "y")) or type(value.get("kick")) is not bool:
                     raise ValueError("Некорректное управление")
+                if "kick_seq" in value and (type(value["kick_seq"]) is not int or not 0 <= value["kick_seq"] <= 2**53 - 1):
+                    raise ValueError("Некорректный номер удара")
                 if own.team not in ("red", "blue") or room.status != "playing":
                     return
                 host = self.connections.get(room.host_id)
                 if host and host.id != connection.id:
-                    host.send_transient("input:" + connection.id, {"type": "input", "from": connection.id, "input": {key: value[key] for key in ("x", "y", "kick")}})
+                    safe_input = {key: value[key] for key in ("x", "y", "kick")}
+                    if "kick_seq" in value:
+                        safe_input["kick_seq"] = value["kick_seq"]
+                    host.send_transient("input:" + connection.id, {"type": "input", "from": connection.id, "input": safe_input})
             elif kind == "frame":
                 if room.host_id != connection.id:
                     raise HTTPException(403, "Кадры отправляет создатель комнаты")

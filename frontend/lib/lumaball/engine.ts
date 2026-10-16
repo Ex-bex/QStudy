@@ -1,6 +1,17 @@
-/** QBall's fixed-step disc football simulation. No browser or network state. */
+import {
+  World,
+  Vec2,
+  Circle,
+  Edge,
+  Settings,
+  type Body,
+  type Fixture,
+  type FixtureOpt,
+} from "planck";
+
+/** The original LumaBall Planck simulation, with QStudy's transport-safe frames. */
 export type Team = "red" | "blue" | "spectator";
-export type Input = { x: number; y: number; kick: boolean };
+export type Input = { x: number; y: number; kick: boolean; kick_seq?: number };
 export type Member = {
   id: string;
   name: string;
@@ -27,56 +38,76 @@ export type GameFrame = {
   elapsed: number;
   remaining: number;
   kickoff: number;
+  goal_pause?: number;
   finished: boolean;
   winner: "red" | "blue" | "draw" | null;
 };
+
+// Metres remain inside Planck. Only the rendering/network boundary uses pixels.
+export const PHYSICS = {
+  hz: 60,
+  pixelsPerMetre: 80,
+  movementForce: 1.5,
+  playerDamping: 1.5,
+  playerDensity: 3,
+  playerRestitution: 0.1,
+  ballDamping: 1,
+  ballDensity: 1,
+  ballRestitution: 0.4,
+  kickImpulse: 0.23,
+  kickoffImpulse: 0.1,
+  kickRadius: 0.37,
+  kickoffSeconds: 3,
+  goalPauseSeconds: 2.5,
+};
 export const FIELD = {
-  width: 1200,
-  height: 700,
-  left: 72,
-  right: 1128,
+  width: 800,
+  height: 400,
+  left: 80,
+  right: 720,
   top: 60,
-  bottom: 640,
-  goalTop: 244,
-  goalBottom: 456,
-  goalDepth: 34,
-  playerRadius: 20,
-  ballRadius: 11,
+  bottom: 340,
+  goalTop: 144,
+  goalBottom: 256,
+  goalDepth: 40,
+  playerRadius: 17.6,
+  ballRadius: 8,
+  postRadius: 6.8,
+  centerRadius: 80,
+  kickRadius: PHYSICS.kickRadius * PHYSICS.pixelsPerMetre,
+};
+const CATEGORY = {
+  player: 0b001,
+  inner: 0b010,
+  outer: 0b111,
+  ball: 0b100,
+  center: 0b011,
 };
 const EMPTY_INPUT: Input = { x: 0, y: 0, kick: false };
-const FIXED_STEP = 1 / 60;
+const FIXED_STEP = 1 / PHYSICS.hz;
+const METRES = PHYSICS.pixelsPerMetre;
+const MAX_COUNTER = 2 ** 31 - 1;
 const clamp = (n: number, low: number, high: number) =>
   Math.max(low, Math.min(high, n));
-
-function spawn(team: "red" | "blue", index: number, count: number) {
-  const columns = Math.ceil(count / 8);
-  const rows = Math.ceil(count / columns);
-  const column = Math.floor(index / rows);
-  const row = index % rows;
-  const columnRows = Math.min(rows, count - column * rows);
-  return {
-    x: team === "red" ? 350 - column * 62 : 850 + column * 62,
-    y: 350 + (row - (columnRows - 1) / 2) * 62,
-  };
-}
 
 export function normalizeInput(value: unknown): Input {
   if (!value || typeof value !== "object") return { ...EMPTY_INPUT };
   const input = value as Partial<Input>;
-  let x =
-    typeof input.x === "number" && Number.isFinite(input.x)
-      ? clamp(input.x, -1, 1)
-      : 0;
-  let y =
-    typeof input.y === "number" && Number.isFinite(input.y)
-      ? clamp(input.y, -1, 1)
-      : 0;
-  const length = Math.hypot(x, y);
-  if (length > 1) {
-    x /= length;
-    y /= length;
-  }
-  return { x, y, kick: input.kick === true };
+  const result: Input = {
+    // Original controls apply the full force on each pressed axis.
+    x:
+      typeof input.x === "number" && Number.isFinite(input.x)
+        ? clamp(input.x, -1, 1)
+        : 0,
+    y:
+      typeof input.y === "number" && Number.isFinite(input.y)
+        ? clamp(input.y, -1, 1)
+        : 0,
+    kick: input.kick === true,
+  };
+  if (Number.isSafeInteger(input.kick_seq) && input.kick_seq! >= 0)
+    result.kick_seq = input.kick_seq;
+  return result;
 }
 
 export function validFrame(value: unknown): value is GameFrame {
@@ -104,245 +135,372 @@ export function validFrame(value: unknown): value is GameFrame {
         p.id.length <= 64 &&
         typeof p.name === "string" &&
         p.name.length <= 120 &&
-        ["red", "blue"].includes(p.team),
+        ["red", "blue"].includes(p.team) &&
+        typeof p.kicking === "boolean",
     ) &&
     disc(f.ball) &&
     !!f.score &&
     [f.score.red, f.score.blue].every(
-      (n) => Number.isInteger(n) && n >= 0 && n <= 999,
+      (n) => Number.isInteger(n) && n >= 0 && n <= MAX_COUNTER,
     ) &&
     [f.elapsed, f.remaining, f.kickoff].every(
       (n) =>
-        typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 86400,
+        typeof n === "number" &&
+        Number.isFinite(n) &&
+        n >= 0 &&
+        n <= MAX_COUNTER,
     ) &&
+    (f.goal_pause === undefined ||
+      (Number.isFinite(f.goal_pause) &&
+        f.goal_pause >= 0 &&
+        f.goal_pause <= PHYSICS.goalPauseSeconds)) &&
     typeof f.finished === "boolean" &&
     [null, "red", "blue", "draw"].includes(f.winner)
   );
 }
 
-function collide(
-  a: Disc,
-  b: Disc,
-  ra: number,
-  rb: number,
-  ma: number,
-  mb: number,
-) {
-  let dx = b.x - a.x,
-    dy = b.y - a.y;
-  let distance = Math.hypot(dx, dy);
-  if (distance >= ra + rb) return;
-  if (distance < 0.00001) {
-    dx = 1;
-    dy = 0;
-    distance = 1;
-  }
-  const nx = dx / distance,
-    ny = dy / distance;
-  const overlap = ra + rb - distance;
-  const invA = 1 / ma,
-    invB = 1 / mb,
-    inverse = invA + invB;
-  a.x -= (nx * overlap * invA) / inverse;
-  a.y -= (ny * overlap * invA) / inverse;
-  b.x += (nx * overlap * invB) / inverse;
-  b.y += (ny * overlap * invB) / inverse;
-  const speed = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-  if (speed >= 0) return;
-  const impulse = (-(1.0 + 0.7) * speed) / inverse;
-  a.vx -= impulse * invA * nx;
-  a.vy -= impulse * invA * ny;
-  b.vx += impulse * invB * nx;
-  b.vy += impulse * invB * ny;
+type SimPlayer = {
+  id: string;
+  name: string;
+  team: "red" | "blue";
+  body: Body;
+  kicking: boolean;
+  lastKickSequence: number;
+};
+
+function spawn(team: "red" | "blue", index: number, count: number) {
+  // Original centred, one-metre spacing for normal sides. Large QStudy rooms
+  // use more columns so extra players do not start beyond the outer wall.
+  const columns = Math.ceil(count / 5);
+  const rows = Math.ceil(count / columns);
+  const column = Math.floor(index / rows);
+  const columnRows = Math.min(rows, count - column * rows);
+  const halfSpread = (columns - 1) * 0.25;
+  const center =
+    team === "red"
+      ? Math.min(2.5, 3.5 - halfSpread)
+      : Math.max(7.5, 6.5 + halfSpread);
+  return Vec2(
+    center + (column - (columns - 1) / 2) * 0.5,
+    2.5 + ((index % rows) - (columnRows - 1) / 2),
+  );
 }
 
 export class FootballEngine {
-  private players: GamePlayer[] = [];
+  private world: World;
+  private players: SimPlayer[] = [];
   private inputs = new Map<string, { input: Input; at: number }>();
-  private cooldown = new Map<string, number>();
-  private ball: Disc = { x: 600, y: 350, vx: 0, vy: 0 };
+  private ball: Body;
+  private center: Fixture[] = [];
   private score = { red: 0, blue: 0 };
   private elapsed = 0;
-  private kickoff = 1.2;
+  private kickoff: number = PHYSICS.kickoffSeconds;
+  private goalPause = 0;
+  private goalStart: "red" | "blue" = "red";
   private finished = false;
   private accumulator = 0;
   private seq = 0;
   private clock = 0;
   readonly scoreLimit: number;
   readonly duration: number;
-  constructor(members: Member[], scoreLimit = 5, minutes = 5) {
+
+  constructor(members: Member[], scoreLimit = 0, minutes = 0) {
     this.scoreLimit = clamp(
-      Number.isFinite(scoreLimit) ? Math.round(scoreLimit) : 5,
-      1,
+      Number.isFinite(scoreLimit) ? Math.round(scoreLimit) : 0,
+      0,
       99,
     );
-    this.duration = clamp(
-      Number.isFinite(minutes) ? minutes * 60 : 300,
-      60,
-      3600,
-    );
+    this.duration = clamp(Number.isFinite(minutes) ? minutes * 60 : 0, 0, 3600);
+    Settings.velocityThreshold = 0.5;
+    this.world = new World({ gravity: Vec2(0, 0) });
+    this.world.setContinuousPhysics(true);
+    this.createMap();
+    this.ball = this.world.createBody({
+      type: "dynamic",
+      linearDamping: 1,
+      angularDamping: 1,
+      bullet: true,
+      allowSleep: false,
+    });
+    this.ball.createFixture({
+      shape: Circle(0.1),
+      density: 1,
+      friction: 0.1,
+      restitution: 0.4,
+      filterCategoryBits: CATEGORY.ball,
+      filterMaskBits: CATEGORY.inner | CATEGORY.player,
+    });
+    this.ball.setUserData({ type: "ball" });
+    this.ball.setPosition(Vec2(5, 2.5));
     this.syncMembers(members);
   }
+
+  private createPlayerBody(team: "red" | "blue") {
+    const body = this.world.createBody({
+      type: "dynamic",
+      linearDamping: 1.5,
+      fixedRotation: true,
+      allowSleep: false,
+    });
+    body.createFixture({
+      shape: Circle(0.22),
+      density: 3,
+      restitution: 0.1,
+      friction: 0.3,
+      filterCategoryBits: CATEGORY.player,
+      filterMaskBits: CATEGORY.ball | CATEGORY.outer,
+    });
+    body.setUserData({ type: "player", team: team === "red" ? 1 : 2 });
+    return body;
+  }
+
   syncMembers(members: Member[]) {
     const active = members.filter(
       (m) => m.connected && (m.team === "red" || m.team === "blue"),
     );
     const previous = new Map(this.players.map((p) => [p.id, p]));
-    this.players = active.map((m) => {
-      const before = previous.get(m.id);
-      if (before && before.team === m.team) return { ...before, name: m.name };
-      const team = m.team as "red" | "blue";
+    const continuing = new Set(
+      active
+        .filter((m) => previous.get(m.id)?.team === m.team)
+        .map((m) => m.id),
+    );
+    for (const player of this.players)
+      if (!continuing.has(player.id)) this.world.destroyBody(player.body);
+    this.players = active.map((member) => {
+      const before = previous.get(member.id);
+      if (continuing.has(member.id)) return { ...before!, name: member.name };
+      const team = member.team as "red" | "blue";
       const teammates = active.filter((p) => p.team === team);
+      const body = this.createPlayerBody(team);
+      const joining = this.elapsed > 0 || this.kickoff === 0;
+      body.setPosition(
+        joining
+          ? Vec2(team === "red" ? 0.1 : 9.9, 2.5)
+          : spawn(team, teammates.indexOf(member), teammates.length),
+      );
+      this.inputs.delete(member.id);
       return {
-        id: m.id,
-        name: m.name,
+        id: member.id,
+        name: member.name,
         team,
-        ...spawn(team, teammates.indexOf(m), teammates.length),
-        vx: 0,
-        vy: 0,
+        body,
         kicking: false,
+        lastKickSequence: -1,
       };
     });
     for (const id of this.inputs.keys())
       if (!active.some((m) => m.id === id)) this.inputs.delete(id);
   }
-  input(id: string, input: unknown) {
-    if (this.players.some((p) => p.id === id))
-      this.inputs.set(id, { input: normalizeInput(input), at: this.clock });
+
+  input(id: string, value: unknown) {
+    const player = this.players.find((p) => p.id === id);
+    if (!player) return;
+    const input = normalizeInput(value);
+    const before = this.inputs.get(id)?.input;
+    if (!input.kick) player.kicking = false;
+    else if (input.kick_seq === undefined) {
+      if (!before?.kick) player.kicking = true;
+    } else if (input.kick_seq > player.lastKickSequence) {
+      player.kicking = true;
+      player.lastKickSequence = input.kick_seq;
+    }
+    this.inputs.set(id, { input, at: this.clock });
   }
-  /** Bounds tab-resume catch-up to keep both the timer and collision loop sane. */
+
+  /** Pauses simulation cleanly and bounds catch-up after a hidden tab resumes. */
   advance(seconds: number, playing = true) {
     if (!Number.isFinite(seconds) || seconds <= 0) return;
-    const bounded = Math.min(seconds, 0.2);
+    const bounded = Math.min(seconds, 0.25);
     this.clock += bounded;
     if (!playing || this.finished) {
       this.accumulator = 0;
       return;
     }
     this.accumulator += bounded;
-    while (this.accumulator >= FIXED_STEP) {
+    while (this.accumulator + 1e-12 >= FIXED_STEP) {
       this.step(FIXED_STEP);
-      this.accumulator -= FIXED_STEP;
+      this.accumulator = Math.max(0, this.accumulator - FIXED_STEP);
     }
   }
+
   private resetPositions() {
-    this.ball = { x: 600, y: 350, vx: 0, vy: 0 };
+    this.ball.setLinearVelocity(Vec2(0, 0));
+    this.ball.setAngularVelocity(0);
+    this.ball.setPosition(Vec2(5, 2.5));
     for (const team of ["red", "blue"] as const) {
       const players = this.players.filter((p) => p.team === team);
-      players.forEach((p, i) =>
-        Object.assign(p, {
-          ...spawn(team, i, players.length),
-          vx: 0,
-          vy: 0,
-          kicking: false,
-        }),
-      );
+      players.forEach((player, index) => {
+        this.world.destroyBody(player.body);
+        player.body = this.createPlayerBody(team);
+        player.body.setPosition(spawn(team, index, players.length));
+        player.kicking = false;
+      });
     }
-    this.kickoff = 1.2;
+    this.goalPause = 0;
+    this.kickoff = PHYSICS.kickoffSeconds;
+    for (const fixture of this.center) fixture.setSensor(false);
   }
+
   private step(dt: number) {
     if (this.finished) return;
-    if (this.kickoff > 0) {
+    if (this.goalPause > 0) {
+      this.goalPause = Math.max(0, this.goalPause - dt);
+      if (this.goalPause < 1e-10) this.resetPositions();
+      else this.elapsed = Math.min(MAX_COUNTER, this.elapsed + dt);
+    } else if (this.kickoff > 0) {
       this.kickoff = Math.max(0, this.kickoff - dt);
-      return;
-    }
-    this.elapsed = Math.min(this.duration, this.elapsed + dt);
-    if (this.elapsed >= this.duration) {
-      this.finished = true;
-      return;
-    }
-    for (const p of this.players) {
-      const record = this.inputs.get(p.id);
-      const input =
-        record && this.clock - record.at < 0.6 ? record.input : EMPTY_INPUT;
-      p.vx = (p.vx + input.x * 1550 * dt) * Math.exp(-5 * dt);
-      p.vy = (p.vy + input.y * 1550 * dt) * Math.exp(-5 * dt);
-      const speed = Math.hypot(p.vx, p.vy);
-      if (speed > 300) {
-        p.vx *= 300 / speed;
-        p.vy *= 300 / speed;
+      if (this.kickoff < 1e-10) {
+        this.kickoff = 0;
+        this.ball.applyLinearImpulse(
+          Vec2(this.goalStart === "red" ? -0.1 : 0.1, 0),
+          this.ball.getWorldCenter(),
+        );
+        for (const fixture of this.center) fixture.setSensor(true);
       }
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.x = clamp(
-        p.x,
-        FIELD.left + FIELD.playerRadius,
-        FIELD.right - FIELD.playerRadius,
-      );
-      p.y = clamp(
-        p.y,
-        FIELD.top + FIELD.playerRadius,
-        FIELD.bottom - FIELD.playerRadius,
-      );
-      p.kicking = input.kick;
-      const dx = this.ball.x - p.x,
-        dy = this.ball.y - p.y,
-        distance = Math.hypot(dx, dy);
+    } else this.elapsed = Math.min(MAX_COUNTER, this.elapsed + dt);
+
+    // Original order matters: Planck integrates forces from the preceding tick,
+    // then each player's current controls apply force/impulse for the next one.
+    this.world.step(dt, 6, 2);
+    for (const player of this.players) {
+      const record = this.inputs.get(player.id);
+      const fresh = record && this.clock - record.at < 0.6;
+      const input = fresh ? record.input : EMPTY_INPUT;
+      if (!fresh) player.kicking = false;
+      const center = player.body.getWorldCenter();
+      if (input.y < 0) player.body.applyForce(Vec2(0, 1.5 * input.y), center);
+      if (input.y > 0) player.body.applyForce(Vec2(0, 1.5 * input.y), center);
+      if (input.x < 0) player.body.applyForce(Vec2(1.5 * input.x, 0), center);
+      if (input.x > 0) player.body.applyForce(Vec2(1.5 * input.x, 0), center);
       if (
-        input.kick &&
-        distance < 51 &&
-        this.clock >= (this.cooldown.get(p.id) || 0)
+        player.kicking &&
+        Vec2.distance(player.body.getPosition(), this.ball.getPosition()) <
+          PHYSICS.kickRadius
       ) {
-        const nx = distance > 0.01 ? dx / distance : p.team === "red" ? 1 : -1;
-        const ny = distance > 0.01 ? dy / distance : 0;
-        this.ball.vx += nx * 470;
-        this.ball.vy += ny * 470;
-        this.cooldown.set(p.id, this.clock + 0.22);
+        const direction = this.ball
+          .getPosition()
+          .clone()
+          .sub(player.body.getPosition());
+        direction.normalize();
+        this.ball.applyLinearImpulse(
+          direction.mul(PHYSICS.kickImpulse),
+          this.ball.getWorldCenter(),
+        );
+        player.kicking = false;
       }
     }
-    for (let i = 0; i < this.players.length; i++) {
-      for (let j = i + 1; j < this.players.length; j++)
-        collide(this.players[i], this.players[j], 20, 20, 3, 3);
-      collide(this.players[i], this.ball, 20, 11, 3, 0.7);
-    }
-    const maxBallSpeed = Math.hypot(this.ball.vx, this.ball.vy);
-    if (maxBallSpeed > 900) {
-      this.ball.vx *= 900 / maxBallSpeed;
-      this.ball.vy *= 900 / maxBallSpeed;
-    }
-    this.ball.x += this.ball.vx * dt;
-    this.ball.y += this.ball.vy * dt;
-    this.ball.vx *= Math.exp(-0.72 * dt);
-    this.ball.vy *= Math.exp(-0.72 * dt);
-    const r = FIELD.ballRadius;
-    if (this.ball.y < FIELD.top + r) {
-      this.ball.y = FIELD.top + r;
-      this.ball.vy = Math.abs(this.ball.vy) * 0.82;
-    }
-    if (this.ball.y > FIELD.bottom - r) {
-      this.ball.y = FIELD.bottom - r;
-      this.ball.vy = -Math.abs(this.ball.vy) * 0.82;
-    }
-    const inGoal =
-      this.ball.y > FIELD.goalTop + r && this.ball.y < FIELD.goalBottom - r;
-    if (!inGoal) {
-      if (this.ball.x < FIELD.left + r) {
-        this.ball.x = FIELD.left + r;
-        this.ball.vx = Math.abs(this.ball.vx) * 0.82;
-      }
-      if (this.ball.x > FIELD.right - r) {
-        this.ball.x = FIELD.right - r;
-        this.ball.vx = -Math.abs(this.ball.vx) * 0.82;
-      }
-    } else if (this.ball.x < FIELD.left - r || this.ball.x > FIELD.right + r) {
-      this.score[this.ball.x < FIELD.left ? "blue" : "red"] += 1;
-      if (Math.max(this.score.red, this.score.blue) >= this.scoreLimit)
-        this.finished = true;
-      else this.resetPositions();
-    }
+    this.checkGoal();
+    if (this.duration > 0 && this.elapsed >= this.duration)
+      this.finished = true;
   }
+
+  private checkGoal() {
+    if (this.goalPause > 0) return;
+    const position = this.ball.getPosition();
+    if (
+      position.y <= FIELD.goalTop / METRES ||
+      position.y >= FIELD.goalBottom / METRES
+    )
+      return;
+    const left = position.x > 0.5 && position.x < 1;
+    const right = position.x > 9 && position.x < 9.5;
+    if (!left && !right) return;
+    const team = left ? "blue" : "red";
+    this.score[team] = Math.min(MAX_COUNTER, this.score[team] + 1);
+    this.goalStart = left ? "red" : "blue";
+    this.goalPause = PHYSICS.goalPauseSeconds;
+    if (this.scoreLimit > 0 && this.score[team] >= this.scoreLimit)
+      this.finished = true;
+  }
+
+  private createMap() {
+    const inner: FixtureOpt = {
+      filterCategoryBits: CATEGORY.inner,
+      filterMaskBits: CATEGORY.ball,
+      restitution: 0.1,
+    };
+    const outer: FixtureOpt = {
+      filterCategoryBits: CATEGORY.outer,
+      filterMaskBits: CATEGORY.player | CATEGORY.ball,
+    };
+    const middle: FixtureOpt = {
+      filterCategoryBits: CATEGORY.center,
+      filterMaskBits: CATEGORY.player,
+    };
+    const ground = this.world.createBody({
+      type: "static",
+      position: Vec2(5, 2.5),
+    });
+    ground.setUserData({ type: "wall" });
+    this.center.push(
+      ground.createFixture(Edge(Vec2(0, -2.5), Vec2(0, 2.5)), middle),
+    );
+    this.center.push(ground.createFixture(Circle(Vec2(0, 0), 1), middle));
+    ground.createFixture(Edge(Vec2(-4, -1.75), Vec2(4, -1.75)), inner);
+    ground.createFixture(Edge(Vec2(-4, 1.75), Vec2(4, 1.75)), inner);
+    const goalOffset = (3.5 - 3.5 * 0.4) / 2;
+    const upperPost = -1.75 + goalOffset;
+    const lowerPost = 1.75 - goalOffset;
+    for (const x of [-4, 4]) {
+      const back = x < 0 ? x - 0.5 : x + 0.5;
+      ground.createFixture(Circle(Vec2(x, upperPost), 0.085), outer);
+      ground.createFixture(Circle(Vec2(x, lowerPost), 0.085), outer);
+      ground.createFixture(Edge(Vec2(x, -1.75), Vec2(x, upperPost)), inner);
+      ground.createFixture(Edge(Vec2(x, lowerPost), Vec2(x, 1.75)), inner);
+      ground.createFixture(
+        Edge(Vec2(x, upperPost), Vec2(back, upperPost)),
+        inner,
+      );
+      ground.createFixture(
+        Edge(Vec2(x, lowerPost), Vec2(back, lowerPost)),
+        inner,
+      );
+      ground.createFixture(
+        Edge(Vec2(back, upperPost), Vec2(back, lowerPost)),
+        inner,
+      );
+    }
+    const boundary = this.world.createBody({
+      type: "static",
+      position: Vec2(5, 2.5),
+    });
+    boundary.setUserData({ type: "wall" });
+    boundary.createFixture(Edge(Vec2(-5, -2.5), Vec2(5, -2.5)), outer);
+    boundary.createFixture(Edge(Vec2(-5, 2.5), Vec2(5, 2.5)), outer);
+    boundary.createFixture(Edge(Vec2(-5, -2.5), Vec2(-5, 2.5)), outer);
+    boundary.createFixture(Edge(Vec2(5, -2.5), Vec2(5, 2.5)), outer);
+  }
+
   frame(): GameFrame {
+    const disc = (body: Body): Disc => {
+      const position = body.getPosition();
+      const velocity = body.getLinearVelocity();
+      return {
+        x: position.x * METRES,
+        y: position.y * METRES,
+        vx: velocity.x * METRES,
+        vy: velocity.y * METRES,
+      };
+    };
     return {
       seq: ++this.seq,
       match_id: "",
       width: FIELD.width,
       height: FIELD.height,
-      players: this.players.map((p) => ({ ...p })),
-      ball: { ...this.ball },
+      players: this.players.map((player) => ({
+        id: player.id,
+        name: player.name,
+        team: player.team,
+        kicking: player.kicking,
+        ...disc(player.body),
+      })),
+      ball: disc(this.ball),
       score: { ...this.score },
       elapsed: this.elapsed,
-      remaining: Math.max(0, this.duration - this.elapsed),
+      remaining:
+        this.duration > 0 ? Math.max(0, this.duration - this.elapsed) : 0,
       kickoff: this.kickoff,
+      goal_pause: this.goalPause,
       finished: this.finished,
       winner: !this.finished
         ? null

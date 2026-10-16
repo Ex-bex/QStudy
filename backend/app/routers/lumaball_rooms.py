@@ -28,9 +28,9 @@ class RoomCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=80)
     password: str = Field(default="", max_length=64)
-    max_players: int | None = Field(default=None, ge=2, le=16)
-    score_limit: int | None = Field(default=None, ge=1, le=20)
-    time_limit: int | None = Field(default=None, ge=1, le=30)
+    max_players: int | None = Field(default=None, ge=2, le=20)
+    score_limit: int | None = Field(default=None, ge=0, le=20)
+    time_limit: int | None = Field(default=None, ge=0, le=30)
 
 
 class RoomJoin(BaseModel):
@@ -42,9 +42,9 @@ class RoomUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str | None = Field(default=None, min_length=1, max_length=80)
     password: str | None = Field(default=None, max_length=64)
-    max_players: int | None = Field(default=None, ge=2, le=16)
-    score_limit: int | None = Field(default=None, ge=1, le=20)
-    time_limit: int | None = Field(default=None, ge=1, le=30)
+    max_players: int | None = Field(default=None, ge=2, le=20)
+    score_limit: int | None = Field(default=None, ge=0, le=20)
+    time_limit: int | None = Field(default=None, ge=0, le=30)
 
 
 class RoomCommand(BaseModel):

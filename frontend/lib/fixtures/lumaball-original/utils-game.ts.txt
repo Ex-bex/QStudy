@@ -1,0 +1,628 @@
+import planck from "planck";
+import { definePlanckSettings, Config } from "~/utils/config_game";
+import Map from "~/utils/map";
+import type { room_game } from "~/types/room";
+import type * as g_t from "~/types/game_param";
+import type * as p_t from "~/types/player";
+import Timer from "~/utils/timer";
+const { goal_flash } = useFlashEffect();
+export default class {
+	private world: planck.World | null = null;
+	private game_state: boolean = false;
+
+	public map: Map = new Map();
+	public timer: Timer = new Timer();
+	private ball: planck.Body | null = null;
+	private score: g_t.score = { red: 0, blue: 0 };
+	private goal_state: boolean = false;
+	private goal_start: p_t.player_active_team = 1;
+	private timeouts: g_t.timeouts = {
+		kickoff: null,
+		restart: null,
+	};
+
+	private center_line: g_t.center_line = {
+		circle: null,
+		line: null,
+	};
+
+	private loop_steps: g_t.loop_steps = {
+		world_step: 1 / Config.WORLD_STEP_COUNT,
+		game_step: 1000 / Config.WORLD_STEP_COUNT,
+	};
+	private loop_param: {
+		loop_id: number | null;
+		last_time: number;
+		accumulator: number;
+	} = {
+		loop_id: 0,
+		last_time: 0,
+		accumulator: 0,
+	};
+	private calc_fps_param = {
+		frames: 0,
+		fps: 0,
+		last_time: 0,
+	};
+
+	constructor(private room: room_game) {
+		this.init_config();
+	}
+	private init_game(): void {
+		this.world = new planck.World({ gravity: new planck.Vec2(0, 0) });
+
+		this.world.setContinuousPhysics(true);
+		this.init_map();
+		this.create_ball();
+	}
+
+	private init_config(): void {
+		definePlanckSettings();
+	}
+
+	public start(): void {
+		this.game_state = true;
+		this.init_game();
+		this.game_loop();
+		this.restart();
+		this.score = { red: 0, blue: 0 };
+		this.goal_start = 1;
+		this.goal_state = false;
+		this.loop_param.accumulator = 0;
+		this.loop_param.last_time = 0;
+		this.calc_fps_param.fps = 0;
+		this.calc_fps_param.frames = 0;
+		this.calc_fps_param.last_time = 0;
+	}
+	public stop(): void {
+		this.game_state = false;
+		this.world = null;
+		this.timer.stop();
+		this.timer.reset();
+		this.ball = null;
+		this.clear_timeouts();
+		if (this.loop_param.loop_id) {
+			cancelAnimationFrame(this.loop_param.loop_id);
+			this.loop_param.loop_id = null;
+		}
+	}
+
+	private clear_timeouts(): void {
+		if (this.timeouts.kickoff) {
+			window.clearTimeout(this.timeouts.kickoff);
+			this.timeouts.kickoff = null;
+		}
+		if (this.timeouts.restart) {
+			window.clearTimeout(this.timeouts.restart);
+			this.timeouts.restart = null;
+		}
+	}
+
+	private change_goal_state(team: p_t.player_active_team): void {
+		this.send_score_for_client();
+		this.goal_state = true;
+		this.goal_start = team;
+		this.timeouts.restart = window.setTimeout(
+			() => this.restart(),
+			Config.GAME_RESTART_TIME
+		);
+	}
+
+	private change_sensor_center_line(bool: boolean): void {
+		if (this.center_line.circle && this.center_line.line) {
+			this.center_line.circle.setSensor(bool);
+			this.center_line.line.setSensor(bool);
+		}
+	}
+
+	private start_kickoff(): void {
+		if (!this.game_state) return;
+		if (!this.ball) return;
+		this.ball.applyLinearImpulse(
+			new planck.Vec2(
+				this.goal_start == 1
+					? -Config.BALL_KICKOFF_SPEED
+					: Config.BALL_KICKOFF_SPEED,
+				0
+			),
+			this.ball.getWorldCenter()
+		);
+
+		this.change_sensor_center_line(true);
+		this.timer.start();
+	}
+
+	private restart(): void {
+		if (!this.game_state) return;
+		if (this.ball) {
+			this.ball.setLinearVelocity(new planck.Vec2(0, 0));
+			this.ball.setAngularVelocity(0);
+			this.ball.setPosition(
+				new planck.Vec2(this.map.width / 2, this.map.height / 2)
+			);
+		}
+		this.room.spawn_players();
+		this.goal_state = false;
+		this.change_sensor_center_line(false);
+		this.timer.stop();
+		this.timeouts.kickoff = window.setTimeout(
+			() => this.start_kickoff(),
+			Config.GAME_KICKOFF_TIME
+		);
+	}
+	public send_ballandplayerspositon_for_client(): void {
+		const { $owebrtc } = useNuxtApp();
+		$owebrtc.send_data_for_host_peers("game", {
+			action: "ball_and_players",
+			data: {
+				ball: this.get_ball_position(),
+				players: this.get_player_positions(),
+			},
+		});
+	}
+	public send_score_for_client(): void {
+		const { $owebrtc } = useNuxtApp();
+		$owebrtc.send_data_for_host_peers("init_datas", {
+			action: "init_score",
+			data: this.get_score(),
+		});
+	}
+	public send_goaleffect_for_client(team: p_t.player_active_team): void {
+		const { $owebrtc } = useNuxtApp();
+		$owebrtc.send_data_for_host_peers("init_datas", {
+			action: "goal_effect",
+			data: team,
+		});
+	}
+	private game_loop(current_time = performance.now()): void {
+		if (!this.game_state || !this.world) return;
+		const frame_time = Math.min(
+			(current_time - this.loop_param.last_time) / 1000,
+			0.25
+		);
+		const is_every_sec =
+			current_time - this.calc_fps_param.last_time >= 1000;
+
+		this.loop_param.last_time = current_time;
+		this.loop_param.accumulator += frame_time;
+
+		while (this.loop_param.accumulator >= this.loop_steps.world_step) {
+			this.world.step(this.loop_steps.world_step, 6, 2);
+			this.calc_fps_param.frames++;
+			this.handle_input();
+			this.check_goal();
+
+			this.send_ballandplayerspositon_for_client();
+			this.loop_param.accumulator -= this.loop_steps.world_step;
+		}
+
+		if (is_every_sec) {
+			this.calc_fps_param.fps = this.calc_fps_param.frames;
+			this.calc_fps_param.frames = 0;
+			this.calc_fps_param.last_time = current_time;
+			//console.log(this.calc_fps_param.fps);
+		}
+		this.loop_param.loop_id = requestAnimationFrame((ct) =>
+			this.game_loop(ct)
+		);
+	}
+
+	private handle_input(): void {
+		const pls = this.room.get_players();
+		for (const p of pls) {
+			if (p.team != 0) {
+				p.move_state(this.ball);
+			}
+		}
+	}
+
+	private check_goal(): void {
+		if (this.ball) {
+			if (this.goal_state) return;
+			const goal = this.map.goal;
+			const ball_position = this.ball.getPosition();
+			if (
+				ball_position.y > goal.start_y &&
+				ball_position.y < goal.end_y
+			) {
+				const goal_depth = this.map.goal_depth;
+				if (
+					ball_position.x > goal.start_x - goal_depth &&
+					ball_position.x < goal.start_x
+				) {
+					this.score.blue += 1;
+					this.change_goal_state(1);
+					goal_flash(2);
+					this.send_goaleffect_for_client(2);
+				}
+				if (
+					ball_position.x > goal.end_x &&
+					ball_position.x < goal.end_x + goal_depth
+				) {
+					this.score.red += 1;
+					this.change_goal_state(2);
+					goal_flash(1);
+					this.send_goaleffect_for_client(1);
+				}
+			}
+		}
+	}
+
+	get_state(): boolean {
+		return this.game_state;
+	}
+	get_score(): g_t.score {
+		return { ...this.score };
+	}
+	public get_ball_position() {
+		if (!this.ball) return;
+		const fixture = this.ball.getFixtureList();
+		const shape: any = fixture!.getShape();
+		const result = {
+			pos: this.ball?.getPosition(),
+			center: shape.m_p,
+			radius: shape.m_radius,
+		};
+		return result;
+	}
+	public get_player_positions() {
+		const result: any = [];
+		for (const p of this.room.get_players()) {
+			if (p.body && p.team != 0) {
+				const fixture = p.body.getFixtureList();
+				const shape: any = fixture!.getShape();
+				result.push({
+					data: {
+						name: p.name,
+						team: p.team,
+						id: p.connection_id,
+						states: p.get_states(),
+					},
+					pos: p.body?.getPosition(),
+					center: shape.m_p,
+					radius: shape.m_radius,
+				});
+			}
+		}
+		return result;
+	}
+	public get_wall_positions(): g_t.wall_positions[] {
+		const wall_positions: g_t.wall_positions[] = [];
+		if (this.world) {
+			for (
+				let body = this.world.getBodyList();
+				body;
+				body = body.getNext()
+			) {
+				const user_data: any = body.getUserData();
+				if (user_data?.type != "wall") {
+					continue;
+				}
+				for (
+					let fixture = body.getFixtureList();
+					fixture;
+					fixture = fixture.getNext()
+				) {
+					const shape: any = fixture.getShape();
+					const type = shape.getType();
+					if (type == planck.Edge.TYPE) {
+						wall_positions.push({
+							type: planck.Edge.TYPE,
+							position_1: shape.m_vertex1,
+							position_2: shape.m_vertex2,
+						});
+					} else if (type == planck.Circle.TYPE) {
+						const category = fixture.getFilterCategoryBits();
+						wall_positions.push({
+							type: planck.Circle.TYPE,
+							circle: shape.m_p,
+							circle_radius: shape.m_radius,
+							circle_is_stroke:
+								category == Config.CATEGORY_CENTERLINE,
+						});
+					}
+				}
+			}
+		}
+		return wall_positions;
+	}
+	get alem() {
+		return this.world;
+	}
+
+	private create_ball(): void {
+		if (this.world) {
+			this.ball = this.world.createBody(Config.BALL_PARAMETERS.body);
+			this.ball.createFixture(Config.BALL_PARAMETERS.fixture);
+			this.ball.setUserData(Config.BALL_USER_DATA);
+		}
+	}
+	public create_player(): planck.Body {
+		let new_body = this.world!.createBody(Config.PLAYER_PARAMETERS.body);
+		new_body.createFixture(Config.PLAYER_PARAMETERS.fixture);
+		new_body.setUserData(Config.PLAYER_USER_DATA);
+		return new_body;
+	}
+	private init_map(): void {
+		this.create_inner_walls();
+		this.create_outer_walls();
+	}
+	private create_outer_walls(): void {
+		//todo add new function for create fixture with default fixture category
+		const ground = this.world!.createBody({
+			type: "static",
+			position: new planck.Vec2(this.map.width / 2, this.map.height / 2),
+		});
+		ground.setUserData(Config.EDGE_USER_DATA);
+
+		// bot wall
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(-this.map.width / 2, -this.map.height / 2),
+				new planck.Vec2(this.map.width / 2, -this.map.height / 2)
+			),
+			Config.OUTER_WALL_FIXTURE
+		);
+		// top wall
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(-this.map.width / 2, this.map.height / 2),
+				new planck.Vec2(this.map.width / 2, this.map.height / 2)
+			),
+			Config.OUTER_WALL_FIXTURE
+		);
+		// left wall
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(-this.map.width / 2, -this.map.height / 2),
+				new planck.Vec2(-this.map.width / 2, this.map.height / 2)
+			),
+			Config.OUTER_WALL_FIXTURE
+		);
+		// right wall
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(this.map.width / 2, -this.map.height / 2),
+				new planck.Vec2(this.map.width / 2, this.map.height / 2)
+			),
+			Config.OUTER_WALL_FIXTURE
+		);
+	}
+	private create_inner_walls(): void {
+		//todo add new function for create fixture with default fixture category
+		const map_param = this.map.get_param();
+		const inner_width = map_param.inner_width;
+		const inner_height = map_param.inner_height;
+		const ground = this.world!.createBody({
+			type: "static",
+			position: new planck.Vec2(
+				inner_width / 2 + (this.map.width - inner_width) / 2,
+				inner_height / 2 + (this.map.height - inner_height) / 2
+			),
+		});
+		ground.setUserData(Config.EDGE_USER_DATA);
+		//center wall
+		this.center_line.line = ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(0, -this.map.height / 2),
+				new planck.Vec2(0, this.map.height / 2)
+			),
+			Config.CENTERLINE_FIXTURE
+		);
+
+		// center circle
+		const circleRadius = 1.0;
+		this.center_line.circle = ground.createFixture(
+			new planck.Circle(new planck.Vec2(0, 0), circleRadius),
+			Config.CENTERLINE_FIXTURE
+		);
+		// bot wall
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(-inner_width / 2, -inner_height / 2),
+				new planck.Vec2(inner_width / 2, -inner_height / 2)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+		// top wall
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(-inner_width / 2, inner_height / 2),
+				new planck.Vec2(inner_width / 2, inner_height / 2)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		// goal
+		const goal_h = map_param.goal_height;
+		const goal_offset = (inner_height - goal_h) / 2;
+		const goal_depth = map_param.goal_depth;
+		const circle_radius = 0.085;
+
+		// left wall
+		// bot circle
+		ground.createFixture(
+			new planck.Circle(
+				new planck.Vec2(
+					-inner_width / 2,
+					-inner_height / 2 + goal_offset
+				),
+				circle_radius
+			),
+			Config.OUTER_WALL_FIXTURE
+		);
+
+		// top circle
+		ground.createFixture(
+			new planck.Circle(
+				new planck.Vec2(
+					-inner_width / 2,
+					inner_height / 2 - goal_offset
+				),
+				circle_radius
+			),
+			Config.OUTER_WALL_FIXTURE
+		);
+		// bot goal
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(-inner_width / 2, -inner_height / 2),
+				new planck.Vec2(
+					-inner_width / 2,
+					-inner_height / 2 + goal_offset
+				)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		// top goal
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(
+					-inner_width / 2,
+					inner_height / 2 - goal_offset
+				),
+				new planck.Vec2(-inner_width / 2, inner_height / 2)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		//GOAL P TOP
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(
+					-inner_width / 2,
+					-inner_height / 2 + goal_offset
+				),
+				new planck.Vec2(
+					-inner_width / 2 - goal_depth,
+					-inner_height / 2 + goal_offset
+				)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		//GOAL P BOT
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(
+					-inner_width / 2,
+					inner_height / 2 - goal_offset
+				),
+				new planck.Vec2(
+					-inner_width / 2 - goal_depth,
+					inner_height / 2 - goal_offset
+				)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		// GOAL P
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(
+					-inner_width / 2 - goal_depth,
+					-inner_height / 2 + goal_offset
+				),
+				new planck.Vec2(
+					-inner_width / 2 - goal_depth,
+					inner_height / 2 - goal_offset
+				)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		// right wall
+		// bot circle
+		ground.createFixture(
+			new planck.Circle(
+				new planck.Vec2(
+					inner_width / 2,
+					-inner_height / 2 + goal_offset
+				),
+				circle_radius
+			),
+			Config.OUTER_WALL_FIXTURE
+		);
+
+		// top circle
+		ground.createFixture(
+			new planck.Circle(
+				new planck.Vec2(
+					inner_width / 2,
+					inner_height / 2 - goal_offset
+				),
+				circle_radius
+			),
+			Config.OUTER_WALL_FIXTURE
+		);
+		// bot goal
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(inner_width / 2, -inner_height / 2),
+				new planck.Vec2(
+					inner_width / 2,
+					-inner_height / 2 + goal_offset
+				)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		// top goal
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(
+					inner_width / 2,
+					inner_height / 2 - goal_offset
+				),
+				new planck.Vec2(inner_width / 2, inner_height / 2)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		//GOAL P TOP
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(
+					inner_width / 2,
+					-inner_height / 2 + goal_offset
+				),
+				new planck.Vec2(
+					inner_width / 2 + goal_depth,
+					-inner_height / 2 + goal_offset
+				)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		//GOAL P BOT
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(
+					inner_width / 2,
+					inner_height / 2 - goal_offset
+				),
+				new planck.Vec2(
+					inner_width / 2 + goal_depth,
+					inner_height / 2 - goal_offset
+				)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+
+		// GOAL P
+		ground.createFixture(
+			new planck.Edge(
+				new planck.Vec2(
+					inner_width / 2 + goal_depth,
+					-inner_height / 2 + goal_offset
+				),
+				new planck.Vec2(
+					inner_width / 2 + goal_depth,
+					inner_height / 2 - goal_offset
+				)
+			),
+			Config.INNER_WALL_FIXTURE
+		);
+	}
+}

@@ -87,10 +87,10 @@ class LumaBallRelayPerformanceTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(asyncio.shield(task), timeout=1)
 
     def frame(self, seq=1):
-        return {"seq": seq, "match_id": self.match_id, "width": 1200, "height": 700,
-                "players": [{"id": self.host_id, "name": "FORGED", "team": "red", "x": 350, "y": 350, "vx": 0, "vy": 0, "kicking": False},
-                            {"id": self.peer_id, "name": "FORGED", "team": "blue", "x": 850, "y": 350, "vx": 0, "vy": 0, "kicking": False}],
-                "ball": {"x": 600, "y": 350, "vx": 0, "vy": 0}, "score": {"red": 0, "blue": 0},
+        return {"seq": seq, "match_id": self.match_id, "width": 800, "height": 400,
+                "players": [{"id": self.host_id, "name": "FORGED", "team": "red", "x": 200, "y": 200, "vx": 0, "vy": 0, "kicking": False},
+                            {"id": self.peer_id, "name": "FORGED", "team": "blue", "x": 600, "y": 200, "vx": 0, "vy": 0, "kicking": False}],
+                "ball": {"x": 400, "y": 200, "vx": 0, "vy": 0}, "score": {"red": 0, "blue": 0},
                 "elapsed": 1, "remaining": 299, "kickoff": 0, "finished": False, "winner": None}
 
     async def test_input_uses_one_current_membership_query_without_caching_or_spoofed_sender(self):

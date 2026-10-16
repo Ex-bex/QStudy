@@ -99,17 +99,84 @@ test("short packet gaps extrapolate by velocity, then freeze within safe field b
   assert.equal(snapshots.sample(140).players[0].x, 354);
   assert.equal(snapshots.sample(180).players[0].x, 358);
   assert.equal(snapshots.sample(10000).players[0].x, 358);
-  const wall = frame(2, FIELD.right - FIELD.playerRadius - 1);
+  const wall = frame(2, FIELD.width - FIELD.playerRadius - 1);
   wall.ball.x = FIELD.right + FIELD.goalDepth - FIELD.ballRadius - 1;
   snapshots.enqueue(wall, 150);
   assert.equal(
     snapshots.sample(250).players[0].x,
-    FIELD.right - FIELD.playerRadius,
+    FIELD.width - FIELD.playerRadius,
   );
   assert.equal(
     snapshots.sample(250).ball.x,
     FIELD.right + FIELD.goalDepth - FIELD.ballRadius,
   );
+});
+
+test("players can move through the touchline runoff instead of snapping to the ball walls", () => {
+  const snapshots = new SnapshotInterpolator({ delayMs: 0 });
+  const value = frame(1);
+  Object.assign(value.players[0], {
+    x: FIELD.left - FIELD.playerRadius - 5,
+    y: FIELD.top - FIELD.playerRadius - 5,
+    vx: -100,
+    vy: -100,
+  });
+  Object.assign(value.players[1], {
+    x: FIELD.right + FIELD.playerRadius + 5,
+    y: FIELD.bottom + FIELD.playerRadius + 5,
+    vx: 100,
+    vy: 100,
+  });
+  snapshots.enqueue(value, 100);
+  const display = snapshots.sample(180);
+  assert.equal(display.players[0].x, value.players[0].x - 8);
+  assert.equal(display.players[0].y, value.players[0].y - 8);
+  assert.equal(display.players[1].x, value.players[1].x + 8);
+  assert.equal(display.players[1].y, value.players[1].y + 8);
+  assert.ok(display.players[0].x < FIELD.left);
+  assert.ok(display.players[0].y < FIELD.top);
+  assert.ok(display.players[1].x > FIELD.right);
+  assert.ok(display.players[1].y > FIELD.bottom);
+});
+
+test("runoff prediction still stops at every outer board edge", () => {
+  const snapshots = new SnapshotInterpolator({ delayMs: 0 });
+  const value = frame(1);
+  Object.assign(value.players[0], {
+    x: FIELD.playerRadius + 1,
+    y: FIELD.playerRadius + 1,
+    vx: -100,
+    vy: -100,
+  });
+  Object.assign(value.players[1], {
+    x: FIELD.width - FIELD.playerRadius - 1,
+    y: FIELD.height - FIELD.playerRadius - 1,
+    vx: 100,
+    vy: 100,
+  });
+  snapshots.enqueue(value, 100);
+  const display = snapshots.sample(10000);
+  assert.equal(display.players[0].x, FIELD.playerRadius);
+  assert.equal(display.players[0].y, FIELD.playerRadius);
+  assert.equal(display.players[1].x, FIELD.width - FIELD.playerRadius);
+  assert.equal(display.players[1].y, FIELD.height - FIELD.playerRadius);
+});
+
+test("kickoff and the goal delay retain smooth movement while the original world runs", () => {
+  for (const phase of ["kickoff", "goal_pause"]) {
+    const snapshots = new SnapshotInterpolator({ delayMs: 0 });
+    const a = frame(1, 300),
+      b = frame(2, 305);
+    a[phase] = phase === "kickoff" ? 3 : 2.5;
+    b[phase] = a[phase] - 0.05;
+    snapshots.enqueue(a, 100);
+    snapshots.enqueue(b, 150);
+    const between = snapshots.sample(125);
+    assert.equal(between.players[0].x, 302.5);
+    assert.equal(between.ball.x, 452.5);
+    assert.equal(between[phase], b[phase]);
+    assert.equal(snapshots.sample(180).players[0].x, 308);
+  }
 });
 
 test("goal/reset/roster/teleport boundaries snap instead of sliding through the field", () => {
@@ -119,7 +186,11 @@ test("goal/reset/roster/teleport boundaries snap instead of sliding through the 
       f.players[0].x = 350;
     },
     (f) => {
-      f.kickoff = 1.2;
+      f.kickoff = 3;
+      f.players[0].x = 350;
+    },
+    (f) => {
+      f.goal_pause = 2.5;
       f.players[0].x = 350;
     },
     (f) => {

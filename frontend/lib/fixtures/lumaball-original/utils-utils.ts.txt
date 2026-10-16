@@ -1,0 +1,15 @@
+import planck from "planck";
+import { Config } from "~/utils/config_game";
+export function normalizeTo(v: planck.Vec2, length: number) {
+	const len = v.length();
+	if (len === 0) return new planck.Vec2(0, 0);
+	return new planck.Vec2((v.x / len) * length, (v.y / len) * length);
+}
+export function get_centralized_pos(
+	spawn: planck.Vec2,
+	index: number,
+	count: number
+): planck.Vec2 {
+	const offset = (index - (count - 1) / 2) * Config.SPAWN_SPACING;
+	return new planck.Vec2(spawn.x, spawn.y + offset);
+}

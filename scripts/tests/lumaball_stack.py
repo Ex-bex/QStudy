@@ -253,7 +253,7 @@ def play_engine_match(node, environment, log, playing, host_ws, peer_ws,
         while not frame["finished"] and time.monotonic() < deadline:
             tick_at = time.monotonic()
             defender = next(player for player in frame["players"] if player["id"] == peer_identity["id"])
-            peer_input = {"x": 0, "y": -1 if defender["y"] > 130 else 0, "kick": False}
+            peer_input = {"x": 0, "y": -1 if defender["y"] > 65 else 0, "kick": False}
             # Input belongs to the peer's actual connection, even if a hostile
             # client supplies somebody else's ID. Physics consumes the relay's
             # authenticated `from` value rather than the command's fake field.
@@ -261,6 +261,8 @@ def play_engine_match(node, environment, log, playing, host_ws, peer_ws,
             received = receive(host_ws, "input")
             require(received["from"] == peer_identity["id"] and received["input"] == peer_input,
                     "Peer movement was not relayed with the authenticated identity")
+            previous_ball = frame["ball"]
+            pending_kick = next(player for player in frame["players"] if player["id"] == host_identity["id"])["kicking"]
             frame = physics.step([
                 {"id": host_identity["id"], "input": {"x": 1, "y": 0, "kick": True}},
                 {"id": received["from"], "input": received["input"]},
@@ -269,8 +271,11 @@ def play_engine_match(node, environment, log, playing, host_ws, peer_ws,
             defender = next(player for player in frame["players"] if player["id"] == peer_identity["id"])
             moved_host |= attacker["x"] > starting[attacker["id"]]["x"] + 100
             moved_peer |= defender["y"] < starting[defender["id"]]["y"] - 100
-            kicked_ball |= (attacker["kicking"] and frame["ball"]["vx"] > 400
-                            and abs(frame["ball"]["x"] - attacker["x"]) < 90)
+            # The original consumes the pending kick immediately on contact;
+            # the accelerated ball, not a held UI state, proves that impulse.
+            kicked_ball |= (pending_kick and not attacker["kicking"]
+                            and frame["ball"]["vx"] - previous_ball["vx"] > 300
+                            and abs(frame["ball"]["x"] - attacker["x"]) < 80)
             send(host_ws, {"type": "frame", "frame": frame})
             delivered = receive(peer_ws, "frame", lambda event: event["frame"]["seq"] == frame["seq"])["frame"]
             require(delivered == frame,
@@ -286,7 +291,8 @@ def play_engine_match(node, environment, log, playing, host_ws, peer_ws,
         require(frame["finished"] and frame["winner"] == "red"
                 and frame["score"] == {"red": playing["score_limit"], "blue": 0},
                 "The actual physics did not finish at the configured goal limit")
-        require(frame["ball"]["x"] > 1139 and 0 < frame["elapsed"] < playing["time_limit"] * 60,
+        require(frame["ball"]["x"] > 720 and 0 < frame["elapsed"]
+                and (playing["time_limit"] == 0 or frame["elapsed"] < playing["time_limit"] * 60),
                 "The winning goal did not cross the goal line before the timer")
         require(delivered_count > 20, "Too few live snapshots reached the other client")
         send(host_ws, {"type": "result", "match_id": playing["match_id"],
@@ -456,10 +462,10 @@ def main():
                         origin=site_url, open_timeout=8, close_timeout=2, max_size=24 * 1024, proxy=None))
                     require(receive(host_ws, "welcome")["identity"]["id"] == host_identity["id"], "WebSocket host identity did not match cookie session")
                     send(host_ws, {"type": "command", "action": "start"})
-                    waiting = receive(host_ws, "error")
-                    require("подключения" in waiting.get("detail", "")
-                            and response_json(host.get("/api/lumaball/rooms/" + room["id"]))["status"] == "lobby",
-                            "The host started while the invited opponent had not connected")
+                    practice = receive(host_ws, "room", lambda value: value["room"]["status"] == "playing")["room"]
+                    require(practice["status"] == "playing", "Original solo practice could not start")
+                    send(host_ws, {"type": "command", "action": "stop"})
+                    receive(host_ws, "room", lambda value: value["room"]["status"] == "lobby")
                     peer_ws = connections.enter_context(connect(ws_root + urlencode({"ticket": peer_ticket, "room": room["id"]}),
                         origin=site_url, open_timeout=8, close_timeout=2, max_size=24 * 1024, proxy=None))
                     require(receive(peer_ws, "welcome")["identity"]["id"] == peer_identity["id"], "WebSocket peer identity did not match cookie session")

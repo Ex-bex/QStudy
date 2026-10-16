@@ -31,7 +31,13 @@ try {
     Write-FixtureFile $old 'original source'
     Write-FixtureFile $database 'PRIVATE_FIXTURE_ACCOUNTS'; Write-FixtureFile $dotenv 'PRIVATE_FIXTURE_SETTINGS'
     $databaseHash = (Get-FileHash -LiteralPath $database).Hash; $dotenvHash = (Get-FileHash -LiteralPath $dotenv).Hash
-    $paths = @('frontend/lib/game-csp.mjs', 'frontend/lib/lumaball/session-queue.ts', 'scripts/launcher/data.py', 'backend/app/services/lumaball_realtime.py')
+    $builder = [IO.File]::ReadAllText((Join-Path $workspace 'scripts/maintenance/Build-QBallFix.py'))
+    $payloadBlock = [regex]::Match($builder, '(?ms)^PAYLOAD = \(\r?\n(?<paths>.*?)^\)')
+    Assert-Fix $payloadBlock.Success 'source updater builder declares an explicit payload'
+    $paths = @([regex]::Matches($payloadBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+    foreach ($required in @('frontend/lib/game-csp.mjs', 'frontend/lib/lumaball/engine.ts', 'frontend/lib/lumaball/room-state.ts', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/components/lumaball/admin-panel.tsx', 'backend/app/lumaball_room_models.py', 'backend/app/routers/lumaball_rooms.py', 'backend/app/services/lumaball_identity.py', 'backend/app/services/lumaball_rooms.py', 'backend/app/services/lumaball_realtime.py')) {
+        Assert-Fix ($paths -ccontains $required) ('complete original physics/runtime dependency included: ' + $required)
+    }
     $entries = @()
     foreach ($relative in $paths) {
         $source = Join-Path $package ('payload/' + $relative)
@@ -40,12 +46,12 @@ try {
     }
     Write-FixManifest $entries
     $plan = Get-QBallFixFiles $fixture $package
-    Assert-Fix ($plan.files.Count -eq 4) 'valid frontend entries and exact launcher/game relay helpers pass SHA256 validation'
-    foreach ($relative in @('backend/.env', 'frontend/.env', 'frontend/lib/../../backend/secret.ts', 'frontend/node_modules/file.ts', 'frontend/.next/file.ts', 'frontend/lib/../secret.ts', 'frontend/lib//alias.ts', 'frontend/lib/escape.db', 'C:/outside.ts', 'scripts/launcher/control.py', 'scripts/launcher/data.py.bak', 'backend/app/config.py', 'backend/app/auth.py', 'backend/app/services/lumaball_realtime.py.bak')) {
+    Assert-Fix ($plan.files.Count -eq $paths.Count) 'all exact builder payload paths pass SHA256 validation, including pinned package files and original physics fixtures'
+    foreach ($relative in @('backend/.env', 'frontend/.env', 'frontend/lib/../../backend/secret.ts', 'frontend/node_modules/file.ts', 'frontend/.next/file.ts', 'frontend/lib/../secret.ts', 'frontend/lib//alias.ts', 'frontend/lib/escape.db', 'C:/outside.ts', 'scripts/launcher/control.py', 'scripts/launcher/data.py.bak', 'backend/app/config.py', 'backend/app/auth.py', 'backend/app/services/lumaball_realtime.py.bak', 'backend/app/services/academic_service.py', 'backend/app/routers/auth.py', 'backend/tests/test_auth.py', 'frontend/lib/unreviewed.ts', 'frontend/package.json.bak', 'frontend/package-lock.json/extra.ts')) {
         Write-FixManifest @(@{ path = $relative; sha256 = ('a' * 64) })
         Assert-FixThrows { Get-QBallFixFiles $fixture $package } ('reject private/generated/traversal path: ' + $relative)
     }
-    Write-FixManifest @($entries[0], @{ path = 'frontend/lib/GAME-csp.mjs'; sha256 = $entries[0].sha256 })
+    Write-FixManifest @($entries[0], @{ path = $entries[0].path; sha256 = $entries[0].sha256 })
     Assert-FixThrows { Get-QBallFixFiles $fixture $package } 'case-insensitive duplicate targets are rejected on Windows'
     Write-FixManifest @(@{ path = $paths[0]; sha256 = ('0' * 64) })
     Assert-FixThrows { Get-QBallFixFiles $fixture $package } 'tampered payload is rejected before any stop or source write'
@@ -97,7 +103,7 @@ try {
     Assert-Fix (Test-Path -LiteralPath (Join-Path $fixture '.local/stop-called.fixture')) 'the owned runtime is stopped through the separate bundled entry'
     Assert-Fix ([IO.File]::ReadAllText((Join-Path $fixture '.local/start-called.fixture')) -ceq 'local') 'explicit local fixture mode is forwarded after releasing launcher.lock'
     $backups = @(Get-ChildItem -LiteralPath (Join-Path $fixture '.local/source-updates') -Directory)
-    Assert-Fix ($backups.Count -eq 1 -and [IO.File]::ReadAllText((Join-Path $backups[0].FullName $paths[0])) -ceq 'original source') 'private backup retains original changed source bytes'
+    Assert-Fix ($backups.Count -eq 1 -and [IO.File]::ReadAllText((Join-Path $backups[0].FullName 'frontend/lib/game-csp.mjs')) -ceq 'original source') 'private backup retains original changed source bytes'
     foreach ($entry in $entries) { Assert-Fix ((Get-FileHash -LiteralPath (Join-Path $fixture $entry.path)).Hash.ToLowerInvariant() -ceq $entry.sha256) 'existing and newly created sources match the manifest' }
     Assert-Fix ((Get-FileHash -LiteralPath $database).Hash -ceq $databaseHash -and (Get-FileHash -LiteralPath $dotenv).Hash -ceq $dotenvHash) 'existing database and private environment remain byte-for-byte unchanged'
     Write-QStudyInstallJson (Join-Path $fixture '.local/managed/status.json') @{ state = 'stopped'; root_owner = $fixture; instance = $state.instance; backend_pid = 987654; frontend_pid = 987654 }

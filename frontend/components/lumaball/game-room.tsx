@@ -95,7 +95,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [score, setScore] = useState({ red: 0, blue: 0 });
-  const [remaining, setRemaining] = useState(300);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [directCount, setDirectCount] = useState(0);
   const [help, setHelp] = useState(false);
   const [roomMenuOpen, setRoomMenuOpen] = useState(true);
@@ -111,6 +111,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const frameRef = useRef<GameFrame | null>(null);
   const snapshotsRef = useRef(new SnapshotInterpolator());
   const inputRef = useRef(zero());
+  const kickSequenceRef = useRef(0);
   const keysRef = useRef(new Set<string>());
   const touchRef = useRef(zero());
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -183,7 +184,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         frameRef.current.kickoff = 0;
         frameRef.current.score = value.score || { red: 0, blue: 0 };
         setScore(value.score || { red: 0, blue: 0 });
-        setRemaining(value.time_limit * 60);
+        setElapsedSeconds(0);
       } else if (value.status === "finished") {
         setScore(value.score);
         {
@@ -207,7 +208,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                 : "blue";
           frameRef.current = preview;
           snapshots.reset();
-          setRemaining(0);
+          setElapsedSeconds(Math.floor(preview.elapsed));
         }
       }
     };
@@ -455,7 +456,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
               ? current
               : frame.score,
           );
-          setRemaining(Math.floor(frame.remaining));
+          setElapsedSeconds(Math.floor(frame.elapsed));
           lastHud = now;
         }
       }
@@ -485,6 +486,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           keys.has("Space") ||
           keys.has("ShiftLeft") ||
           keys.has("ShiftRight"),
+        kick_seq: kickSequenceRef.current,
       });
       const currentRoom = roomRef.current;
       const ownId = identityRef.current?.id;
@@ -526,7 +528,13 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       }
       if (!allowed.has(event.code)) return;
       event.preventDefault();
-      if (pressed && keysRef.current.has(event.code)) return;
+      const kickKey = ["Space", "ShiftLeft", "ShiftRight"].includes(event.code);
+      if (pressed && kickKey)
+        kickSequenceRef.current = Math.max(
+          kickSequenceRef.current + 1,
+          Date.now(),
+        );
+      else if (pressed && keysRef.current.has(event.code)) return;
       if (pressed) keysRef.current.add(event.code);
       else keysRef.current.delete(event.code);
       update();
@@ -616,7 +624,13 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     setStick({ x: 0, y: 0 });
   };
   const kick = (event: PointerEvent<HTMLButtonElement>, active: boolean) => {
-    if (active) event.currentTarget.setPointerCapture(event.pointerId);
+    if (active) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      kickSequenceRef.current = Math.max(
+        kickSequenceRef.current + 1,
+        Date.now(),
+      );
+    }
     touchRef.current.kick = active;
     setKicking(active);
   };
@@ -717,7 +731,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           <h1>{room?.name || "Футбол начинается здесь"}</h1>
           <p>
             {room
-              ? `${room.members.filter((m) => m.connected).length} / ${room.max_players} игроков · до ${room.score_limit} голов · ${room.time_limit} мин`
+              ? `${room.members.filter((m) => m.connected).length} / ${room.max_players} игроков · ${room.score_limit ? `до ${room.score_limit} голов` : "без лимита голов"} · ${room.time_limit ? `${room.time_limit} мин` : "без лимита времени"}`
               : "Готовим поле и подключаем игроков"}
           </p>
         </div>
@@ -788,8 +802,9 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           <strong>Как играть</strong>
           <p>
             WASD или стрелки — движение. Пробел или Shift — удар, когда мяч
-            рядом. На телефоне используйте джойстик и кнопку удара. Забейте
-            сопернику больше голов до окончания времени.
+            рядом. На телефоне используйте джойстик и кнопку удара. Можно
+            тренироваться одному. Нулевые лимиты голов и времени означают игру
+            до остановки создателем комнаты.
           </p>
           <button
             className={styles.iconButton}
@@ -867,7 +882,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                   Красные <b>{score.red}</b>
                 </span>
                 <span className={styles.clock}>
-                  {timeLabel(remaining)}
+                  {timeLabel(elapsedSeconds)}
                   <small>
                     {room ? statusLabels[room.status] : "Подключение"}
                   </small>
@@ -952,8 +967,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                             room?.status !== "paused" &&
                             !readyToStart && (
                               <p>
-                                Дождитесь хотя бы одного подключённого игрока в
-                                каждой команде.
+                                Дождитесь подключения создателя комнаты.
                               </p>
                             )}
                         </>
@@ -1206,7 +1220,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                 room?.status !== "playing" &&
                 room?.status !== "paused" && (
                   <p className={styles.emptyTeam}>
-                    Для старта нужен подключённый игрок в каждой команде.
+                    Для старта дождитесь подключения создателя комнаты.
                   </p>
                 )}
             </section>

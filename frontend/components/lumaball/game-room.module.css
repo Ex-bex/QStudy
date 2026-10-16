@@ -255,7 +255,7 @@
 }
 .pitch {
   position: relative;
-  aspect-ratio: 12/7;
+  aspect-ratio: 2/1;
 }
 .pitch canvas {
   width: 100%;

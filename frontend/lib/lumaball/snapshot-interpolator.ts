@@ -26,6 +26,7 @@ function discontinuity(previous: Snapshot, current: Snapshot): boolean {
     a.score.blue !== b.score.blue ||
     a.finished !== b.finished ||
     b.kickoff > a.kickoff + 0.05 ||
+    (b.goal_pause || 0) > (a.goal_pause || 0) + 0.05 ||
     b.elapsed < a.elapsed - 0.05 ||
     current.at - previous.at > 250 ||
     a.players.length !== b.players.length
@@ -121,7 +122,6 @@ export class SnapshotInterpolator {
     if (
       !playing ||
       result.finished ||
-      result.kickoff > 0 ||
       !Number.isFinite(nowMs)
     )
       return result;
@@ -161,13 +161,13 @@ export class SnapshotInterpolator {
       ...player,
       x: clamp(
         player.x + player.vx * seconds,
-        FIELD.left + FIELD.playerRadius,
-        FIELD.right - FIELD.playerRadius,
+        FIELD.playerRadius,
+        FIELD.width - FIELD.playerRadius,
       ),
       y: clamp(
         player.y + player.vy * seconds,
-        FIELD.top + FIELD.playerRadius,
-        FIELD.bottom - FIELD.playerRadius,
+        FIELD.playerRadius,
+        FIELD.height - FIELD.playerRadius,
       ),
     }));
     result.ball.x = clamp(

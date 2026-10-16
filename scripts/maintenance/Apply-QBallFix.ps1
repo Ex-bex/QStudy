@@ -21,13 +21,63 @@ function Get-QBallFixFiles([string]$Root, [string]$Package) {
     $manifestPath = Resolve-QBallFixPath $Package 'manifest.json'
     $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
     if ($manifest.version -ne 1 -or $manifest.id -cnotmatch '^[a-z0-9][a-z0-9-]{1,70}$' -or $manifest.target_mode -cnotin @('local', 'lan', 'internet')) { throw 'Неизвестный формат пакета исправления.' }
+    # Keep the preserving updater restricted to the exact reviewed QBall source payload.
+    $allowed = @(
+        'frontend/package.json',
+        'frontend/package-lock.json',
+        'frontend/app/api/[...path]/route.ts',
+        'frontend/app/qball/qball.css',
+        'frontend/components/lumaball/brand.tsx',
+        'frontend/components/lumaball/context.tsx',
+        'frontend/components/lumaball/admin-panel.tsx',
+        'frontend/components/lumaball/game-room.module.css',
+        'frontend/components/lumaball/game-room.tsx',
+        'frontend/components/lumaball/lobby.tsx',
+        'frontend/components/lumaball/original-lobby.css',
+        'frontend/components/lumaball/shell.tsx',
+        'frontend/lib/lumaball/engine.ts',
+        'frontend/lib/lumaball/room-state.ts',
+        'frontend/lib/lumaball/render.ts',
+        'frontend/lib/lumaball/snapshot-interpolator.ts',
+        'frontend/lib/lumaball-snapshots.test.mjs',
+        'frontend/lib/lumaball-render.test.mjs',
+        'frontend/lib/lumaball.test.mjs',
+        'frontend/lib/lumaball-parity.test.mjs',
+        'frontend/lib/lumaball-room-state.test.mjs',
+        'frontend/lib/fixtures/lumaball-original/provenance.json',
+        'frontend/lib/fixtures/lumaball-original/utils-game.ts.txt',
+        'frontend/lib/fixtures/lumaball-original/utils-player.ts.txt',
+        'frontend/lib/fixtures/lumaball-original/utils-map.ts.txt',
+        'frontend/lib/fixtures/lumaball-original/utils-config_game.ts.txt',
+        'frontend/lib/fixtures/lumaball-original/utils-timer.ts.txt',
+        'frontend/lib/fixtures/lumaball-original/utils-utils.ts.txt',
+        'frontend/lib/fixtures/lumaball-original/types-player.ts.txt',
+        'frontend/lib/game-csp.mjs',
+        'frontend/lib/game-csp.test.mjs',
+        'frontend/lib/lumaball/session-queue.ts',
+        'frontend/lib/lumaball-session.test.mjs',
+        'frontend/lib/native-server.integration.mjs',
+        'frontend/server.mjs',
+        'scripts/launcher/data.py',
+        'scripts/tests/qball_physics_fixture.mjs',
+        'scripts/tests/lumaball_stack.py',
+        'backend/app/lumaball_room_models.py',
+        'backend/app/routers/lumaball_rooms.py',
+        'backend/app/services/lumaball_identity.py',
+        'backend/app/services/lumaball_rooms.py',
+        'backend/app/services/lumaball_realtime.py',
+        'backend/tests/test_lumaball_identity.py',
+        'backend/tests/test_lumaball_realtime.py',
+        'backend/tests/test_lumaball_relay_performance.py',
+        'backend/tests/test_lumaball_rooms.py'
+    )
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $files = @(); $size = 0
     foreach ($entry in @($manifest.files)) {
         $relative = [string]$entry.path
         if ($relative.Contains('\') -or $relative.Contains('//') -or $relative -match '(^|/)(\.|\.env[^/]*|\.next|node_modules|uploads|\.git|\.local)(/|$)' -or
-            $relative -cnotmatch '^(frontend/(server\.mjs|next\.config\.ts|(app|components|lib|types)/[A-Za-z0-9_./\[\]()-]+\.(ts|tsx|mjs|css)|public/[A-Za-z0-9_./-]+\.(png|svg|ico|webp))|scripts/launcher/data\.py|backend/app/services/lumaball_realtime\.py)$' -or
-            [string]$entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not $seen.Add($relative)) { throw 'Пакет содержит запрещённый или повторный путь. Допускаются только перечисленные исходники интерфейса, игрового канала и записи статуса запуска.' }
+            $allowed -cnotcontains $relative -or
+            [string]$entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not $seen.Add($relative)) { throw 'Пакет содержит запрещённый или повторный путь. Допускаются только проверенные исходники QBall, закреплённые зависимости и тесты оригинальной физики.' }
         $source = Resolve-QBallFixPath $Package ('payload/' + $relative)
         $target = Resolve-QBallFixPath $Root $relative
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'В пакете отсутствует исходник.' }

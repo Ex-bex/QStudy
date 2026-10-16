@@ -73,10 +73,12 @@ class GameSettings(BaseModel):
     guests_enabled: bool = True
     guest_create_rooms: bool = True
     max_rooms: int = Field(default=20, ge=1, le=100)
-    max_players: int = Field(default=8, ge=2, le=16)
-    default_players: int = Field(default=4, ge=2, le=16)
-    score_limit: int = Field(default=5, ge=1, le=20)
-    time_limit: int = Field(default=5, ge=1, le=30)
+    max_players: int = Field(default=20, ge=2, le=20)
+    default_players: int = Field(default=2, ge=2, le=20)
+    # Original LumaBall counts score/time until the host stops the game.
+    # Saved positive administrator limits remain optional match rules.
+    score_limit: int = Field(default=0, ge=0, le=20)
+    time_limit: int = Field(default=0, ge=0, le=30)
     chat_enabled: bool = True
     ice_servers: list[IceServer] = Field(default_factory=lambda: [IceServer(urls=["stun:stun.l.google.com:19302"])], max_length=5)
 

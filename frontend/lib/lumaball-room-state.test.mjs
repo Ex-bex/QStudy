@@ -42,16 +42,25 @@ test("invitations use the configured public origin instead of the host's localho
   );
 });
 
-test("reserved or spectator seats cannot satisfy both connected teams for kickoff", () => {
+test("original kickoff supports solo practice and a connected spectator host", () => {
   assert.equal(teamsReady(roster), true);
   assert.equal(
     teamsReady([roster[0], { ...roster[1], connected: false }]),
-    false,
+    true,
   );
   assert.equal(
     teamsReady([roster[0], { ...roster[1], team: "spectator" }]),
+    true,
+  );
+  assert.equal(
+    teamsReady([{ ...roster[0], is_host: true, team: "spectator" }]),
+    true,
+  );
+  assert.equal(
+    teamsReady(roster.map((member) => ({ ...member, connected: false }))),
     false,
   );
+  assert.equal(teamsReady([]), false);
 });
 
 test("finished results survive congestion, retry before acknowledgement and reset for rematches", () => {

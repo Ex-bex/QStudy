@@ -21,7 +21,10 @@ const compiled = ts.transpileModule(source, {
     module: ts.ModuleKind.ES2022,
   },
   fileName: fileURLToPath(new URL("lib/lumaball/engine.ts", frontend)),
-}).outputText;
+}).outputText.replace(
+  /from (["'])planck\1/g,
+  `from "${new URL("node_modules/planck/dist/planck.mjs", frontend).href}"`,
+);
 const { FootballEngine, validFrame } = await import(
   "data:text/javascript;base64," + Buffer.from(compiled).toString("base64")
 );
