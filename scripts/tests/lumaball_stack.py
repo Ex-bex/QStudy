@@ -207,6 +207,8 @@ class BrowserPhysics:
         self.reader.start()
         self.expected_source = hashlib.sha256(
             (ROOT / "frontend" / "lib" / "lumaball" / "engine.ts").read_bytes()).hexdigest()
+        self.expected_maps_source = hashlib.sha256(
+            (ROOT / "frontend" / "lib" / "lumaball" / "maps.ts").read_bytes()).hexdigest()
         try:
             self.initial = self.request({"action": "start", "room": room})
         except BaseException:
@@ -222,7 +224,8 @@ class BrowserPhysics:
             raise StackFailure("The actual browser physics helper did not answer") from None
         require(line is not None, "The actual browser physics helper exited")
         value = json.loads(line)
-        require("error" not in value and value.get("source_sha256") == self.expected_source,
+        require("error" not in value and value.get("source_sha256") == self.expected_source
+                and value.get("maps_source_sha256") == self.expected_maps_source,
                 "Physics fixture did not use the current shipped browser engine")
         return value["frame"]
 
@@ -303,6 +306,81 @@ def play_engine_match(node, environment, log, playing, host_ws, peer_ws,
         return frame, delivered_count
     finally:
         physics.close()
+
+
+def exercise_room_maps(node, environment, log, host, peer, host_ws, peer_ws,
+                       room, classic_frame, host_identity, peer_identity):
+    """Use the public host editor, then relay the real engine on both maps."""
+    endpoint = "/api/lumaball/rooms/" + room["id"]
+    require(peer.patch(endpoint, json={"map_id": "hockey"}).status_code == 403,
+            "An invited guest changed somebody else's room map")
+    total_snapshots = 0
+    for map_id, width, height in (("hockey", 18, 9), ("arena", 14, 8)):
+        configured = response_json(host.patch(endpoint, json={
+            "map_id": map_id, "map_width": width, "map_height": height,
+            "score_limit": 0, "time_limit": 0,
+        }))
+        require(configured["map_id"] == map_id
+                and (configured["map_width"], configured["map_height"]) == (width, height),
+                "The host editor did not save the selected map dimensions")
+        for connection in (host_ws, peer_ws):
+            changed = receive(connection, "room", lambda event: event["room"].get("map_id") == map_id)["room"]
+            require((changed["map_width"], changed["map_height"]) == (width, height),
+                    "Both connected guests did not receive the map configuration")
+        detail = response_json(peer.get(endpoint))
+        listing = response_json(peer.get("/api/lumaball/rooms"))
+        listed = next((item for item in listing["items"] if item["id"] == room["id"]), {})
+        require(detail["map_id"] == listed.get("map_id") == map_id
+                and detail["map_width"] == listed.get("map_width") == width
+                and detail["map_height"] == listed.get("map_height") == height,
+                "HTTP room details and room listing disagreed with the map broadcast")
+        send(host_ws, {"type": "command", "action": "start"})
+        playing = receive(host_ws, "room", lambda event: event["room"]["status"] == "playing")["room"]
+        receive(peer_ws, "room", lambda event: event["room"]["status"] == "playing")
+        require(host.patch(endpoint, json={"map_width": 20}).status_code == 409,
+                "The host changed field geometry during an active match")
+        physics = BrowserPhysics(node, playing, environment, log)
+        try:
+            frame = physics.initial
+            require((frame.get("map_id"), frame["width"], frame["height"]) == (map_id, width * 80, height * 80),
+                    "The actual engine ignored the room map or dimensions")
+            # Malformed client probes never become valid engine frames. One
+            # stale match and two geometry/map mismatches must be rejected,
+            # followed by valid traffic on the same unaffected connections.
+            for invalid in (classic_frame, {**frame, "map_id": "classic"}, {**frame, "width": 800}):
+                send(host_ws, {"type": "frame", "frame": invalid})
+                receive(host_ws, "error")
+            starting = {player["id"]: dict(player) for player in frame["players"]}
+            for tick in range(30):
+                tick_at = time.monotonic()
+                peer_input = {"x": 0, "y": -1, "kick": False}
+                send(peer_ws, {"type": "input", "input": peer_input})
+                received = receive(host_ws, "input")
+                require(received["from"] == peer_identity["id"],
+                        "The guest's control was lost after changing the map")
+                frame = physics.step([
+                    {"id": host_identity["id"], "input": {"x": 1, "y": 0, "kick": tick == 0, "kick_seq": 1}},
+                    {"id": received["from"], "input": received["input"]},
+                ])
+                send(host_ws, {"type": "frame", "frame": frame})
+                delivered = receive(peer_ws, "frame", lambda event: event["frame"]["seq"] == frame["seq"])["frame"]
+                require(delivered == frame, "A dynamic map frame changed or disappeared through the production relay")
+                total_snapshots += 1
+                delay = 0.05 - (time.monotonic() - tick_at)
+                if delay > 0:
+                    time.sleep(delay)
+            players = {player["id"]: player for player in frame["players"]}
+            require(players[host_identity["id"]]["x"] > starting[host_identity["id"]]["x"] + 10
+                    and players[peer_identity["id"]]["y"] < starting[peer_identity["id"]]["y"] - 10,
+                    "Both players did not move on the selected map")
+            require(not frame["finished"] and frame["score"] == {"red": 0, "blue": 0},
+                    "An unlimited map practice match stopped or invented a score")
+        finally:
+            physics.close()
+        send(host_ws, {"type": "command", "action": "stop"})
+        for connection in (host_ws, peer_ws):
+            receive(connection, "room", lambda event: event["room"]["status"] == "lobby")
+    return total_snapshots
 
 
 def main():
@@ -489,6 +567,9 @@ def main():
                     require(history["total"] == 1 and history["items"][0]["id"] == playing["match_id"]
                             and history["items"][0]["score"] == final_frame["score"],
                             "The actual engine's finished result was not stored in SQLite")
+                    stage = "switching maps through the host editor and relaying real hockey and arena physics"
+                    map_snapshots = exercise_room_maps(node, environment, physics_log, host, peer, host_ws, peer_ws,
+                        room, final_frame, host_identity, peer_identity)
                     host_ws.close()
                     require(receive(peer_ws, "closed")["reason"] == "host_left", "Creator departure did not notify the peer")
 
@@ -508,6 +589,8 @@ def main():
                 print("PASS: production frontend/BFF, two HttpOnly guests, direct invitation and shared room list, "
                       "password checks, real shipped FootballEngine movement/kick/winning goal, "
                       f"{delivered_count} exact snapshots over the same-port WebSocket relay, "
+                      f"host map editing, live hockey/arena configuration and {map_snapshots} dynamic snapshots, "
+                      "non-owner/active-edit denial and stale-map frame rejection, "
                       "published final score and SQLite/account/settings persistence after restart. "
                       "This fixture verifies the server relay and engine; it does not emulate browser rendering or WebRTC ICE.")
                 return 0

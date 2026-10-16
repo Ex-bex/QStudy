@@ -15,6 +15,9 @@ const require = createRequire(new URL("package.json", frontend));
 const ts = require("typescript");
 const source = await readFile(new URL("lib/lumaball/engine.ts", frontend), "utf8");
 const sourceSha256 = createHash("sha256").update(source).digest("hex");
+const mapsSourceSha256 = createHash("sha256")
+  .update(await readFile(new URL("lib/lumaball/maps.ts", frontend)))
+  .digest("hex");
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     target: ts.ScriptTarget.ES2022,
@@ -24,6 +27,9 @@ const compiled = ts.transpileModule(source, {
 }).outputText.replace(
   /from (["'])planck\1/g,
   `from "${new URL("node_modules/planck/dist/planck.mjs", frontend).href}"`,
+).replace(
+  /from (["'])\.\/maps\.ts\1/g,
+  `from "${new URL("lib/lumaball/maps.ts", frontend).href}"`,
 );
 const { FootballEngine, validFrame } = await import(
   "data:text/javascript;base64," + Buffer.from(compiled).toString("base64")
@@ -41,7 +47,7 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
       if (!room || room.status !== "playing" || !room.match_id)
         throw new Error("invalid-room");
       members = new Set(room.members.map((member) => member.id));
-      engine = new FootballEngine(room.members, room.score_limit, room.time_limit);
+      engine = new FootballEngine(room.members, room.score_limit, room.time_limit, room);
       matchId = room.match_id;
     } else if (value.action === "step" && engine) {
       if (!Array.isArray(value.inputs) || value.inputs.length > 16 ||
@@ -56,7 +62,7 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
     const frame = engine.frame();
     frame.match_id = matchId;
     if (!validFrame(frame)) throw new Error("invalid-engine-frame");
-    process.stdout.write(JSON.stringify({ source_sha256: sourceSha256, frame }) + "\n");
+    process.stdout.write(JSON.stringify({ source_sha256: sourceSha256, maps_source_sha256: mapsSourceSha256, frame }) + "\n");
   } catch {
     // Do not echo arbitrary input or module diagnostics to shared CI output.
     process.stdout.write('{"error":"physics-fixture-command-failed"}\n');

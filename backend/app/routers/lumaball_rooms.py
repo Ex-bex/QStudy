@@ -5,13 +5,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.auth import hash_password, require_admin
+from app.auth import require_admin
 from app.database import get_db
 from app.lumaball_room_models import LumaBallChatMessage, LumaBallMatch, LumaBallRoom
 from app.security import rate_limit
 from app.services.audit import record_audit
-from app.services.lumaball_identity import get_config, resolve_identity
-from app.lumaball_models import utcnow
+from app.services.lumaball_identity import resolve_identity
 from app.services import lumaball_rooms as rooms
 
 router = APIRouter(tags=["lumaball"])
@@ -31,6 +30,9 @@ class RoomCreate(BaseModel):
     max_players: int | None = Field(default=None, ge=2, le=20)
     score_limit: int | None = Field(default=None, ge=0, le=20)
     time_limit: int | None = Field(default=None, ge=0, le=30)
+    map_id: Literal["classic", "hockey", "arena"] = "classic"
+    map_width: int = Field(default=10, ge=10, le=30)
+    map_height: int = Field(default=5, ge=5, le=15)
 
 
 class RoomJoin(BaseModel):
@@ -45,6 +47,9 @@ class RoomUpdate(BaseModel):
     max_players: int | None = Field(default=None, ge=2, le=20)
     score_limit: int | None = Field(default=None, ge=0, le=20)
     time_limit: int | None = Field(default=None, ge=0, le=30)
+    map_id: Literal["classic", "hockey", "arena"] | None = None
+    map_width: int | None = Field(default=None, ge=10, le=30)
+    map_height: int | None = Field(default=None, ge=5, le=15)
 
 
 class RoomCommand(BaseModel):
@@ -87,6 +92,15 @@ def room_detail(room_id: str, request: Request, db: Session = Depends(get_db)):
     room = rooms.room_by_id(db, room_id)
     if not identity.is_admin and rooms.member(db, room_id, identity.profile.id) is None:
         return {**rooms.public_room(db, room, full=False), "members": [], "chat": [], "is_member": False}
+    return rooms.public_room(db, room, identity.profile.id)
+
+
+@router.patch("/lumaball/rooms/{room_id}")
+async def host_update_room(room_id: str, data: RoomUpdate, request: Request, db: Session = Depends(get_db)):
+    identity = resolve_identity(request, db)
+    rate_limit("lumaball-room-edit:" + identity.profile.id, 20, 60)
+    room = rooms.update_room(db, room_id, identity, data.model_dump(exclude_unset=True))
+    await _hub().publish_room(room.id)
     return rooms.public_room(db, room, identity.profile.id)
 
 
@@ -143,29 +157,9 @@ def admin_rooms(q: str = Query(default="", max_length=80), limit: int = Query(de
 
 
 @router.patch("/admin/lumaball/rooms/{room_id}")
-async def update_room(room_id: str, data: RoomUpdate, db: Session = Depends(get_db), admin=Depends(require_admin)):
-    room = rooms.room_by_id(db, room_id)
-    values = data.model_dump(exclude_unset=True)
-    if not values or any(value is None for value in values.values()):
-        raise HTTPException(422, "Укажите изменяемые поля без пустых значений")
-    if room.status in ("playing", "paused") and set(values) - {"name"}:
-        raise HTTPException(409, "Сначала остановите матч, чтобы изменить его лимиты или пароль")
-    if "max_players" in values:
-        if values["max_players"] > get_config(db)["max_players"]:
-            raise HTTPException(422, "Количество игроков превышает предел в настройках LumaBall")
-        if values["max_players"] < len(rooms.active_members(db, room.id)):
-            raise HTTPException(409, "В комнате больше игроков, чем указано в новом лимите")
-    for key, value in values.items():
-        if key == "name":
-            room.name = rooms.clean_text(value, 80)
-        elif key == "password":
-            password = rooms.clean_text(value, 64, empty=True)
-            room.password_hash = hash_password(password) if password else ""
-        else:
-            setattr(room, key, value)
-    room.updated_at = utcnow()
-    record_audit(db, admin, "lumaball.room.update", "lumaball_room", room.id, fields=values.keys())
-    db.commit()
+async def update_room(room_id: str, data: RoomUpdate, request: Request, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    identity = resolve_identity(request, db)
+    room = rooms.update_room(db, room_id, identity, data.model_dump(exclude_unset=True))
     await _hub().publish_room(room.id)
     return rooms.public_room(db, room)
 

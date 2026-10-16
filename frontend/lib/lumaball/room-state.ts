@@ -1,9 +1,47 @@
-import type { GameFrame, Member } from "./engine";
+import type { GameFrame, Input, Member } from "./engine";
 import type { Room } from "./types";
 
 /** Original rooms also support solo practice and a host watching the field. */
 export function teamsReady(members: Member[]): boolean {
   return members.some((member) => member.connected);
+}
+
+export function frameMatchesRoom(frame: GameFrame, room: Room): boolean {
+  return (
+    (frame.map_id || "classic") === (room.map_id || "classic") &&
+    frame.width === (room.map_width ?? 10) * 80 &&
+    frame.height === (room.map_height ?? 5) * 80
+  );
+}
+
+/** Immediate key edges, bounded pointer traffic, and refreshes before the input TTL. */
+export class InputDelivery {
+  private at = -Infinity;
+  private last: Input | null = null;
+
+  publish(
+    input: Input,
+    now: number,
+    send: (input: Input) => boolean,
+    immediate = false,
+  ) {
+    const same =
+      this.last &&
+      this.last.x === input.x &&
+      this.last.y === input.y &&
+      this.last.kick === input.kick &&
+      this.last.kick_seq === input.kick_seq;
+    if (
+      !Number.isFinite(now) ||
+      (same && now - this.at < 150) ||
+      (!immediate && now - this.at < 1000 / 30)
+    )
+      return;
+    if (send(input)) {
+      this.at = now;
+      this.last = { ...input };
+    }
+  }
 }
 
 /** Keep room passwords and session credentials out of invitations. */

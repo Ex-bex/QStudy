@@ -18,7 +18,7 @@ from app.services import lumaball_realtime
 
 
 def initialize_database():
-    """Idempotent, additive upgrade of existing SQLite installations."""
+    """Idempotent, additive upgrade of existing installations."""
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         columns = {
@@ -31,7 +31,9 @@ def initialize_database():
             "flashcards": {"source_context_json": "TEXT DEFAULT '{}'"},
             "lectures": {"source_context_json": "TEXT DEFAULT '{}'"},
             "chat_messages": {"source_context_json": "TEXT DEFAULT '{}'"},
-            "lumaball_rooms": {"match_started_at": "DATETIME"},
+            "lumaball_rooms": {"match_started_at": "DATETIME" if engine.dialect.name == "sqlite" else "TIMESTAMP",
+                               "map_id": "VARCHAR(20) NOT NULL DEFAULT 'classic'",
+                               "map_width": "INTEGER NOT NULL DEFAULT 10", "map_height": "INTEGER NOT NULL DEFAULT 5"},
             "syllabus_documents": {"source_restricted": "BOOLEAN NOT NULL DEFAULT FALSE", "source_sha256": "VARCHAR(64) DEFAULT ''"},
             "student_groups": {"program": "VARCHAR(300) DEFAULT ''", "study_year": "INTEGER", "semester": "INTEGER", "warnings_json": "TEXT DEFAULT '[]'"},
             "schedule_entries": {"start_times_json": "TEXT DEFAULT '[]'", "teacher": "VARCHAR(200) DEFAULT ''", "notes": "TEXT DEFAULT ''",

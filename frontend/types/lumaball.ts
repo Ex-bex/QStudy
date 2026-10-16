@@ -1,3 +1,5 @@
+import type { MapId } from "@/lib/lumaball/maps";
+
 export type LumaConfig = {
   enabled: boolean;
   title: string;
@@ -42,6 +44,9 @@ export type LumaRoom = {
   locked: boolean;
   score_limit: number;
   time_limit: number;
+  map_id?: MapId;
+  map_width?: number;
+  map_height?: number;
 };
 
 export type LumaPlayer = {

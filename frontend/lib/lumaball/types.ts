@@ -1,4 +1,5 @@
 import type { Member, Team } from "./engine";
+import type { MapId } from "./maps";
 export type Identity = {
   id: string;
   name: string;
@@ -13,6 +14,9 @@ export type Room = {
   max_players: number;
   score_limit: number;
   time_limit: number;
+  map_id?: MapId;
+  map_width?: number;
+  map_height?: number;
   locked: boolean;
   members: Member[];
   score: { red: number; blue: number };

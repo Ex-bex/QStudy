@@ -11,7 +11,7 @@ os.environ.setdefault("SECRET_KEY", "test-only-qstudy-secret-key-32-characters-l
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
@@ -116,6 +116,95 @@ class LumaBallRoomTests(unittest.TestCase):
             self.assertEqual(response.status_code, 422, response.text)
         self.client.patch("/api/admin/lumaball/settings", headers=self.admin_headers, json={"max_players": 4})
         self.assertEqual(self.client.post("/api/lumaball/rooms", headers=headers, json={"name": "Поле", "max_players": 5}).status_code, 422)
+
+    def test_map_presets_and_sizes_are_persisted_and_listed_with_legacy_defaults(self):
+        headers, _ = self.guest()
+        room = self.create(headers)
+        self.assertEqual((room["map_id"], room["map_width"], room["map_height"]), ("classic", 10, 5))
+        for map_id in ("hockey", "arena"):
+            headers, _ = self.guest()
+            room = self.create(headers, map_id=map_id, map_width=30, map_height=15)
+            with self.sessions() as db:
+                saved = db.get(LumaBallRoom, room["id"])
+                self.assertEqual((saved.map_id, saved.map_width, saved.map_height), (map_id, 30, 15))
+            listed = next(item for item in self.client.get("/api/lumaball/rooms").json()["items"] if item["id"] == room["id"])
+            self.assertEqual((listed["map_id"], listed["map_width"], listed["map_height"]), (map_id, 30, 15))
+
+    def test_invalid_map_settings_are_rejected_before_room_creation(self):
+        headers, _ = self.guest()
+        for changes in ({"map_id": "custom"}, {"map_id": None}, {"map_width": 9}, {"map_width": 31},
+                        {"map_width": "10"}, {"map_width": True}, {"map_height": 4}, {"map_height": 16},
+                        {"map_height": 5.5}, {"map_height": None}):
+            response = self.client.post("/api/lumaball/rooms", headers=headers, json={"name": "Поле", **changes})
+            self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.client.get("/api/lumaball/rooms").json()["total"], 0)
+
+    def test_guest_host_can_edit_own_map_and_rules_and_changes_are_published(self):
+        headers, _ = self.guest()
+        room = self.create(headers, password="old-secret")
+        url = "/api/lumaball/rooms/" + room["id"]
+        response = self.client.patch(url, headers=headers, json={"name": "Хоккей", "password": "", "map_id": "hockey",
+            "map_width": 18, "map_height": 9, "max_players": 6, "score_limit": 3, "time_limit": 10})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["is_member"])
+        self.assertEqual((response.json()["map_id"], response.json()["map_width"], response.json()["map_height"]), ("hockey", 18, 9))
+        self.assertFalse(response.json()["locked"])
+        self.hub.publish_room.assert_awaited_with(room["id"])
+        with self.sessions() as db:
+            self.assertEqual(db.get(LumaBallRoom, room["id"]).map_id, "hockey")
+            self.assertEqual(db.query(AuditLog).count(), 0)
+
+    def test_nonhost_cannot_edit_maps_and_host_cannot_change_active_map(self):
+        room, host_headers, _, other_headers, _ = self.connected_room()
+        url = "/api/lumaball/rooms/" + room["id"]
+        self.assertEqual(self.client.patch(url, json={"map_id": "arena"}).status_code, 401)
+        self.assertEqual(self.client.patch(url, headers=other_headers, json={"map_id": "arena"}).status_code, 403)
+        self.assertEqual(self.client.patch(url, headers=self.student_headers, json={"map_id": "arena"}).status_code, 403)
+        self.assertEqual(self.command(room, "start").status_code, 200)
+        for headers in (host_headers, self.admin_headers):
+            for values in ({"map_id": "hockey"}, {"map_width": 20}, {"map_height": 10}, {"score_limit": 2}):
+                self.assertEqual(self.client.patch(url, headers=headers, json=values).status_code, 409)
+        self.assertEqual(self.command(room, "pause").status_code, 200)
+        self.assertEqual(self.client.patch(url, headers=host_headers, json={"map_id": "arena"}).status_code, 409)
+        self.assertEqual(self.command(room, "stop").status_code, 200)
+        self.assertEqual(self.client.patch(url, headers=host_headers, json={"map_id": "arena"}).status_code, 200)
+
+    def test_admin_and_signed_in_host_share_map_validation_and_safe_audit(self):
+        room = self.create(self.student_headers)
+        url = "/api/lumaball/rooms/" + room["id"]
+        self.assertEqual(self.client.patch(url, headers=self.student_headers, json={"map_id": "hockey", "password": "private-room-secret"}).status_code, 200)
+        admin_url = "/api/admin/lumaball/rooms/" + room["id"]
+        self.assertEqual(self.client.patch(admin_url, headers=self.admin_headers, json={"map_id": "arena", "map_width": 30, "map_height": 15}).status_code, 200)
+        for values in ({"map_id": "forged"}, {"map_width": 9}, {"map_height": None}, {"host_id": "a" * 32}):
+            self.assertEqual(self.client.patch(admin_url, headers=self.admin_headers, json=values).status_code, 422)
+        with self.sessions() as db:
+            events = db.query(AuditLog).filter_by(action="lumaball.room.update").order_by(AuditLog.id).all()
+            self.assertEqual([event.actor_id for event in events], [self.student_id, self.admin_id])
+            self.assertNotIn("private-room-secret", "".join(event.fields_json + event.metadata_json for event in events))
+            self.assertNotIn("password", events[0].fields_json)
+
+    def test_additive_map_schema_upgrade_preserves_existing_room_and_accounts(self):
+        from app import main
+        headers, _ = self.guest()
+        room = self.create(headers, password="legacy-secret")
+        with self.sessions() as db:
+            before_hash = db.get(LumaBallRoom, room["id"]).password_hash
+            profiles_before = db.query(LumaBallProfile).count()
+        with self.engine.begin() as connection:
+            for name in ("map_id", "map_width", "map_height"):
+                connection.execute(text('ALTER TABLE lumaball_rooms DROP COLUMN "' + name + '"'))
+        with patch.object(main, "engine", self.engine), patch.object(main, "SessionLocal", self.sessions), \
+                patch("app.services.syllabus.seed_academic_defaults"), patch("app.services.reference_curriculum.seed_sourced_curriculum"), \
+                patch("app.services.reference_timetable.seed_sourced_timetable"), patch("app.services.developers.seed_developer_departments"):
+            main.initialize_database()
+            main.initialize_database()
+        with self.sessions() as db:
+            saved = db.get(LumaBallRoom, room["id"])
+            self.assertEqual((saved.map_id, saved.map_width, saved.map_height), ("classic", 10, 5))
+            self.assertEqual(saved.password_hash, before_hash)
+            self.assertEqual(db.query(LumaBallProfile).count(), profiles_before)
+            self.assertEqual(db.query(User).count(), 2)
+        self.assertTrue({"map_id", "map_width", "map_height"} <= {column["name"] for column in inspect(self.engine).get_columns("lumaball_rooms")})
 
     def test_guest_creation_and_max_room_limits_are_applied_by_server(self):
         first, _ = self.guest(); second, _ = self.guest()

@@ -1,5 +1,5 @@
 import {
-  FIELD,
+  getField,
   validFrame,
   type Disc,
   type GameFrame,
@@ -22,6 +22,9 @@ function discontinuity(previous: Snapshot, current: Snapshot): boolean {
   const b = current.frame;
   if (
     a.match_id !== b.match_id ||
+    (a.map_id || "classic") !== (b.map_id || "classic") ||
+    a.width !== b.width ||
+    a.height !== b.height ||
     a.score.red !== b.score.red ||
     a.score.blue !== b.score.blue ||
     a.finished !== b.finished ||
@@ -43,14 +46,34 @@ function discontinuity(previous: Snapshot, current: Snapshot): boolean {
         !before ||
         before.team !== player.team ||
         Math.hypot(player.x - before.x, player.y - before.y) >
-          Math.max(80, 400 * seconds + 40)
+          Math.max(
+            80,
+            400 * seconds + 40,
+            Math.max(
+              Math.hypot(before.vx, before.vy),
+              Math.hypot(player.vx, player.vy),
+            ) *
+              seconds *
+              1.35 +
+              40,
+          )
       );
     })
   )
     return true;
   return (
     Math.hypot(b.ball.x - a.ball.x, b.ball.y - a.ball.y) >
-    Math.max(180, 1000 * seconds + 70)
+    Math.max(
+      180,
+      1000 * seconds + 70,
+      Math.max(
+        Math.hypot(a.ball.vx, a.ball.vy),
+        Math.hypot(b.ball.vx, b.ball.vy),
+      ) *
+        seconds *
+        1.35 +
+        70,
+    )
   );
 }
 
@@ -108,7 +131,7 @@ export class SnapshotInterpolator {
     };
     if (previous && discontinuity(previous, snapshot)) this.snapshots = [];
     this.snapshots.push(snapshot);
-    // Twelve 20 Hz packets are ample for a short interpolation delay. Do not
+    // Twelve 20–30 Hz packets are ample for a short interpolation delay. Do not
     // retain a whole match, even when render sampling pauses in a hidden tab.
     if (this.snapshots.length > 12) this.snapshots.shift();
     return true;
@@ -119,12 +142,7 @@ export class SnapshotInterpolator {
     const latest = this.snapshots.at(-1);
     if (!latest) return null;
     const result = copy(latest.frame);
-    if (
-      !playing ||
-      result.finished ||
-      !Number.isFinite(nowMs)
-    )
-      return result;
+    if (!playing || result.finished || !Number.isFinite(nowMs)) return result;
     const at = nowMs - this.delayMs;
     const first = this.snapshots[0];
     if (at <= first.at) {
@@ -156,24 +174,25 @@ export class SnapshotInterpolator {
       result.ball = blend(before.frame.ball, next.frame.ball, amount);
       return result;
     }
+    const FIELD = getField(latest.frame);
     const seconds = clamp(at - latest.at, 0, this.maxExtrapolationMs) / 1000;
     result.players = result.players.map((player): GamePlayer => ({
       ...player,
       x: clamp(
         player.x + player.vx * seconds,
-        FIELD.playerRadius,
-        FIELD.width - FIELD.playerRadius,
+        (FIELD.hasGoals ? 0 : FIELD.left) + FIELD.playerRadius,
+        (FIELD.hasGoals ? FIELD.width : FIELD.right) - FIELD.playerRadius,
       ),
       y: clamp(
         player.y + player.vy * seconds,
-        FIELD.playerRadius,
-        FIELD.height - FIELD.playerRadius,
+        (FIELD.hasGoals ? 0 : FIELD.top) + FIELD.playerRadius,
+        (FIELD.hasGoals ? FIELD.height : FIELD.bottom) - FIELD.playerRadius,
       ),
     }));
     result.ball.x = clamp(
       result.ball.x + result.ball.vx * seconds,
-      FIELD.left - FIELD.goalDepth + FIELD.ballRadius,
-      FIELD.right + FIELD.goalDepth - FIELD.ballRadius,
+      FIELD.left - (FIELD.hasGoals ? FIELD.goalDepth : 0) + FIELD.ballRadius,
+      FIELD.right + (FIELD.hasGoals ? FIELD.goalDepth : 0) - FIELD.ballRadius,
     );
     result.ball.y = clamp(
       result.ball.y + result.ball.vy * seconds,

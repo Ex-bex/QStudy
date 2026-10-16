@@ -44,6 +44,8 @@ import { SnapshotInterpolator } from "@/lib/lumaball/snapshot-interpolator";
 import { requestGameSession } from "@/lib/lumaball/session-queue";
 import {
   MatchResultDelivery,
+  InputDelivery,
+  frameMatchesRoom,
   roomInvitationUrl,
   teamsReady,
 } from "@/lib/lumaball/room-state";
@@ -58,6 +60,8 @@ import {
 } from "@/lib/lumaball/types";
 import styles from "./game-room.module.css";
 import { useQBall } from "./context";
+import { RoomSettings } from "./room-settings";
+import { mapSummary } from "./map-settings";
 
 type RoomView = Room & { is_member?: boolean };
 const zero = (): Input => ({ x: 0, y: 0, kick: false });
@@ -111,6 +115,10 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const frameRef = useRef<GameFrame | null>(null);
   const snapshotsRef = useRef(new SnapshotInterpolator());
   const inputRef = useRef(zero());
+  const inputUpdateRef = useRef<((immediate?: boolean) => void) | null>(null);
+  const releaseInputRef = useRef<(() => void) | null>(null);
+  const kickVisibleRef = useRef(false);
+  const touchUiAtRef = useRef(0);
   const kickSequenceRef = useRef(0);
   const keysRef = useRef(new Set<string>());
   const touchRef = useRef(zero());
@@ -118,6 +126,20 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   const arenaRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const invitationRef = useRef<HTMLInputElement>(null);
+
+  const canControlPlayer = useCallback(() => {
+    const current = roomRef.current;
+    return (
+      socketRef.current?.readyState === WebSocket.OPEN &&
+      current?.status === "playing" &&
+      current.members.some(
+        (member) =>
+          member.id === identityRef.current?.id &&
+          member.connected &&
+          member.team !== "spectator",
+      )
+    );
+  }, []);
 
   const send = useCallback((value: unknown) => {
     const socket = socketRef.current;
@@ -152,10 +174,18 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     setNeedsJoin(false);
     const acceptRoom = (value: RoomView) => {
       if (disposed) return;
-      if (roomRef.current?.match_id !== value.match_id) {
+      const previousRoom = roomRef.current;
+      const mapChanged =
+        previousRoom?.map_id !== value.map_id ||
+        previousRoom?.map_width !== value.map_width ||
+        previousRoom?.map_height !== value.map_height;
+      if (previousRoom?.match_id !== value.match_id || mapChanged) {
         frameRef.current = null;
         snapshots.reset();
+        engineRef.current = null;
+        lastMatch = "";
       }
+      if (value.status !== "playing" || mapChanged) releaseInputRef.current?.();
       roomRef.current = value;
       setRoom(value);
       if (Array.isArray(value.chat)) setChat(value.chat.slice(-80));
@@ -170,6 +200,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
             value.members,
             value.score_limit,
             value.time_limit,
+            value,
           );
           lastMatch = key;
         } else engineRef.current.syncMembers(value.members);
@@ -180,6 +211,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           value.members,
           value.score_limit,
           value.time_limit,
+          value,
         ).frame();
         frameRef.current.kickoff = 0;
         frameRef.current.score = value.score || { red: 0, blue: 0 };
@@ -194,6 +226,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
               value.members,
               value.score_limit,
               value.time_limit,
+              value,
             ).frame();
           preview.match_id = value.match_id || "";
           preview.score = value.score;
@@ -220,6 +253,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         current.host_id === identityRef.current?.id ||
         frame.match_id !== current.match_id ||
         current.status === "finished" ||
+        !frameMatchesRoom(frame, current) ||
         (frameRef.current && frame.seq <= frameRef.current.seq)
       )
         return;
@@ -312,6 +346,11 @@ export default function GameRoom({ roomId }: { roomId: string }) {
               );
             else if (data.type === "closed") {
               permanent = true;
+              if (roomRef.current) {
+                roomRef.current = { ...roomRef.current, status: "closed" };
+                setRoom(roomRef.current);
+              }
+              releaseInputRef.current?.();
               setConnection("closed");
               const reasons: Record<string, string> = {
                 host_left:
@@ -345,6 +384,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           if (disposed || permanent) return;
           setConnection("reconnecting");
           inputRef.current = zero();
+          releaseInputRef.current?.();
           if (reconnects++ < 4)
             reconnectTimer = setTimeout(
               () => void connect(),
@@ -446,7 +486,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           renderer = new FootballRenderer(renderedCanvas);
         }
         const display = host
-          ? frame
+          ? engine?.renderFrame(frame) || frame
           : snapshotsRef.current.sample(now, room?.status === "playing") ||
             frame;
         renderer?.draw(display, identity?.id || "");
@@ -470,7 +510,13 @@ export default function GameRoom({ roomId }: { roomId: string }) {
   }, [send]);
 
   useEffect(() => {
-    const update = () => {
+    const delivery = new InputDelivery();
+    const update = (immediate = false) => {
+      const active = canControlPlayer();
+      if (!active) {
+        keysRef.current.clear();
+        touchRef.current = zero();
+      }
       const keys = keysRef.current;
       inputRef.current = normalizeInput({
         x:
@@ -488,19 +534,33 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           keys.has("ShiftRight"),
         kick_seq: kickSequenceRef.current,
       });
+      const held = inputRef.current.kick;
+      if (kickVisibleRef.current !== held) {
+        kickVisibleRef.current = held;
+        setKicking(held);
+      }
       const currentRoom = roomRef.current;
       const ownId = identityRef.current?.id;
       if (
+        active &&
         currentRoom?.status === "playing" &&
         currentRoom.host_id !== ownId &&
         currentRoom.members.some(
           (member) => member.id === ownId && member.team !== "spectator",
         )
       ) {
-        peersRef.current?.input(inputRef.current);
-        send({ type: "input", input: inputRef.current });
+        delivery.publish(
+          inputRef.current,
+          performance.now(),
+          (input) => {
+            peersRef.current?.input(input);
+            return send({ type: "input", input });
+          },
+          immediate,
+        );
       }
     };
+    inputUpdateRef.current = update;
     const allowed = new Set([
       "KeyW",
       "KeyS",
@@ -523,10 +583,11 @@ export default function GameRoom({ roomId }: { roomId: string }) {
         return;
       if (event.code === "Space" && target?.closest("button,a,[role=button]")) {
         keysRef.current.delete(event.code);
-        update();
+        update(true);
         return;
       }
       if (!allowed.has(event.code)) return;
+      if (pressed && !canControlPlayer()) return;
       event.preventDefault();
       const kickKey = ["Space", "ShiftLeft", "ShiftRight"].includes(event.code);
       if (pressed && kickKey)
@@ -537,7 +598,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       else if (pressed && keysRef.current.has(event.code)) return;
       if (pressed) keysRef.current.add(event.code);
       else keysRef.current.delete(event.code);
-      update();
+      update(true);
     };
     const down = (event: KeyboardEvent) => key(event, true),
       up = (event: KeyboardEvent) => key(event, false);
@@ -546,9 +607,9 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       touchRef.current = zero();
       inputRef.current = zero();
       setStick({ x: 0, y: 0 });
-      setKicking(false);
-      update();
+      update(true);
     };
+    releaseInputRef.current = release;
     const visibility = () => {
       if (document.hidden) release();
     };
@@ -565,7 +626,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     window.addEventListener("blur", release);
     document.addEventListener("visibilitychange", visibility);
     document.addEventListener("focusin", focus);
-    const interval = setInterval(update, 1000 / 30);
+    const interval = setInterval(() => update(), 1000 / 30);
     const heartbeat = setInterval(() => send({ type: "ping" }), 15000);
     return () => {
       clearInterval(interval);
@@ -575,8 +636,10 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       window.removeEventListener("blur", release);
       document.removeEventListener("visibilitychange", visibility);
       document.removeEventListener("focusin", focus);
+      inputUpdateRef.current = null;
+      releaseInputRef.current = null;
     };
-  }, [send]);
+  }, [canControlPlayer, send]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({
@@ -608,6 +671,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     }
   };
   const moveStick = (event: PointerEvent<HTMLDivElement>) => {
+    if (!canControlPlayer()) return;
     if (event.type === "pointerdown")
       event.currentTarget.setPointerCapture(event.pointerId);
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
@@ -616,14 +680,25 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       y = (event.clientY - box.top - box.height / 2) / (box.height * 0.35);
     const input = normalizeInput({ x, y, kick: touchRef.current.kick });
     touchRef.current = input;
-    setStick({ x: input.x, y: input.y });
+    inputUpdateRef.current?.();
+    const now = performance.now();
+    if (
+      now - touchUiAtRef.current >= 1000 / 30 ||
+      event.type === "pointerdown"
+    ) {
+      touchUiAtRef.current = now;
+      const length = Math.max(1, Math.hypot(input.x, input.y));
+      setStick({ x: input.x / length, y: input.y / length });
+    }
   };
   const endStick = () => {
     touchRef.current.x = 0;
     touchRef.current.y = 0;
     setStick({ x: 0, y: 0 });
+    inputUpdateRef.current?.(true);
   };
   const kick = (event: PointerEvent<HTMLButtonElement>, active: boolean) => {
+    if (active && !canControlPlayer()) return;
     if (active) {
       event.currentTarget.setPointerCapture(event.pointerId);
       kickSequenceRef.current = Math.max(
@@ -632,7 +707,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       );
     }
     touchRef.current.kick = active;
-    setKicking(active);
+    inputUpdateRef.current?.(true);
   };
   const me = room?.members.find((m) => m.id === identity?.id);
   const manage = identity?.is_admin || room?.host_id === identity?.id;
@@ -660,6 +735,11 @@ export default function GameRoom({ roomId }: { roomId: string }) {
     }
   };
   const online = connection === "online";
+  const controlsEnabled =
+    online &&
+    room?.status === "playing" &&
+    me?.connected &&
+    me.team !== "spectator";
   const leave = async () => {
     if (leaving) return;
     if (
@@ -731,7 +811,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
           <h1>{room?.name || "Футбол начинается здесь"}</h1>
           <p>
             {room
-              ? `${room.members.filter((m) => m.connected).length} / ${room.max_players} игроков · ${room.score_limit ? `до ${room.score_limit} голов` : "без лимита голов"} · ${room.time_limit ? `${room.time_limit} мин` : "без лимита времени"}`
+              ? `${room.members.filter((m) => m.connected).length} / ${room.max_players} игроков · ${mapSummary(room)} · ${room.score_limit ? `до ${room.score_limit} голов` : "без лимита голов"} · ${room.time_limit ? `${room.time_limit} мин` : "без лимита времени"}`
               : "Готовим поле и подключаем игроков"}
           </p>
         </div>
@@ -876,7 +956,16 @@ export default function GameRoom({ roomId }: { roomId: string }) {
       ) : (
         <div className={styles.layout}>
           <main className={styles.main}>
-            <div className={styles.arena} ref={arenaRef}>
+            <div
+              className={styles.arena}
+              ref={arenaRef}
+              style={
+                {
+                  "--map-aspect":
+                    (room?.map_width ?? 10) / (room?.map_height ?? 5),
+                } as CSSProperties
+              }
+            >
               <div className={styles.scoreboard}>
                 <span className={styles.pink}>
                   Красные <b>{score.red}</b>
@@ -966,9 +1055,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                           {manage &&
                             room?.status !== "paused" &&
                             !readyToStart && (
-                              <p>
-                                Дождитесь подключения создателя комнаты.
-                              </p>
+                              <p>Дождитесь подключения создателя комнаты.</p>
                             )}
                         </>
                       )}
@@ -1039,6 +1126,7 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                 className={styles.joystick}
                 role="application"
                 aria-label="Джойстик движения"
+                aria-disabled={!controlsEnabled}
                 tabIndex={0}
                 onPointerDown={moveStick}
                 onPointerMove={moveStick}
@@ -1065,6 +1153,8 @@ export default function GameRoom({ roomId }: { roomId: string }) {
               <button
                 className={`${styles.kick} ${kicking ? styles.kickActive : ""}`}
                 aria-label="Ударить по мячу"
+                aria-pressed={kicking}
+                disabled={!controlsEnabled}
                 onPointerDown={(e) => kick(e, true)}
                 onPointerUp={(e) => kick(e, false)}
                 onPointerCancel={(e) => kick(e, false)}
@@ -1215,6 +1305,15 @@ export default function GameRoom({ roomId }: { roomId: string }) {
                     </button>
                   </div>
                 </div>
+              )}
+              {manage && room && (
+                <RoomSettings
+                  room={room}
+                  online={online}
+                  // The ordered room broadcast owns updates. A slower PATCH
+                  // response must not rewind a newly started match or roster.
+                  onSaved={() => setError("")}
+                />
               )}
               {!readyToStart &&
                 room?.status !== "playing" &&

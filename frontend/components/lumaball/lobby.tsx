@@ -23,7 +23,9 @@ import {
 } from "lucide-react";
 import PasswordInput from "@/components/password-input";
 import type { LumaList, LumaRoom } from "@/types/lumaball";
+import { normalizeMapSettings } from "@/lib/lumaball/maps";
 import { lumaApi, useQBall } from "./context";
+import { MapSettings, mapSummary } from "./map-settings";
 import "./original-lobby.css";
 
 const statusLabels: Record<LumaRoom["status"], string> = {
@@ -51,6 +53,7 @@ export default function LumaLobby() {
   const [scoreLimit, setScoreLimit] = useState<number | null>(null);
   const [timeLimit, setTimeLimit] = useState<number | null>(null);
   const [password, setPassword] = useState("");
+  const [map, setMap] = useState(() => normalizeMapSettings());
   const modal = useRef<HTMLElement>(null);
 
   const refreshRooms = useCallback(async () => {
@@ -187,6 +190,7 @@ export default function LumaLobby() {
           max_players: maxPlayers || config.default_players,
           score_limit: scoreLimit ?? config.score_limit,
           time_limit: timeLimit ?? config.time_limit,
+          ...map,
         }),
       });
       router.push(`/qball/room/${encodeURIComponent(room.id)}`);
@@ -268,6 +272,7 @@ export default function LumaLobby() {
                         <strong>{room.name}</strong>
                         <small>
                           {room.host_name} · {statusLabels[room.status]} ·{" "}
+                          {mapSummary(room)} ·{" "}
                           {room.score_limit
                             ? `${room.score_limit} голов`
                             : "Без лимита голов"}{" "}
@@ -533,6 +538,11 @@ export default function LumaLobby() {
                     onChange={(event) => setPassword(event.target.value)}
                   />
                 </label>
+                <MapSettings
+                  value={map}
+                  onChange={setMap}
+                  disabled={Boolean(busy)}
+                />
                 <p className="lb-form-note">
                   0 голов и 0 минут — без лимитов, как в оригинале. Комната
                   работает, пока её создатель находится в игре.

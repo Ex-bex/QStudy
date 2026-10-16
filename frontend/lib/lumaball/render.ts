@@ -1,4 +1,5 @@
-import { FIELD, type GameFrame } from "./engine";
+import { getField, type GameFrame } from "./engine";
+import type { Field } from "./maps.ts";
 
 export const FOOTBALL_PALETTE = {
   background: "#10171d",
@@ -7,10 +8,12 @@ export const FOOTBALL_PALETTE = {
   line: "rgba(232,245,236,.64)",
   red: "#ef4444",
   blue: "#93c5fd",
-  ball: "rgba(255,215,0,.8)",
+  ball: "#f4f7ff",
 };
 
-function paintPitch(ctx: CanvasRenderingContext2D) {
+function paintPitch(ctx: CanvasRenderingContext2D, FIELD: Field) {
+  const hockey = FIELD.map_id === "hockey";
+  const arena = FIELD.map_id === "arena";
   ctx.fillStyle = FOOTBALL_PALETTE.background;
   ctx.fillRect(0, 0, FIELD.width, FIELD.height);
   const width = FIELD.right - FIELD.left;
@@ -20,7 +23,11 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
   ctx.strokeStyle = "rgba(180,202,197,.13)";
   ctx.lineWidth = 1;
   ctx.strokeRect(FIELD.left - 12, FIELD.top - 12, width + 24, height + 24);
-  ctx.fillStyle = FOOTBALL_PALETTE.turf;
+  ctx.fillStyle = hockey
+    ? "#dcebf3"
+    : arena
+      ? "#26243a"
+      : FOOTBALL_PALETTE.turf;
   ctx.fillRect(FIELD.left, FIELD.top, width, height);
   const light = ctx.createLinearGradient(
     FIELD.left,
@@ -33,7 +40,7 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
   light.addColorStop(1, "rgba(0,9,14,.19)");
   ctx.fillStyle = light;
   ctx.fillRect(FIELD.left, FIELD.top, width, height);
-  ctx.fillStyle = FOOTBALL_PALETTE.stripe;
+  ctx.fillStyle = hockey ? "rgba(255,255,255,.08)" : FOOTBALL_PALETTE.stripe;
   const stripeWidth = width / 12;
   for (let index = 0; index < 12; index += 2)
     ctx.fillRect(
@@ -44,7 +51,7 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
     );
 
   // Goal mouths and boundaries share the simulation's exact coordinates.
-  for (const side of ["red", "blue"] as const) {
+  for (const side of FIELD.hasGoals ? (["red", "blue"] as const) : []) {
     const left = side === "red";
     const x = left ? FIELD.left - FIELD.goalDepth : FIELD.right;
     ctx.fillStyle = "#152329";
@@ -76,7 +83,7 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
     ctx.stroke();
   }
 
-  ctx.strokeStyle = FOOTBALL_PALETTE.line;
+  ctx.strokeStyle = hockey ? "rgba(53,92,121,.65)" : FOOTBALL_PALETTE.line;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(FIELD.left, FIELD.top);
@@ -85,8 +92,10 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
   ctx.lineTo(FIELD.right, FIELD.bottom);
   for (const x of [FIELD.left, FIELD.right]) {
     ctx.moveTo(x, FIELD.top);
-    ctx.lineTo(x, FIELD.goalTop);
-    ctx.moveTo(x, FIELD.goalBottom);
+    if (FIELD.hasGoals) {
+      ctx.lineTo(x, FIELD.goalTop);
+      ctx.moveTo(x, FIELD.goalBottom);
+    }
     ctx.lineTo(x, FIELD.bottom);
   }
   ctx.moveTo(FIELD.width / 2, FIELD.top);
@@ -101,12 +110,12 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
     Math.PI * 2,
   );
   ctx.stroke();
-  ctx.fillStyle = "#d8e7dd";
+  ctx.fillStyle = hockey ? "#a35969" : "#d8e7dd";
   ctx.beginPath();
   ctx.arc(FIELD.width / 2, FIELD.height / 2, 3, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = "rgba(232,245,236,.46)";
-  for (const left of [true, false]) {
+  for (const left of !hockey && !arena ? [true, false] : []) {
     const goalLine = left ? FIELD.left : FIELD.right;
     for (const [depth, top, bottom] of [
       [width * 0.14, FIELD.top + height * 0.2, FIELD.bottom - height * 0.2],
@@ -141,16 +150,51 @@ function paintPitch(ctx: CanvasRenderingContext2D) {
     ctx.stroke();
   }
   ctx.fillStyle = "#d8e7dd";
-  for (const x of [FIELD.left, FIELD.right])
+  for (const x of FIELD.hasGoals ? [FIELD.left, FIELD.right] : [])
     for (const y of [FIELD.goalTop, FIELD.goalBottom]) {
       ctx.beginPath();
       ctx.arc(x, y, FIELD.postRadius, 0, Math.PI * 2);
       ctx.fill();
     }
+  if (hockey) {
+    ctx.strokeStyle = "rgba(166,70,94,.65)";
+    ctx.lineWidth = 2;
+    for (const side of [-1, 1]) {
+      const x = FIELD.width / 2 + side * width * 0.28;
+      for (const y of [
+        FIELD.top + height * 0.28,
+        FIELD.bottom - height * 0.28,
+      ]) {
+        ctx.beginPath();
+        ctx.arc(x, y, Math.min(38, height * 0.1), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(60,104,169,.6)";
+      ctx.beginPath();
+      ctx.moveTo(FIELD.width / 2 + side * width * 0.17, FIELD.top);
+      ctx.lineTo(FIELD.width / 2 + side * width * 0.17, FIELD.bottom);
+      ctx.stroke();
+    }
+  }
+  for (const obstacle of FIELD.obstacles) {
+    ctx.fillStyle = "#62528b";
+    ctx.strokeStyle = "#bda1ec";
+    ctx.lineWidth = 2;
+    if (obstacle.kind === "circle") {
+      ctx.beginPath();
+      ctx.arc(obstacle.x, obstacle.y, obstacle.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+      ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+    }
+  }
 }
 
 /** Cache the static pitch and measure layout only when its size actually changes. */
 export class FootballRenderer {
+  private field = getField();
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D | null;
   private readonly pitch: HTMLCanvasElement;
@@ -191,6 +235,7 @@ export class FootballRenderer {
   }
 
   private resize() {
+    const FIELD = this.field;
     const actual = window.devicePixelRatio || 1;
     const dpr = Math.min(
       2,
@@ -217,12 +262,21 @@ export class FootballRenderer {
         0,
         0,
       );
-      paintPitch(this.pitchContext);
+      paintPitch(this.pitchContext, FIELD);
     }
   }
 
   draw(frame: GameFrame, ownId: string) {
     if (this.destroyed || !this.ctx || !this.pitchContext) return;
+    if (
+      frame.width !== this.field.width ||
+      frame.height !== this.field.height ||
+      (frame.map_id || "classic") !== this.field.map_id
+    ) {
+      this.field = getField(frame);
+      this.dirty = true;
+    }
+    const FIELD = this.field;
     this.resize();
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -239,9 +293,7 @@ export class FootballRenderer {
     ctx.shadowBlur = 0;
     for (const player of frame.players) {
       if (player.id === ownId || player.kicking) {
-        ctx.strokeStyle = player.kicking
-          ? "rgba(255,255,255,.8)"
-          : "rgba(255,215,0,.8)";
+        ctx.strokeStyle = player.kicking ? "#f8d775" : "rgba(245,247,255,.65)";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(player.x, player.y, player.kicking ? 33 : 28, 0, Math.PI * 2);
@@ -263,19 +315,20 @@ export class FootballRenderer {
         player.x,
         player.y + 1,
       );
-      ctx.fillStyle = player.id === ownId ? "#fff1b2" : "#ddd2f5";
+      ctx.fillStyle = player.id === ownId ? "#f5f7ff" : "#ddd2f5";
       ctx.font = "12px system-ui";
       ctx.fillText(player.name.slice(0, 19), player.x, player.y + 37);
     }
     const ball = frame.ball;
-    ctx.fillStyle = FOOTBALL_PALETTE.ball;
+    ctx.fillStyle =
+      FIELD.map_id === "hockey" ? "#17242f" : FOOTBALL_PALETTE.ball;
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, FIELD.ballRadius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,235,147,.85)";
+    ctx.strokeStyle = FIELD.map_id === "hockey" ? "#e7f0f7" : "#b9c9d9";
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.fillStyle = "#8a6314";
+    ctx.fillStyle = FIELD.map_id === "hockey" ? "#3d5263" : "#7e92a8";
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, 3, 0, Math.PI * 2);
     ctx.fill();

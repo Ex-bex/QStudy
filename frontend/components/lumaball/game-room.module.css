@@ -209,7 +209,7 @@
   border-radius: 0;
 }
 .arena:fullscreen .pitch {
-  width: min(100%, 170vh);
+  width: min(100%, calc((100dvh - 100px) * var(--map-aspect, 2)));
   align-self: center;
 }
 .scoreboard {
@@ -255,7 +255,7 @@
 }
 .pitch {
   position: relative;
-  aspect-ratio: 2/1;
+  aspect-ratio: var(--map-aspect, 2);
 }
 .pitch canvas {
   width: 100%;
@@ -1271,7 +1271,7 @@
   width: 100%;
 }
 .arena {
-  width: min(100%, calc((100dvh - 285px) * 12 / 7));
+  width: min(100%, calc((100dvh - 285px) * var(--map-aspect, 2)));
   margin: 0 auto;
   border: 1px solid #5a43d9;
   border-radius: 7px;
@@ -1677,6 +1677,12 @@
   background: #3c2679;
   border-color: #8a7bf8;
   color: #e6e6fa;
+}
+.kick.kickActive {
+  background: #f0ce72;
+  border-color: #fff0bd;
+  color: #322647;
+  transform: scale(0.94);
 }
 @media (max-width: 900px) {
   .room {

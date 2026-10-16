@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  InputDelivery,
   MatchResultDelivery,
+  frameMatchesRoom,
   roomInvitationUrl,
   teamsReady,
 } from "./lumaball/room-state.ts";
@@ -12,6 +14,87 @@ const roster = [
   { id: "host", name: "Host", team: "red", connected: true },
   { id: "friend", name: "Friend", team: "blue", connected: true },
 ];
+
+test("input delivery preserves kick edges while bounding pointer traffic and refreshing held movement", () => {
+  const delivery = new InputDelivery();
+  const sent = [];
+  const send = (input) => (sent.push({ ...input }), true);
+  const input = { x: 1, y: 0, kick: false, kick_seq: 1 };
+  delivery.publish(input, 0, send);
+  for (let now = 1; now < 150; now++) delivery.publish(input, now, send);
+  assert.equal(
+    sent.length,
+    1,
+    "held keys must not produce duplicate 30 Hz packets",
+  );
+  delivery.publish(input, 150, send);
+  assert.equal(
+    sent.length,
+    2,
+    "held movement is refreshed before the 600 ms expiry",
+  );
+  delivery.publish({ ...input, kick: true, kick_seq: 2 }, 151, send, true);
+  delivery.publish({ ...input, kick_seq: 2 }, 152, send, true);
+  assert.deepEqual(
+    sent.slice(-2).map((item) => item.kick),
+    [true, false],
+    "press and release edges cannot wait behind pointer throttling",
+  );
+  const pointer = new InputDelivery();
+  let pointerPackets = 0;
+  for (let now = 0; now < 1000; now++)
+    pointer.publish(
+      { ...input, x: now / 1000 },
+      now,
+      () => (++pointerPackets, true),
+    );
+  assert.ok(
+    pointerPackets >= 28 && pointerPackets <= 30,
+    "high-frequency pointer events stay within the network budget",
+  );
+});
+
+test("a congested input socket retries without dropping the latest release", () => {
+  const delivery = new InputDelivery();
+  const input = { x: 0, y: 0, kick: false, kick_seq: 7 };
+  let attempts = 0;
+  delivery.publish(input, 0, () => (++attempts, false), true);
+  delivery.publish(input, 1, () => (++attempts, true), true);
+  delivery.publish(input, NaN, () => (++attempts, true), true);
+  assert.equal(
+    attempts,
+    2,
+    "failed writes cannot acknowledge the input and invalid clocks cannot send",
+  );
+});
+
+test("room map changes reject delayed RTC frames from the old pitch", () => {
+  const frame = new FootballEngine(roster).frame();
+  assert.equal(
+    frameMatchesRoom(frame, {}),
+    true,
+    "pre-map classic rooms remain compatible",
+  );
+  assert.equal(
+    frameMatchesRoom(frame, { map_id: "hockey", map_width: 10, map_height: 5 }),
+    false,
+  );
+  assert.equal(
+    frameMatchesRoom(frame, {
+      map_id: "classic",
+      map_width: 20,
+      map_height: 10,
+    }),
+    false,
+  );
+  assert.equal(
+    frameMatchesRoom(
+      { ...frame, map_id: "arena", width: 1120, height: 640 },
+      { map_id: "arena", map_width: 14, map_height: 8 },
+    ),
+    true,
+  );
+});
 
 test("invitations use the configured public origin instead of the host's localhost", () => {
   assert.equal(

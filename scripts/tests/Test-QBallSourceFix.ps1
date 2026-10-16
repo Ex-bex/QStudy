@@ -35,8 +35,8 @@ try {
     $payloadBlock = [regex]::Match($builder, '(?ms)^PAYLOAD = \(\r?\n(?<paths>.*?)^\)')
     Assert-Fix $payloadBlock.Success 'source updater builder declares an explicit payload'
     $paths = @([regex]::Matches($payloadBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
-    foreach ($required in @('frontend/lib/game-csp.mjs', 'frontend/lib/lumaball/engine.ts', 'frontend/lib/lumaball/room-state.ts', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/components/lumaball/admin-panel.tsx', 'backend/app/lumaball_room_models.py', 'backend/app/routers/lumaball_rooms.py', 'backend/app/services/lumaball_identity.py', 'backend/app/services/lumaball_rooms.py', 'backend/app/services/lumaball_realtime.py')) {
-        Assert-Fix ($paths -ccontains $required) ('complete original physics/runtime dependency included: ' + $required)
+    foreach ($required in @('frontend/lib/game-csp.mjs', 'frontend/lib/lumaball/engine.ts', 'frontend/lib/lumaball/room-state.ts', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json', 'frontend/components/lumaball/map-settings.tsx', 'frontend/components/lumaball/map-settings.module.css', 'frontend/components/lumaball/room-settings.tsx', 'frontend/components/lumaball/admin-panel.tsx', 'frontend/lib/lumaball/maps.ts', 'frontend/lib/lumaball/types.ts', 'frontend/types/lumaball.ts', 'frontend/lib/lumaball-maps.test.mjs', 'backend/app/lumaball_room_models.py', 'backend/app/main.py', 'backend/app/routers/lumaball_rooms.py', 'backend/app/services/lumaball_identity.py', 'backend/app/services/lumaball_rooms.py', 'backend/app/services/lumaball_realtime.py')) {
+        Assert-Fix ($paths -ccontains $required) ('complete original physics, map migration and runtime dependency included: ' + $required)
     }
     $entries = @()
     foreach ($relative in $paths) {

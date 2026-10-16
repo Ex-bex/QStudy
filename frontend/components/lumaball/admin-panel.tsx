@@ -35,6 +35,8 @@ import type {
   LumaRoom,
 } from "@/types/lumaball";
 import styles from "./admin.module.css";
+import { mapSummary } from "./map-settings";
+import { RoomSettings } from "./room-settings";
 
 type AdminSettings = LumaConfig & { ice_servers: RTCIceServer[] };
 type Stats = {
@@ -355,6 +357,8 @@ export default function LumaAdminPanel() {
                         {room.score_limit
                           ? `до ${room.score_limit} голов`
                           : "без лимита голов"}
+                        {" · "}
+                        {mapSummary(room)}
                       </p>
                       <span className={styles.status}>
                         {
@@ -485,6 +489,12 @@ export default function LumaAdminPanel() {
                       Открыть <ArrowUpRight size={13} />
                     </Link>
                   </div>
+                  <RoomSettings
+                    room={room}
+                    online={!busy}
+                    admin
+                    onSaved={() => void refresh()}
+                  />
                   {expandedRoom?.id === room.id && (
                     <div className={styles.members}>
                       {expandedRoom.members.map((member) => (

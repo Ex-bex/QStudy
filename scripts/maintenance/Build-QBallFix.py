@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD = (
     'frontend/package.json',
     'frontend/package-lock.json',
+    'frontend/tsconfig.json',
     'frontend/app/api/[...path]/route.ts',
     'frontend/app/qball/qball.css',
     'frontend/components/lumaball/brand.tsx',
@@ -17,15 +18,22 @@ PAYLOAD = (
     'frontend/components/lumaball/game-room.module.css',
     'frontend/components/lumaball/game-room.tsx',
     'frontend/components/lumaball/lobby.tsx',
+    'frontend/components/lumaball/map-settings.tsx',
+    'frontend/components/lumaball/map-settings.module.css',
+    'frontend/components/lumaball/room-settings.tsx',
     'frontend/components/lumaball/original-lobby.css',
     'frontend/components/lumaball/shell.tsx',
     'frontend/lib/lumaball/engine.ts',
+    'frontend/lib/lumaball/maps.ts',
+    'frontend/lib/lumaball/types.ts',
+    'frontend/types/lumaball.ts',
     'frontend/lib/lumaball/room-state.ts',
     'frontend/lib/lumaball/render.ts',
     'frontend/lib/lumaball/snapshot-interpolator.ts',
     'frontend/lib/lumaball-snapshots.test.mjs',
     'frontend/lib/lumaball-render.test.mjs',
     'frontend/lib/lumaball.test.mjs',
+    'frontend/lib/lumaball-maps.test.mjs',
     'frontend/lib/lumaball-parity.test.mjs',
     'frontend/lib/lumaball-room-state.test.mjs',
     'frontend/lib/fixtures/lumaball-original/provenance.json',
@@ -46,6 +54,7 @@ PAYLOAD = (
     'scripts/tests/qball_physics_fixture.mjs',
     'scripts/tests/lumaball_stack.py',
     'backend/app/lumaball_room_models.py',
+    'backend/app/main.py',
     'backend/app/routers/lumaball_rooms.py',
     'backend/app/services/lumaball_identity.py',
     'backend/app/services/lumaball_rooms.py',
@@ -68,7 +77,7 @@ chcp 65001 >nul
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0.qstudy-fix\\Apply.ps1" -Root "%~dp0." %*
 exit /b %errorlevel%
 '''.replace('\n', '\r\n').encode('ascii')
-README = '''QStudy / QBall: оригинальная физика LumaBall, текущий дизайн QBall
+README = '''QStudy / QBall: карты, плавная отрисовка и оригинальная физика LumaBall
 
 1. Распакуйте СОДЕРЖИМОЕ ZIP в существующую папку работающего QStudy
    на Windows-хосте рядом с Start-QStudy-Internet.cmd.
@@ -81,8 +90,8 @@ README = '''QStudy / QBall: оригинальная физика LumaBall, те
    Создайте комнату и отправьте ссылку из «Пригласить друга».
 
 Помощник проверяет пакет, штатно останавливает эту установку, сохраняет
-изменяемые исходники, возвращает движок Planck и игровые правила оригинального
-LumaBall, затем запускает прежний режим. Зелёное поле и дизайн QBall сохраняются.
+изменяемые исходники, обновляет карты и отрисовку, затем запускает прежний режим. Оригинальный движок
+Planck, физика футбола и текущий дизайн QBall сохраняются.
 Необходимая версия Planck устанавливается автоматически через штатный стартер
 по зафиксированному package-lock.json. Самостоятельно вводить npm-команды не нужно.
 База, аккаунты, документы, логотипы в базе, .env, ключи и пароли не входят
@@ -95,7 +104,14 @@ LumaBall, затем запускает прежний режим. Зелёно�
 из активной игры открываются отдельно. «Выйти из комнаты» у создателя
 закрывает её для всех — перед этим показывается предупреждение.
 
-Картинка создателя обновляется на каждом кадре браузера независимо от сети.
+Картинка создателя сглаживается между шагами физики на каждом кадре браузера.
+Белый индикатор удара желтеет только при ожидающем ударе, а не при выборе игрока.
+При создании комнаты и в настройках хозяина доступны футбол, хоккей и арена,
+а также ширина 10–30 и высота 5–15 метров. Менять карту можно перед матчем
+или после его окончания; активный матч требует сначала штатной остановки.
+Хоккей использует шайбу и скольжение, арена — закрытые борта и препятствия
+без голов. Карта, размеры и настройки комнаты сохраняются в общей базе.
+Необходимые поля добавляются автоматически при запуске, аккаунты сохраняются.
 Для остальных игроков сглаживаются сетевые снимки; передача ограничена
 30 снимками в секунду, управление отправляется сразу при нажатии клавиш.
 Восстановлены компактная таблица комнат и меню команд исходного LumaBall.
@@ -112,7 +128,7 @@ def build(output: Path, mode: str) -> dict:
     files = [{'path': path, 'sha256': hashlib.sha256((ROOT / path).read_bytes()).hexdigest()}
              for path in PAYLOAD]
     identifier = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:12]
-    manifest = {'version': 1, 'id': 'qball-original-physics-' + identifier,
+    manifest = {'version': 1, 'id': 'qball-maps-' + identifier,
                 'target_mode': mode, 'files': files}
     entries = {
         'Apply-QBall-Fix.cmd': WRAPPER,
@@ -127,7 +143,7 @@ def build(output: Path, mode: str) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, 'x', compression=zipfile.ZIP_DEFLATED) as archive:
         for name, payload in entries.items():
-            info = zipfile.ZipInfo(name, date_time=(2026, 10, 16, 0, 0, 0))
+            info = zipfile.ZipInfo(name, date_time=(2026, 10, 17, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o100644 << 16
             archive.writestr(info, payload)
@@ -144,7 +160,7 @@ def build(output: Path, mode: str) -> dict:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / '.local/handover/QStudy-QBall-Original-Physics.zip')
+    parser.add_argument('--output', type=Path, default=ROOT / 'assets/distribution/QStudy-QBall-Maps-Fix.zip')
     parser.add_argument('--mode', choices=('local', 'lan', 'internet'), default='internet')
     options = parser.parse_args()
     print(json.dumps(build(options.output, options.mode)))

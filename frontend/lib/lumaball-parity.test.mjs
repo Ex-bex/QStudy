@@ -20,7 +20,7 @@ const members = [
 ];
 
 /** Run the actual unmodified Nuxt-era classes, replacing only their browser I/O. */
-function original(roster = members) {
+function original(roster = members, map) {
   let now = 0;
   let nextTimer = 1;
   const timers = new Map();
@@ -111,6 +111,8 @@ function original(roster = members) {
     },
   };
   const game = new Game(room);
+  if (map)
+    game.map.change_size({ width: map.map_width, height: map.map_height });
   game.start();
   let tick = 0;
   return {
@@ -178,9 +180,9 @@ function equivalent(engine, source, label) {
   );
 }
 
-function pair(roster = members) {
-  const source = original(roster);
-  const engine = new FootballEngine(roster);
+function pair(roster = members, map) {
+  const source = original(roster, map);
+  const engine = new FootballEngine(roster, 0, 0, map);
   return {
     source,
     engine,
@@ -281,6 +283,37 @@ test("movement, diagonal acceleration, stopping, centre kickoff barriers and kic
     match.source.input("red", x, y);
     match.engine.input("red", { x, y, kick: false });
     match.step("movement tick " + tick);
+  }
+});
+
+test("custom football dimensions preserve the original configurable map and trajectories", () => {
+  for (const [width, height] of [
+    [11, 6],
+    [20, 10],
+    [30, 15],
+  ]) {
+    const match = pair(members, {
+      map_id: "classic",
+      map_width: width,
+      map_height: height,
+    });
+    equivalent(match.engine, match.source, `${width}x${height} original spawn`);
+    for (let tick = 0; tick < 480; tick++) {
+      const x = tick < 240 ? 1 : -1;
+      const y = tick < 180 ? -1 : 1;
+      match.source.input("red", x, y);
+      match.engine.input("red", { x, y, kick: false });
+      match.step(`${width}x${height} original movement ${tick}`);
+    }
+    for (const ball of [match.engine.ball, match.source.game.ball]) {
+      ball.setPosition(Vec2(width - 1.2, height / 2));
+      ball.setLinearVelocity(Vec2(7, 0));
+    }
+    for (let tick = 0; tick < 350; tick++) {
+      match.source.input("red", 0, 0);
+      match.engine.input("red", { x: 0, y: 0, kick: false });
+      match.step(`${width}x${height} original goal/reset ${tick}`);
+    }
   }
 });
 

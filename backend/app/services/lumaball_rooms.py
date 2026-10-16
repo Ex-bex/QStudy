@@ -13,6 +13,7 @@ from app.services.lumaball_identity import get_config
 
 ACTIVE = ("lobby", "playing", "paused", "finished")
 TEAMS = ("red", "blue", "spectator")
+MAPS = ("classic", "hockey", "arena")
 _lock = threading.RLock()
 _ID = re.compile(r"^[a-f0-9]{32}$")
 # Keep unlimited casual matches within the integer storage/wire range. These
@@ -59,6 +60,7 @@ def public_room(db, room, viewer=None, *, full=True):
               "status": room.status, "players": len(members), "max_players": room.max_players,
               "locked": bool(room.password_hash), "password_required": bool(room.password_hash),
               "score_limit": room.score_limit, "time_limit": room.time_limit,
+              "map_id": room.map_id, "map_width": room.map_width, "map_height": room.map_height,
               "score": {"red": room.red_score, "blue": room.blue_score}, "match_id": room.match_id,
               "created_at": _iso(room.created_at), "is_member": bool(viewer and any(p.id == viewer for _, p in members))}
     if full:
@@ -122,6 +124,15 @@ def match_bounds(room):
             room.time_limit * 60)
 
 
+def _map_settings(data):
+    map_id = data.get("map_id", "classic")
+    width, height = data.get("map_width", 10), data.get("map_height", 5)
+    if (map_id not in MAPS or type(width) is not int or not 10 <= width <= 30
+            or type(height) is not int or not 5 <= height <= 15):
+        raise HTTPException(422, "Выберите карту и размер поля: ширина 10–30, высота 5–15 метров")
+    return map_id, width, height
+
+
 def create_room(db, identity, data):
     with _lock:
         config = get_config(db)
@@ -137,16 +148,57 @@ def create_room(db, identity, data):
         if db.query(LumaBallRoom).filter(LumaBallRoom.status.in_(ACTIVE)).count() >= config["max_rooms"]:
             raise HTTPException(409, "Все комнаты заняты. Попробуйте позже")
         maximum, score, minutes = _limits(data, config)
+        map_id, map_width, map_height = _map_settings(data)
         name = clean_text(data.get("name", ""), 80)
         password = clean_text(data.get("password", ""), 64, empty=True)
         room = LumaBallRoom(id=uuid.uuid4().hex, name=name, host_id=identity.profile.id,
                            password_hash=hash_password(password) if password else "", status="lobby",
-                           max_players=maximum, score_limit=score, time_limit=minutes)
+                           max_players=maximum, score_limit=score, time_limit=minutes,
+                           map_id=map_id, map_width=map_width, map_height=map_height)
         db.add(room)
         db.flush()
         db.add(LumaBallRoomMember(room_id=room.id, profile_id=identity.profile.id, team="red", connected=False))
         db.commit()
         return public_room(db, room, identity.profile.id)
+
+
+def update_room(db, room_id, identity, values):
+    """Host settings use the same server limits as administrator edits."""
+    with _lock:
+        room = room_by_id(db, room_id)
+        if not identity.is_admin and room.host_id != identity.profile.id:
+            raise HTTPException(403, "Менять настройки может создатель комнаты или администратор")
+        permitted = {"name", "password", "max_players", "score_limit", "time_limit", "map_id", "map_width", "map_height"}
+        if not values or set(values) - permitted or any(value is None for value in values.values()):
+            raise HTTPException(422, "Укажите изменяемые поля без пустых значений")
+        if room.status in ("playing", "paused") and set(values) - {"name"}:
+            raise HTTPException(409, "Сначала остановите матч, чтобы изменить карту, лимиты или пароль")
+        current = {key: getattr(room, key) for key in ("max_players", "score_limit", "time_limit", "map_id", "map_width", "map_height")}
+        merged = current | values
+        limits_config = get_config(db)
+        if "max_players" not in values:
+            # Lowering the global capacity must not prevent a host from
+            # renaming an existing larger room or changing its map.
+            limits_config = {**limits_config, "max_players": max(limits_config["max_players"], room.max_players)}
+        maximum, _, _ = _limits(merged, limits_config)
+        _map_settings(merged)
+        if maximum < len(active_members(db, room.id)):
+            raise HTTPException(409, "В комнате больше игроков, чем указано в новом лимите")
+        # Validate every field before changing the ORM state.
+        cleaned = dict(values)
+        if "name" in cleaned:
+            cleaned["name"] = clean_text(cleaned["name"], 80)
+        if "password" in cleaned:
+            password = clean_text(cleaned.pop("password"), 64, empty=True)
+            cleaned["password_hash"] = hash_password(password) if password else ""
+        for key, value in cleaned.items():
+            setattr(room, key, value)
+        room.updated_at = datetime.utcnow()
+        if identity.user is not None:
+            from app.services.audit import record_audit
+            record_audit(db, identity.user, "lumaball.room.update", "lumaball_room", room.id, fields=values.keys())
+        db.commit()
+        return room
 
 
 def join_room(db, room_id, identity, password=""):

@@ -135,12 +135,70 @@ class LumaBallRealtimeTests(unittest.TestCase):
         return room
 
     def frame(self, room):
-        return {"seq": 1, "match_id": room["match_id"], "width": 800, "height": 400,
+        return {"seq": 1, "match_id": room["match_id"], "width": room.get("map_width", 10) * 80, "height": room.get("map_height", 5) * 80,
+            "map_id": room.get("map_id", "classic"),
             "players": [{"id": member["id"], "name": "FORGED_NAME", "team": member["team"],
                          "x": 200 if member["team"] == "red" else 600, "y": 200, "vx": 0, "vy": 0, "kicking": False}
                         for member in room["members"] if member["team"] != "spectator"],
             "ball": {"x": 400, "y": 200, "vx": 0, "vy": 0}, "score": {"red": 0, "blue": 0},
             "elapsed": 0, "remaining": room["time_limit"] * 60, "kickoff": 1, "finished": False, "winner": None}
+
+    def test_host_map_edit_reaches_every_member_and_dynamic_frames_are_strict(self):
+        with ExitStack() as stack:
+            host, peer, room, host_headers, _, _, _ = self.connect_pair(stack)
+            response = self.client.patch("/api/lumaball/rooms/" + room["id"], headers=host_headers,
+                                         json={"map_id": "hockey", "map_width": 24, "map_height": 12})
+            self.assertEqual(response.status_code, 200, response.text)
+            for socket in (host, peer):
+                changed = self.receive(socket, "room", lambda event: event["room"]["map_id"] == "hockey")["room"]
+                self.assertEqual((changed["map_width"], changed["map_height"]), (24, 12))
+            started = self.start(host, peer)
+            frame = self.frame(started)
+            frame["ball"].update(x=1900, y=950)
+            host.send_json({"type": "frame", "frame": frame})
+            delivered = self.receive(peer, "frame")["frame"]
+            self.assertEqual((delivered["map_id"], delivered["width"], delivered["height"]), ("hockey", 1920, 960))
+            self.assertEqual(delivered["ball"]["x"], 1900)
+            for change in ({"map_id": "classic"}, {"map_id": "unknown"}, {"width": 800}, {"height": 400},
+                           {"ball": {**frame["ball"], "x": 2071}}, {"ball": {**frame["ball"], "y": 1111}}):
+                host.send_json({"type": "frame", "frame": {**frame, **change}})
+                self.receive(host, "error")
+            no_map = dict(frame)
+            del no_map["map_id"]
+            host.send_json({"type": "frame", "frame": no_map})
+            self.receive(host, "error")
+            host.send_json({"type": "frame", "frame": {**frame, "seq": 2}})
+            self.assertEqual(self.receive(peer, "frame")["frame"]["seq"], 2)
+
+    def test_legacy_frame_map_is_allowed_only_for_original_size_and_preset(self):
+        with ExitStack() as stack:
+            host, peer, _, _, _, _, _ = self.connect_pair(stack)
+            started = self.start(host, peer)
+            frame = self.frame(started)
+            del frame["map_id"]
+            host.send_json({"type": "frame", "frame": frame})
+            self.assertEqual(self.receive(peer, "frame")["frame"]["map_id"], "classic")
+            host.send_json({"type": "frame", "frame": {**frame, "seq": 2, "map_id": "arena"}})
+            self.receive(host, "error")
+
+    def test_frame_geometry_covers_every_preset_and_cannot_spoof_classic_legacy_size(self):
+        for map_id in ("classic", "hockey", "arena"):
+            headers, _ = self.guest()
+            room = self.room(headers, map_id=map_id, map_width=30, map_height=15)
+            with self.sessions() as db:
+                saved = db.get(LumaBallRoom, room["id"])
+                saved.match_id = "b" * 32
+                frame = {**self.frame(room), "match_id": saved.match_id, "players": [],
+                         "ball": {"x": 2549, "y": 1349, "vx": 0, "vy": 0}}
+                validated = realtime.validate_frame(frame, saved, [])
+                self.assertEqual((validated["map_id"], validated["width"], validated["height"]), (map_id, 2400, 1200))
+                missing_map = dict(frame)
+                del missing_map["map_id"]
+                for invalid in (missing_map, {**frame, "width": 800}, {**frame, "height": 400},
+                                {**frame, "map_id": "not-a-map"}, {**frame, "width": True},
+                                {**frame, "ball": {**frame["ball"], "x": 2551}}):
+                    with self.assertRaises(ValueError):
+                        realtime.validate_frame(invalid, saved, [])
 
     def test_origin_and_private_proxy_proof_are_checked_before_accepting_a_ticket(self):
         headers, identity = self.guest()

@@ -4,7 +4,12 @@ import { readFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { URL } from "node:url";
 import ts from "typescript";
-import { FootballEngine, FIELD, validFrame } from "./lumaball/engine.ts";
+import {
+  FootballEngine,
+  FIELD,
+  getField,
+  validFrame,
+} from "./lumaball/engine.ts";
 
 const source = readFileSync(
   new URL("./lumaball/snapshot-interpolator.ts", import.meta.url),
@@ -197,7 +202,7 @@ test("goal/reset/roster/teleport boundaries snap instead of sliding through the 
       f.players[0].x = 900;
     },
     (f) => {
-      f.ball.x = 1050;
+      f.ball.x = 200;
     },
     (f) => {
       f.players[0].team = "blue";
@@ -272,4 +277,184 @@ test("visual sampling preserves authoritative metadata and never mutates stored 
   assert.equal(snapshots.sample(100).players[0].x, 352.5);
   assert.equal(JSON.stringify(a), beforeA);
   assert.equal(JSON.stringify(b), beforeB);
+});
+
+test("24/30 Hz packets with arrival jitter keep kick accelerations and rebounds moving at 60/120/144 Hz", () => {
+  const jitter = [0, 5, -3, 9, -5, 2, -2, 7];
+  // A press accelerates the ball at 400 ms; its real wall collision reverses it
+  // at 800 ms. These authoritative positions are never fed back into physics.
+  const trajectory = (ms) =>
+    ms < 400
+      ? { x: 250 + ms * 0.12, vx: 120 }
+      : ms < 800
+        ? { x: 298 + (ms - 400) * 0.6, vx: 600 }
+        : { x: 538 - (ms - 800) * 0.45, vx: -450 };
+  for (const packetsPerSecond of [24, 30]) {
+    for (const displayHz of [60, 120, 144]) {
+      const snapshots = new SnapshotInterpolator();
+      const positions = [];
+      const original = [];
+      let sequence = 0;
+      for (let render = 0; render <= displayHz * 1.25; render++) {
+        const now = (render * 1000) / displayHz;
+        while (true) {
+          const time = (sequence * 1000) / packetsPerSecond;
+          const arrival = time + 12 + jitter[sequence % jitter.length];
+          if (arrival > now) break;
+          const packet = frame(sequence + 1, 250 + time * 0.04);
+          packet.elapsed = time / 1000;
+          packet.players[0].vx = 40;
+          packet.players[0].kicking = time >= 400 && time < 450;
+          Object.assign(packet.ball, trajectory(time));
+          original.push([packet, JSON.stringify(packet)]);
+          snapshots.enqueue(packet, arrival);
+          sequence++;
+        }
+        const visual = snapshots.sample(now);
+        if (now >= 200) {
+          assert.ok(validFrame(visual));
+          positions.push({ now, x: visual.ball.x });
+        }
+      }
+      const deltas = positions
+        .slice(1)
+        .map((item, index) => item.x - positions[index].x);
+      assert.ok(
+        deltas.filter((delta) => Math.abs(delta) < 1e-7).length <= 2,
+        `${packetsPerSecond} Hz/${displayHz} Hz: ball must not pause at each packet or kick`,
+      );
+      assert.ok(
+        deltas.every((delta) => Math.abs(delta) < 1200 / displayHz),
+        "arrival jitter must not trigger teleport-sized visual jumps",
+      );
+      const beforeRebound = positions.filter(
+        (item) => item.now >= 550 && item.now < 800,
+      );
+      assert.ok(
+        beforeRebound.every(
+          (item, index) => index === 0 || item.x > beforeRebound[index - 1].x,
+        ),
+      );
+      const afterRebound = positions.filter((item) => item.now >= 950);
+      assert.ok(
+        afterRebound.every(
+          (item, index) => index === 0 || item.x < afterRebound[index - 1].x,
+        ),
+        "a real impact reverses the trajectory instead of smoothing away the bounce",
+      );
+      for (const [packet, before] of original)
+        assert.equal(JSON.stringify(packet), before);
+    }
+  }
+});
+
+test("fast travel consistent with kick velocity does not falsely reset the interpolation buffer", () => {
+  const snapshots = new SnapshotInterpolator({ delayMs: 0 });
+  const a = frame(1),
+    b = frame(2);
+  Object.assign(a.ball, { x: 200, vx: 0 });
+  Object.assign(b.ball, { x: 400, vx: 6000 });
+  snapshots.enqueue(a, 0);
+  snapshots.enqueue(b, 1000 / 30);
+  assert.equal(
+    snapshots.sample(1000 / 60).ball.x,
+    300,
+    "a valid strong kick is interpolated, while an unexplained teleport still snaps",
+  );
+  assert.equal(snapshots.sample(1000 / 60).ball.vx, 3000);
+});
+
+test("map and dimension changes snap once and retain new authoritative metadata", () => {
+  for (const map of [
+    { map_id: "hockey", map_width: 10, map_height: 5 },
+    { map_id: "classic", map_width: 20, map_height: 10 },
+    { map_id: "arena", map_width: 14, map_height: 8 },
+  ]) {
+    const snapshots = new SnapshotInterpolator();
+    const a = frame(1, 300);
+    const b = frame(2, 305);
+    Object.assign(b, {
+      map_id: map.map_id,
+      width: map.map_width * 80,
+      height: map.map_height * 80,
+    });
+    snapshots.enqueue(a, 0);
+    snapshots.enqueue(b, 50);
+    const visual = snapshots.sample(60);
+    assert.equal(visual.players[0].x, 305);
+    assert.equal(visual.map_id, map.map_id);
+    assert.equal(visual.width, b.width);
+    assert.equal(visual.height, b.height);
+  }
+});
+
+test("expanded football/hockey extrapolation uses its own outer boards and goal backs", () => {
+  for (const map_id of ["classic", "hockey"]) {
+    const value = frame(1);
+    Object.assign(value, { map_id, width: 2400, height: 1200 });
+    const field = getField(value);
+    Object.assign(value.players[0], { x: 2200, y: 1000, vx: 100, vy: 100 });
+    Object.assign(value.ball, { x: 2100, y: 900, vx: 200, vy: 100 });
+    const snapshots = new SnapshotInterpolator({ delayMs: 0 });
+    snapshots.enqueue(value, 100);
+    const display = snapshots.sample(180);
+    assert.equal(display.players[0].x, 2208);
+    assert.equal(display.players[0].y, 1008);
+    assert.equal(
+      display.ball.x,
+      2116,
+      "a wide map does not clamp to the original map's right edge",
+    );
+    assert.equal(display.ball.y, 908);
+    const wall = globalThis.structuredClone(value);
+    wall.seq++;
+    Object.assign(wall.players[0], {
+      x: field.width - field.playerRadius - 1,
+      y: field.height - field.playerRadius - 1,
+    });
+    wall.ball.x = field.right + field.goalDepth - field.ballRadius - 1;
+    wall.ball.y = field.bottom - field.ballRadius - 1;
+    snapshots.enqueue(wall, 150);
+    const bounded = snapshots.sample(1000);
+    assert.equal(bounded.players[0].x, field.width - field.playerRadius);
+    assert.equal(bounded.players[0].y, field.height - field.playerRadius);
+    assert.equal(
+      bounded.ball.x,
+      field.right + field.goalDepth - field.ballRadius,
+    );
+    assert.equal(bounded.ball.y, field.bottom - field.ballRadius);
+  }
+});
+
+test("arena predictions stop at its closed inner boards instead of football goal pockets", () => {
+  const value = frame(1);
+  Object.assign(value, { map_id: "arena", width: 1120, height: 640 });
+  const field = getField(value);
+  Object.assign(value.players[0], {
+    x: field.left + field.playerRadius + 1,
+    y: field.top + field.playerRadius + 1,
+    vx: -100,
+    vy: -100,
+  });
+  Object.assign(value.players[1], {
+    x: field.right - field.playerRadius - 1,
+    y: field.bottom - field.playerRadius - 1,
+    vx: 100,
+    vy: 100,
+  });
+  Object.assign(value.ball, {
+    x: field.right - field.ballRadius - 1,
+    y: field.bottom - field.ballRadius - 1,
+    vx: 100,
+    vy: 100,
+  });
+  const snapshots = new SnapshotInterpolator({ delayMs: 0 });
+  snapshots.enqueue(value, 100);
+  const visual = snapshots.sample(1000);
+  assert.equal(visual.players[0].x, field.left + field.playerRadius);
+  assert.equal(visual.players[0].y, field.top + field.playerRadius);
+  assert.equal(visual.players[1].x, field.right - field.playerRadius);
+  assert.equal(visual.players[1].y, field.bottom - field.playerRadius);
+  assert.equal(visual.ball.x, field.right - field.ballRadius);
+  assert.equal(visual.ball.y, field.bottom - field.ballRadius);
 });

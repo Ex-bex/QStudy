@@ -78,8 +78,14 @@ def validate_frame(frame, room, members):
     if (not isinstance(frame, dict) or frame.get("match_id") != room.match_id or not room.match_id
             or type(frame.get("seq")) is not int or not 0 <= frame["seq"] <= 2**53 - 1):
         raise ValueError("Некорректный кадр")
-    if frame.get("width") != 800 or frame.get("height") != 400:
+    map_id = room.map_id or "classic"
+    width, height = (room.map_width or 10) * 80, (room.map_height or 5) * 80
+    if (type(frame.get("width")) is not int or type(frame.get("height")) is not int
+            or frame["width"] != width or frame["height"] != height):
         raise ValueError("Некорректный размер поля")
+    if frame.get("map_id") != map_id and not (
+            "map_id" not in frame and map_id == "classic" and width == 800 and height == 400):
+        raise ValueError("Карта кадра не совпадает с настройками комнаты")
     players = frame.get("players")
     if not isinstance(players, list) or len(players) > room.max_players:
         raise ValueError("Некорректный состав игроков")
@@ -92,13 +98,13 @@ def validate_frame(frame, room, members):
         member, profile = roster[player["id"]]
         if member.team not in ("red", "blue") or player.get("team") != member.team:
             raise ValueError("Команда игрока изменилась")
-        if (not all(finite(player.get(key), -150, maximum) for key, maximum in (("x", 950), ("y", 550)))
+        if (not all(finite(player.get(key), -150, maximum) for key, maximum in (("x", width + 150), ("y", height + 150)))
                 or not all(finite(player.get(key), -6000, 6000) for key in ("vx", "vy"))
                 or type(player.get("kicking")) is not bool):
             raise ValueError("Некорректная позиция игрока")
         safe_players.append({key: player[key] for key in ("id", "team", "x", "y", "vx", "vy", "kicking")} | {"name": profile.name})
     ball = frame.get("ball")
-    if (not isinstance(ball, dict) or not finite(ball.get("x"), -150, 950) or not finite(ball.get("y"), -150, 550)
+    if (not isinstance(ball, dict) or not finite(ball.get("x"), -150, width + 150) or not finite(ball.get("y"), -150, height + 150)
             or not all(finite(ball.get(key), -10000, 10000) for key in ("vx", "vy"))):
         raise ValueError("Некорректная позиция мяча")
     score = frame.get("score")
@@ -113,7 +119,7 @@ def validate_frame(frame, room, members):
         raise ValueError("Некорректное состояние матча")
     if "goal_pause" in frame and not finite(frame["goal_pause"], 0, 2.5):
         raise ValueError("Некорректная пауза после гола")
-    return {"seq": frame["seq"], "match_id": room.match_id, "width": 800, "height": 400, "players": safe_players,
+    return {"seq": frame["seq"], "match_id": room.match_id, "width": width, "height": height, "map_id": map_id, "players": safe_players,
             "ball": {key: ball[key] for key in ("x", "y", "vx", "vy")},
             "score": {team: score[team] for team in ("red", "blue")},
             **({"goal_pause": frame["goal_pause"]} if "goal_pause" in frame else {}),

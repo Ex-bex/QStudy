@@ -25,6 +25,7 @@ function Get-QBallFixFiles([string]$Root, [string]$Package) {
     $allowed = @(
         'frontend/package.json',
         'frontend/package-lock.json',
+        'frontend/tsconfig.json',
         'frontend/app/api/[...path]/route.ts',
         'frontend/app/qball/qball.css',
         'frontend/components/lumaball/brand.tsx',
@@ -33,15 +34,22 @@ function Get-QBallFixFiles([string]$Root, [string]$Package) {
         'frontend/components/lumaball/game-room.module.css',
         'frontend/components/lumaball/game-room.tsx',
         'frontend/components/lumaball/lobby.tsx',
+        'frontend/components/lumaball/map-settings.tsx',
+        'frontend/components/lumaball/map-settings.module.css',
+        'frontend/components/lumaball/room-settings.tsx',
         'frontend/components/lumaball/original-lobby.css',
         'frontend/components/lumaball/shell.tsx',
         'frontend/lib/lumaball/engine.ts',
+        'frontend/lib/lumaball/maps.ts',
+        'frontend/lib/lumaball/types.ts',
+        'frontend/types/lumaball.ts',
         'frontend/lib/lumaball/room-state.ts',
         'frontend/lib/lumaball/render.ts',
         'frontend/lib/lumaball/snapshot-interpolator.ts',
         'frontend/lib/lumaball-snapshots.test.mjs',
         'frontend/lib/lumaball-render.test.mjs',
         'frontend/lib/lumaball.test.mjs',
+        'frontend/lib/lumaball-maps.test.mjs',
         'frontend/lib/lumaball-parity.test.mjs',
         'frontend/lib/lumaball-room-state.test.mjs',
         'frontend/lib/fixtures/lumaball-original/provenance.json',
@@ -62,6 +70,7 @@ function Get-QBallFixFiles([string]$Root, [string]$Package) {
         'scripts/tests/qball_physics_fixture.mjs',
         'scripts/tests/lumaball_stack.py',
         'backend/app/lumaball_room_models.py',
+        'backend/app/main.py',
         'backend/app/routers/lumaball_rooms.py',
         'backend/app/services/lumaball_identity.py',
         'backend/app/services/lumaball_rooms.py',
@@ -77,7 +86,7 @@ function Get-QBallFixFiles([string]$Root, [string]$Package) {
         $relative = [string]$entry.path
         if ($relative.Contains('\') -or $relative.Contains('//') -or $relative -match '(^|/)(\.|\.env[^/]*|\.next|node_modules|uploads|\.git|\.local)(/|$)' -or
             $allowed -cnotcontains $relative -or
-            [string]$entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not $seen.Add($relative)) { throw 'Пакет содержит запрещённый или повторный путь. Допускаются только проверенные исходники QBall, закреплённые зависимости и тесты оригинальной физики.' }
+            [string]$entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not $seen.Add($relative)) { throw 'Пакет содержит запрещённый или повторный путь. Допускаются только проверенные исходники QBall, закреплённые зависимости, миграция карт и тесты оригинальной физики.' }
         $source = Resolve-QBallFixPath $Package ('payload/' + $relative)
         $target = Resolve-QBallFixPath $Root $relative
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'В пакете отсутствует исходник.' }

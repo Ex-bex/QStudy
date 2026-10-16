@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { URL } from "node:url";
 import ts from "typescript";
-import { FIELD, FootballEngine } from "./lumaball/engine.ts";
+import { Vec2 } from "planck";
+import { FIELD, FootballEngine, getField } from "./lumaball/engine.ts";
 
 const source = readFileSync(
   new URL("./lumaball/render.ts", import.meta.url),
@@ -24,11 +25,16 @@ const compiled = ts
 const { FootballRenderer, FOOTBALL_PALETTE } = await import(
   "data:text/javascript;base64," + Buffer.from(compiled).toString("base64")
 );
-const frame = () => {
-  const result = new FootballEngine([
-    { id: "red", name: "Host", team: "red", connected: true },
-    { id: "blue", name: "Friend", team: "blue", connected: true },
-  ]).frame();
+const frame = (map) => {
+  const result = new FootballEngine(
+    [
+      { id: "red", name: "Host", team: "red", connected: true },
+      { id: "blue", name: "Friend", team: "blue", connected: true },
+    ],
+    0,
+    0,
+    map,
+  ).frame();
   result.kickoff = 0;
   return result;
 };
@@ -231,5 +237,208 @@ test("browsers without ResizeObserver measure only initial layout and window res
   } finally {
     renderer.destroy();
     f.restore();
+  }
+});
+
+test("the ball stays white; the neutral own-player ring is yellow only until a kick is consumed or released", () => {
+  const f = fixture();
+  const renderer = new FootballRenderer(f.canvas);
+  const engine = new FootballEngine([
+    { id: "red", name: "Host", team: "red", connected: true },
+    { id: "blue", name: "Friend", team: "blue", connected: true },
+  ]);
+  engine.kickoff = 0;
+  const player = engine.players.find((item) => item.id === "red");
+  const position = player.body.getPosition();
+  engine.ball.setPosition(Vec2(position.x + 26 / 80, position.y));
+  function drawAndInspect(expectedArmed) {
+    const start = f.canvas.context.calls.length;
+    const value = engine.frame();
+    renderer.draw(value, "red");
+    const calls = f.canvas.context.calls.slice(start);
+    const yellowStrokes = calls.filter(
+      (call) => call.name === "stroke" && call.stroke === "#f8d775",
+    );
+    assert.equal(yellowStrokes.length, expectedArmed ? 1 : 0);
+    assert.ok(
+      calls.some(
+        (call) =>
+          call.name === "stroke" &&
+          call.stroke === (expectedArmed ? "#f8d775" : "rgba(245,247,255,.65)"),
+      ),
+    );
+    const ballArc = calls.findIndex(
+      (call) =>
+        call.name === "arc" &&
+        call.args[0] === value.ball.x &&
+        call.args[1] === value.ball.y &&
+        call.args[2] === FIELD.ballRadius,
+    );
+    assert.ok(ballArc >= 0);
+    assert.equal(
+      calls.slice(ballArc + 1).find((call) => call.name === "fill").fill,
+      FOOTBALL_PALETTE.ball,
+    );
+    assert.ok(
+      !calls.some((call) => call.name === "fill" && call.fill === "#f8d775"),
+      "arming a kick never changes the ball's fill",
+    );
+  }
+  try {
+    drawAndInspect(false);
+    engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 1 });
+    drawAndInspect(true);
+    const statics = f.offscreen[0].context.calls.length;
+    engine.advance(1 / 60);
+    assert.equal(
+      engine.frame().players[0].kicking,
+      false,
+      "a successful original kick consumes its armed state even while the key is held",
+    );
+    drawAndInspect(false);
+    engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 1 });
+    drawAndInspect(false);
+    engine.input("red", { x: 0, y: 0, kick: true, kick_seq: 2 });
+    drawAndInspect(true);
+    engine.input("red", { x: 0, y: 0, kick: false, kick_seq: 2 });
+    drawAndInspect(false);
+    assert.equal(
+      f.offscreen[0].context.calls.length,
+      statics,
+      "kick highlighting and ball movement reuse the cached field",
+    );
+  } finally {
+    renderer.destroy();
+    f.restore();
+  }
+});
+
+test("changing kick flags and impact velocities across 180 frames never rebuilds the static scene", () => {
+  const f = fixture();
+  const renderer = new FootballRenderer(f.canvas);
+  try {
+    const value = frame();
+    renderer.draw(value, "red");
+    const painted = f.offscreen[0].context.calls.length;
+    for (let tick = 0; tick < 180; tick++) {
+      value.seq++;
+      value.ball.x = 300 + (tick % 80);
+      value.ball.vx = tick % 3 === 0 ? -600 : 600;
+      value.players[0].kicking = tick % 2 === 0;
+      renderer.draw(value, "red");
+    }
+    assert.equal(f.offscreen[0].context.calls.length, painted);
+    assert.equal(f.canvas.measurements, 1);
+    assert.equal(f.offscreen.length, 1);
+    assert.equal(
+      f.canvas.context.calls.filter((call) => call.name === "drawImage").length,
+      181,
+    );
+  } finally {
+    renderer.destroy();
+    f.restore();
+  }
+});
+
+test("a map resize or preset change invalidates exactly one static scene and updates its aspect ratio", () => {
+  const f = fixture();
+  const renderer = new FootballRenderer(f.canvas);
+  const paints = () =>
+    f.offscreen[0].context.calls.filter(
+      (call) =>
+        call.name === "fillRect" && call.fill === FOOTBALL_PALETTE.background,
+    ).length;
+  try {
+    let expected = 0;
+    for (const map of [
+      { map_id: "classic", map_width: 10, map_height: 5 },
+      { map_id: "classic", map_width: 20, map_height: 8 },
+      { map_id: "hockey", map_width: 20, map_height: 8 },
+      { map_id: "arena", map_width: 14, map_height: 8 },
+    ]) {
+      const value = frame(map);
+      renderer.draw(value, "red");
+      expected++;
+      assert.equal(paints(), expected);
+      assert.equal(
+        f.canvas.height,
+        Math.round((f.canvas.width * value.height) / value.width),
+      );
+      for (let index = 0; index < 12; index++) renderer.draw(value, "red");
+      assert.equal(paints(), expected);
+    }
+    assert.equal(f.offscreen.length, 1);
+    assert.equal(f.canvas.measurements, 1);
+  } finally {
+    renderer.destroy();
+    f.restore();
+  }
+});
+
+test("hockey draws an ice surface and dark puck while the arena paints its actual collision bumpers", () => {
+  for (const map of [
+    { map_id: "hockey", map_width: 12, map_height: 6 },
+    { map_id: "arena", map_width: 18, map_height: 9 },
+  ]) {
+    const f = fixture();
+    const renderer = new FootballRenderer(f.canvas);
+    try {
+      const value = frame(map),
+        field = getField(value);
+      renderer.draw(value, "red");
+      const statics = f.offscreen[0].context.calls;
+      if (map.map_id === "hockey") {
+        assert.ok(
+          statics.some(
+            (call) => call.name === "fillRect" && call.fill === "#dcebf3",
+          ),
+        );
+        const arc = f.canvas.context.calls.findIndex(
+          (call) =>
+            call.name === "arc" &&
+            call.args[0] === value.ball.x &&
+            call.args[1] === value.ball.y &&
+            call.args[2] === field.ballRadius,
+        );
+        assert.ok(arc >= 0);
+        assert.equal(
+          f.canvas.context.calls
+            .slice(arc + 1)
+            .find((call) => call.name === "fill").fill,
+          "#17242f",
+        );
+        assert.ok(
+          statics.some(
+            (call) =>
+              call.name === "arc" && call.stroke === "rgba(166,70,94,.65)",
+          ),
+          "ice faceoff circles are visible",
+        );
+      } else {
+        assert.equal(field.obstacles.length, 4);
+        for (const obstacle of field.obstacles)
+          assert.ok(
+            statics.some(
+              (call) =>
+                call.name === "arc" &&
+                call.args[0] === obstacle.x &&
+                call.args[1] === obstacle.y &&
+                call.args[2] === obstacle.radius,
+            ),
+            "arena bumper is painted at its physical position and radius",
+          );
+        assert.ok(
+          !statics.some(
+            (call) =>
+              call.name === "stroke" &&
+              ["#bf7180", "#83a9c2"].includes(call.stroke),
+          ),
+          "closed arena has no decorative goal openings",
+        );
+      }
+    } finally {
+      renderer.destroy();
+      f.restore();
+    }
   }
 });
