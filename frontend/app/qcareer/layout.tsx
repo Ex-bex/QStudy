@@ -7,6 +7,10 @@ export const metadata: Metadata = {
   title: "QCareer — из учёбы в будущее",
   description:
     "Поймите свои навыки, найдите интересное направление и соберите следующий шаг на основе обучения в QStudy.",
+  icons: {
+    icon: { url: "/brand/qforcelogo_qcareer.png", type: "image/png" },
+    apple: { url: "/brand/qforcelogo_qcareer.png", type: "image/png" },
+  },
 };
 
 export default function CareerLayout({ children }: { children: ReactNode }) {

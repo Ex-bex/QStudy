@@ -4,7 +4,7 @@ All routes below have `/api` prefix, use the existing QStudy bearer session, SQL
 
 ## Public and personal
 
-- `GET /career/config`: `{enabled,title,description,announcement,logo_url,logo_custom,accent:"orange"}`. Logo is the QStudy branding asset `qcareer` (placeholder until uploaded).
+- `GET /career/config`: `{enabled,title,description,announcement,logo_url,logo_custom,accent:"orange"}`. Logo uses the QStudy branding asset `qcareer` when uploaded; the default is `/brand/qforcelogo_qcareer.png`. Resetting the upload restores this standard logo. Source updates preserve existing branding assets.
 - `GET /career/me`: `{profile,summary,skills,directions,recommendations,activity,disclaimer}`.
   - `profile`: `{user_id,name,group_id,group_name,target_direction_id,interests,about,saved_opportunity_ids}`. Interests: string array.
   - `summary`: `{demonstrated_skills,evidence_count,readiness,target_direction_id,target_direction_title}`; readiness is null when no target/requirements.

@@ -89,6 +89,8 @@ PAYLOAD = (
     'frontend/lib/career.test.mjs',
     'frontend/lib/career.ts',
     'frontend/public/brand/qcareer-placeholder.svg',
+    'frontend/public/brand/qforcelogo_qcareer.png',
+    'assets/brand/source/qforcelogo_qcareer.png',
     'frontend/types/career.ts',
     'scripts/tests/career_stack.py',
     'frontend/app/qcareer/layout.tsx',

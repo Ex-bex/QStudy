@@ -1949,13 +1949,13 @@ export default function CareerAdminPanel() {
           <section className={styles.panel}>
             <h2>Логотип QCareer</h2>
             <p>
-              Место для вашего будущего логотипа уже готово. Загрузите PNG с
-              прозрачным фоном — он появится на страницах QCareer.
+              Используется фирменный логотип QCareer. Здесь можно загрузить
+              другой PNG с прозрачным фоном или вернуть стандартный логотип.
             </p>
             <LogoUpload<{ logo_url: string; logo_custom: boolean }>
               title="Логотип QCareer"
               currentUrl={
-                config.data.logo_url || "/brand/qcareer-placeholder.svg"
+                config.data.logo_url || "/brand/qforcelogo_qcareer.png"
               }
               custom={Boolean(config.data.logo_custom)}
               endpoint="/branding/career-logo"

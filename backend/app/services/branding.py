@@ -16,7 +16,7 @@ MAX_SIDE = 4096
 MAX_PIXELS = 4 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 DEFAULT_PROJECT_LOGO = "/brand/qforce_logo_main.png"
-DEFAULT_CAREER_LOGO = "/brand/qcareer-placeholder.svg"
+DEFAULT_CAREER_LOGO = "/brand/qforcelogo_qcareer.png"
 IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
 
 

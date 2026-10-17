@@ -136,7 +136,7 @@ def main():
                 public, admin, student, other = client(), client(), client(), client()
                 stage = 'shared login and access boundaries'
                 require(public.get('/qcareer').status_code == 200, 'Career public landing did not render')
-                require(public.get('/brand/qcareer-placeholder.svg').status_code == 200, 'Prototype logo missing')
+                require(public.get('/brand/qforcelogo_qcareer.png').status_code == 200, 'QCareer brand logo missing')
                 checked(public.get('/api/career/config'))
                 require(public.get('/api/career/me').status_code == 401, 'Anonymous profile exposed')
                 for account, email in ((admin,'career-admin@example.com'),(student,'career-student@example.com'),(other,'career-other@example.com')):

@@ -78,7 +78,7 @@ export function CareerProvider({ children }: { children: ReactNode }) {
     if (!config) return;
     const title = document.title;
     document.title = `${config.title || "QCareer"} — из учёбы в будущее · QStudy`;
-    const url = config.logo_url || "/brand/qcareer-placeholder.svg";
+    const url = config.logo_url || "/brand/qforcelogo_qcareer.png";
     const icons = Array.from(
       document.querySelectorAll<HTMLLinkElement>(
         'link[rel="icon"], link[rel="apple-touch-icon"]',

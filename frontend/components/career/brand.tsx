@@ -15,7 +15,7 @@ export default function CareerBrand() {
     >
       <span className={styles.brandMark}>
         <Image
-          src={config?.logo_url || "/brand/qcareer-placeholder.svg"}
+          src={config?.logo_url || "/brand/qforcelogo_qcareer.png"}
           alt=""
           width={42}
           height={42}
