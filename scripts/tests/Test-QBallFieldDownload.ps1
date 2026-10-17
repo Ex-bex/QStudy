@@ -1,11 +1,12 @@
-﻿param([ValidateSet('field', 'physics', 'maps')][string]$Variant = 'field', [switch]$SimulateEnglishOem)
+﻿param([ValidateSet('field', 'physics', 'maps', 'career')][string]$Variant = 'field', [switch]$SimulateEnglishOem)
 # PowerShell 5.1 fixtures for the pinned downloaders. No download, runtime, or live data.
 $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $physics = $Variant -ceq 'physics'
 $maps = $Variant -ceq 'maps'
-$cmdName = if ($maps) { 'Update-QBall-Maps.cmd' } elseif ($physics) { 'Update-QBall-Physics.cmd' } else { 'Update-QBall-Field.cmd' }
-$archiveName = if ($maps) { 'QStudy-QBall-Maps-Fix.zip' } elseif ($physics) { 'QStudy-QBall-Original-Physics.zip' } else { 'QStudy-QBall-Browser-Fix.zip' }
+$career = $Variant -ceq 'career'
+$cmdName = if ($career) { 'Update-QCareer.cmd' } elseif ($maps) { 'Update-QBall-Maps.cmd' } elseif ($physics) { 'Update-QBall-Physics.cmd' } else { 'Update-QBall-Field.cmd' }
+$archiveName = if ($career) { 'QStudy-QCareer-Integration.zip' } elseif ($maps) { 'QStudy-QBall-Maps-Fix.zip' } elseif ($physics) { 'QStudy-QBall-Original-Physics.zip' } else { 'QStudy-QBall-Browser-Fix.zip' }
 $bootstrapRelative = 'assets/distribution/' + $cmdName
 $bootstrapPath = Join-Path $workspace $bootstrapRelative
 $bootstrap = [IO.File]::ReadAllText($bootstrapPath)
@@ -31,7 +32,7 @@ function Assert-FieldThrows([scriptblock]$Operation, [string]$Message) {
     Assert-Field $failed $Message
 }
 function Assert-FieldChildText([string]$Actual, [string]$Russian, [string]$Ascii, [string]$Message) {
-    $checkRussian = $physics -or $maps
+    $checkRussian = $physics -or $maps -or $career
     if (-not $checkRussian) {
         $oem = [Text.Encoding]::GetEncoding([int][QBallFieldConsoleEncoding]::GetOEMCP())
         $checkRussian = $oem.GetString($oem.GetBytes($Russian)) -ceq $Russian
@@ -93,7 +94,9 @@ try {
     Install-QBallFieldPackage $project $archive $actualHash
     Assert-Field (Test-Path -LiteralPath (Join-Path $project '.qstudy-fix/Apply.ps1') -PathType Leaf) 'real package prepares the preserving apply helper'
     Assert-Field (Test-Path -LiteralPath (Join-Path $project 'Apply-QBall-Fix.cmd') -PathType Leaf) 'real package prepares its manual retry button'
-    $expectedHelperHash = if ($maps) {
+    $expectedHelperHash = if ($career) {
+        (Get-FileHash -LiteralPath (Join-Path $workspace 'scripts/maintenance/Apply-QCareerFix.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+    } elseif ($maps) {
         (Get-FileHash -LiteralPath (Join-Path $workspace 'scripts/maintenance/Apply-QBallFix.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
     } elseif ($physics) {
         # Original physics stays pinned to its reviewed immutable release helper.
