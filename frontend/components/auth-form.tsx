@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Loader2, ShieldCheck } from "lucide-react";
-import Brand from "./brand";
-import LearningScene from "./learning-scene";
+import { ArrowRight, Loader2 } from "lucide-react";
+import IdentityShell from "./identity-shell";
+import styles from "./identity.module.css";
 import PasswordInput from "./password-input";
 import { api, setToken } from "@/lib/api";
 import { authReturnPath } from "@/lib/auth-return";
@@ -95,199 +95,189 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
       setLoading(false);
     }
   }
+  const destination = returnTo.startsWith("/qcareer")
+    ? "QCareer"
+    : returnTo.startsWith("/qball")
+      ? "QBall"
+      : "QStudy";
   return (
-    <div className="auth-page">
-      <section className="auth-visual">
-        <Brand />
-        <div className="auth-quote">
-          <span className="eyebrow">ВАШЕ ПРОСТРАНСТВО ДЛЯ РОСТА</span>
-          <h2>
-            Любопытство.
-            <br />
-            Ваше главное
-            <br />
-            <em>преимущество.</em>
-          </h2>
-          <p>
-            Учитесь в своём ритме.
-            <br />
-            Всё остальное мы поможем организовать.
-          </p>
-        </div>
-        <LearningScene compact />
-        <span className="auth-footnote">СОЗДАНО ДЛЯ ТЕХ, КТО ИДЁТ ВПЕРЁД</span>
-      </section>
-      <main className="auth-main">
-        <Link href="/" className="back-link">
-          <ArrowLeft size={16} /> На главную
-        </Link>
-        <div className="auth-form-wrap">
-          <span className="eyebrow">НАЧИНАЕТСЯ С ВАС</span>
-          <h1>
-            {register ? "Давайте знакомиться" : "С возвращением"}
-            <span className="brand-dot">.</span>
-          </h1>
-          <p className="muted">
-            {register
-              ? "Создайте аккаунт и соберите учёбу в одном месте."
-              : "Ваши планы, идеи и новые открытия уже здесь."}
-          </p>
-          <form onSubmit={submit} className="auth-form">
-            {error && (
-              <div className="alert" role="alert">
-                {error}
-              </div>
-            )}
-            {register && (
-              <label>
-                Как вас зовут
-                <input
-                  className="field"
-                  autoComplete="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Ваше имя"
-                  maxLength={100}
-                  required
-                />
-              </label>
-            )}
-            <label>
-              Электронная почта
-              <input
-                className="field"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-                maxLength={254}
-              />
-            </label>
-            <label>
-              Пароль
-              <PasswordInput
-                className="field"
-                autoComplete={register ? "new-password" : "current-password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={
-                  register ? "Придумайте надёжный пароль" : "Введите пароль"
-                }
-                minLength={register ? 10 : 1}
-                maxLength={128}
-                required
-              />
-              {register && (
-                <small className="muted">
-                  От 10 символов, с буквами и цифрами.
-                </small>
-              )}
-            </label>
-            {register && (
-              <label>
-                Учебная группа
-                <select
-                  name="group_id"
-                  className="field"
-                  value={groupId}
-                  onChange={(e) => setGroupId(e.target.value)}
-                  required={groups.length > 0}
-                  disabled={loading || groupsLoading || Boolean(groupsError)}
-                  aria-describedby="registration-group-help"
-                >
-                  <option value="">
-                    {groupsLoading
-                      ? "Загружаем группы…"
-                      : "Выберите вашу группу"}
-                  </option>
-                  {groups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
-                  ))}
-                </select>
-                <small className="muted" id="registration-group-help">
-                  {groupsLoading
-                    ? "Получаем список учебных групп."
-                    : groups.length
-                      ? "По группе откроются ваше расписание, силабусы, модули и учебные рекомендации. Позже группу сможет изменить администратор."
-                      : groupsError
-                        ? "Пока список недоступен, регистрация приостановлена."
-                        : "Группы пока не созданы. Можно зарегистрироваться без группы — администратор назначит её позже."}
-                </small>
-                {groupsError && (
-                  <span role="alert">
-                    {groupsError}{" "}
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={groupsLoading}
-                      onClick={() => {
-                        setGroupsLoading(true);
-                        setGroupsError("");
-                        setGroupsRevision((value) => value + 1);
-                      }}
-                    >
-                      Повторить загрузку
-                    </button>
-                  </span>
-                )}
-              </label>
-            )}
-            {register && (
-              <label>
-                Повторите пароль
-                <PasswordInput
-                  className="field"
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                />
-              </label>
-            )}
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={
-                loading || (register && (groupsLoading || Boolean(groupsError)))
-              }
-            >
-              {loading ? (
-                <Loader2 className="animate-spin" size={18} />
-              ) : (
-                <>
-                  {register ? "Создать аккаунт" : "Войти в пространство"}
-                  <ArrowRight size={18} />
-                </>
-              )}
-            </button>
-          </form>
-          {!register && (
-            <p className="auth-switch">
-              <Link href="/forgot-password">Забыли пароль?</Link>
-            </p>
-          )}
-          <p className="auth-switch">
-            {register ? "Уже с нами?" : "Пока нет аккаунта?"}{" "}
-            <Link
-              href={`${register ? "/login" : "/register"}${returnTo === "/dashboard" ? "" : `?next=${encodeURIComponent(returnTo)}`}`}
-            >
-              {register ? "Войти" : "Зарегистрироваться"}
-            </Link>
-          </p>
-          <div className="auth-security">
-            <ShieldCheck size={15} />
-            <span>Личные материалы доступны только вам</span>
+    <IdentityShell mode={register ? "register" : "login"}>
+      <p className={styles.context}>
+        После {register ? "регистрации" : "входа"} откроется{" "}
+        <span className={styles.appLabel}>{destination}</span>.
+      </p>
+      <form onSubmit={submit} className={styles.form} aria-busy={loading}>
+        {error && (
+          <div className={styles.alert} role="alert">
+            {error}
           </div>
+        )}
+        {register && (
+          <div className={styles.label}>
+            <label htmlFor="qid-name">Ваше имя</label>
+            <input
+              id="qid-name"
+              name="name"
+              className={styles.field}
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Как к вам обращаться"
+              maxLength={100}
+              required
+              disabled={loading}
+            />
+          </div>
+        )}
+        <div className={styles.label}>
+          <label htmlFor="qid-email">Электронная почта</label>
+          <input
+            id="qid-email"
+            name="email"
+            className={styles.field}
+            type="email"
+            autoComplete={register ? "email" : "username"}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            required
+            maxLength={254}
+            disabled={loading}
+          />
         </div>
-        <p className="auth-bottom">
-          <span>QStudy · Учиться. Понимать. Расти.</span>
-          <Link href="/developers">Связь с разработчиками</Link>
-        </p>
-      </main>
-    </div>
+        <div className={styles.label}>
+          <div className={styles.labelRow}>
+            <label htmlFor="qid-password">Пароль</label>
+            {!register && (
+              <Link className={styles.textLink} href="/forgot-password">
+                Забыли пароль?
+              </Link>
+            )}
+          </div>
+          <PasswordInput
+            id="qid-password"
+            name="password"
+            className={styles.field}
+            autoComplete={register ? "new-password" : "current-password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={
+              register ? "Придумайте надёжный пароль" : "Введите пароль"
+            }
+            minLength={register ? 10 : 1}
+            maxLength={128}
+            required
+            disabled={loading}
+            aria-describedby={register ? "qid-password-help" : undefined}
+          />
+          {register && (
+            <small className={styles.help} id="qid-password-help">
+              От 10 символов, с буквами и цифрами.
+            </small>
+          )}
+        </div>
+        {register && (
+          <>
+            <div className={styles.label}>
+              <label htmlFor="qid-password-confirm">Повторите пароль</label>
+              <PasswordInput
+                id="qid-password-confirm"
+                name="confirm_password"
+                className={styles.field}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                minLength={10}
+                maxLength={128}
+                placeholder="Введите пароль ещё раз"
+                required
+                disabled={loading}
+              />
+            </div>
+            <div className={styles.label}>
+              <label htmlFor="qid-group">Учебная группа</label>
+              <select
+                id="qid-group"
+                name="group_id"
+                className={styles.field}
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                required={groups.length > 0}
+                disabled={loading || groupsLoading || Boolean(groupsError)}
+                aria-describedby="registration-group-help"
+              >
+                <option value="">
+                  {groupsLoading ? "Загружаем группы…" : "Выберите вашу группу"}
+                </option>
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+              <small className={styles.help} id="registration-group-help">
+                {groupsLoading
+                  ? "Получаем список учебных групп."
+                  : groupsError
+                    ? "Пока список недоступен, регистрация приостановлена."
+                    : groups.length
+                      ? "Группа определяет расписание, силабусы, модули и учебные рекомендации. Позже её сможет изменить администратор."
+                      : "Группы пока не созданы. Можно зарегистрироваться без группы — администратор назначит её позже."}
+              </small>
+              {groupsError && (
+                <div className={styles.alert} role="alert">
+                  <p>{groupsError}</p>
+                  <button
+                    type="button"
+                    className={styles.secondary}
+                    disabled={groupsLoading}
+                    onClick={() => {
+                      setGroupsLoading(true);
+                      setGroupsError("");
+                      setGroupsRevision((value) => value + 1);
+                    }}
+                  >
+                    Повторить загрузку
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        <button
+          type="submit"
+          className={styles.submit}
+          disabled={
+            loading || (register && (groupsLoading || Boolean(groupsError)))
+          }
+        >
+          {loading ? (
+            <>
+              <Loader2 className="animate-spin" size={18} aria-hidden="true" />
+              {register ? "Создаём аккаунт…" : "Входим…"}
+            </>
+          ) : (
+            <>
+              {register ? "Создать Q-ID" : "Войти с Q-ID"}
+              <ArrowRight size={18} aria-hidden="true" />
+            </>
+          )}
+        </button>
+      </form>
+      <p className={styles.switchRow}>
+        {register ? "Уже есть Q-ID?" : "Ещё нет аккаунта?"}{" "}
+        <Link
+          className={styles.textLink}
+          href={`${register ? "/login" : "/register"}${returnTo === "/dashboard" ? "" : `?next=${encodeURIComponent(returnTo)}`}`}
+        >
+          {register ? "Войти" : "Создать Q-ID"}
+        </Link>
+      </p>
+      <p className={styles.security}>
+        {register
+          ? "Один аккаунт для QStudy, QCareer и QBall."
+          : "Уже пользуетесь QStudy? Введите привычные почту и пароль."}
+      </p>
+    </IdentityShell>
   );
 }

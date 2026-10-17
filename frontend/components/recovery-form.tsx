@@ -2,15 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
-  Loader2,
-  ShieldCheck,
-} from "lucide-react";
-import Brand from "./brand";
-import LearningScene from "./learning-scene";
+import { ArrowRight, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
+import IdentityShell from "./identity-shell";
+import styles from "./identity.module.css";
 import PasswordInput from "./password-input";
 import { api, setToken } from "@/lib/api";
 
@@ -88,159 +82,121 @@ export default function RecoveryForm({ reset = false }: { reset?: boolean }) {
   }
 
   return (
-    <div className="auth-page">
-      <section className="auth-visual">
-        <Brand />
-        <div className="auth-quote">
-          <span className="eyebrow">ПРОДОЛЖАЙТЕ СВОЙ ПУТЬ</span>
-          <h2>
-            Ваши идеи.
-            <br />
-            Ваши планы.
-            <br />
-            <em>Всё сохранено.</em>
-          </h2>
-          <p>Верните доступ к своему учебному пространству.</p>
-        </div>
-        <LearningScene compact />
-        <span className="auth-footnote">
-          QSTUDY · УЧИТЬСЯ. ПОНИМАТЬ. РАСТИ.
-        </span>
-      </section>
-      <main className="auth-main">
-        <Link href="/login" className="back-link">
-          <ArrowLeft size={16} /> К входу
-        </Link>
-        <div className="auth-form-wrap">
-          <span className="eyebrow">ДОСТУП К АККАУНТУ</span>
-          <h1>
-            {reset ? "Новый пароль" : "Восстановление"}
-            <span className="brand-dot">.</span>
-          </h1>
-          <p className="muted">
-            {reset
-              ? "Придумайте новый пароль для вашего аккаунта."
-              : "Укажите почту, с которой вы зарегистрировались."}
+    <IdentityShell mode={reset ? "reset" : "forgot"}>
+      {message ? (
+        <div className={styles.form}>
+          <p className={styles.success} role="status">
+            <CheckCircle2 size={20} /> {message}
           </p>
-          {message ? (
-            <div className="auth-form">
-              <p role="status">
-                <CheckCircle2 size={20} /> {message}
-              </p>
-              {!reset && delivery === "local" && (
-                <p className="muted">
-                  Включён локальный режим. Ссылка сохраняется в закрытой папке
-                  восстановления на компьютере сервера. Обратитесь к его
-                  владельцу.
-                </p>
-              )}
-              <Link
-                className="btn btn-primary"
-                href={reset ? "/login" : "/forgot-password"}
-                onClick={() => !reset && setMessage("")}
-              >
-                {reset ? "Войти с новым паролем" : "Запросить снова"}
-                <ArrowRight size={18} />
-              </Link>
-            </div>
-          ) : (
-            <form className="auth-form" onSubmit={submit}>
-              {error && (
-                <div className="alert" role="alert">
-                  {error}
-                </div>
-              )}
-              {reset ? (
-                <>
-                  <label>
-                    Новый пароль
-                    <PasswordInput
-                      className="field"
-                      autoComplete="new-password"
-                      minLength={10}
-                      maxLength={128}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                    <small className="muted">
-                      10–128 символов, с буквами и цифрами.
-                    </small>
-                  </label>
-                  <label>
-                    Повторите пароль
-                    <PasswordInput
-                      className="field"
-                      autoComplete="new-password"
-                      minLength={10}
-                      maxLength={128}
-                      value={confirmation}
-                      onChange={(e) => setConfirmation(e.target.value)}
-                      required
-                    />
-                  </label>
-                </>
-              ) : (
-                <label>
-                  Электронная почта
-                  <input
-                    className="field"
-                    type="email"
-                    autoComplete="email"
-                    maxLength={254}
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    required
-                  />
-                </label>
-              )}
-              {!reset && delivery === "local" && (
-                <small className="muted">
-                  Сейчас восстановление работает через владельца локального
-                  сервера. Для отправки писем администратор может подключить
-                  почту.
-                </small>
-              )}
-              {!reset && delivery === "disabled" && (
-                <div className="alert">
-                  Восстановление пока не настроено. Обратитесь к администратору.
-                </div>
-              )}
-              <button
-                className="btn btn-primary"
-                disabled={
-                  loading ||
-                  (reset
-                    ? !token
-                    : delivery === null || delivery === "disabled")
-                }
-                type="submit"
-              >
-                {loading ? (
-                  <Loader2 className="animate-spin" size={18} />
-                ) : (
-                  <>
-                    {reset ? "Сохранить пароль" : "Получить ссылку"}
-                    <ArrowRight size={18} />
-                  </>
-                )}
-              </button>
-              {reset && !token && (
-                <Link href="/forgot-password">Запросить новую ссылку</Link>
-              )}
-            </form>
+          {!reset && delivery === "local" && (
+            <p className={styles.help}>
+              Включён локальный режим. Ссылка сохраняется в закрытой папке
+              восстановления на компьютере сервера. Обратитесь к его владельцу.
+            </p>
           )}
-          <div className="auth-security">
-            <ShieldCheck size={15} />
-            <span>Ссылка одноразовая. Материалы аккаунта сохраняются.</span>
-          </div>
+          <Link
+            className={styles.submit}
+            href={reset ? "/login" : "/forgot-password"}
+            onClick={() => !reset && setMessage("")}
+          >
+            {reset ? "Войти с новым паролем" : "Запросить снова"}
+            <ArrowRight size={18} />
+          </Link>
         </div>
-        <p className="auth-bottom">
-          <span>QStudy · Учиться. Понимать. Расти.</span>
-          <Link href="/developers">Связь с разработчиками</Link>
-        </p>
-      </main>
-    </div>
+      ) : (
+        <form className={styles.form} onSubmit={submit}>
+          {error && (
+            <div className={styles.alert} role="alert">
+              {error}
+            </div>
+          )}
+          {reset ? (
+            <>
+              <label className={styles.label}>
+                Новый пароль
+                <PasswordInput
+                  className={styles.field}
+                  autoComplete="new-password"
+                  minLength={10}
+                  maxLength={128}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <small className={styles.help}>
+                  10–128 символов, с буквами и цифрами.
+                </small>
+              </label>
+              <label className={styles.label}>
+                Повторите пароль
+                <PasswordInput
+                  className={styles.field}
+                  autoComplete="new-password"
+                  minLength={10}
+                  maxLength={128}
+                  value={confirmation}
+                  onChange={(e) => setConfirmation(e.target.value)}
+                  required
+                />
+              </label>
+            </>
+          ) : (
+            <label className={styles.label}>
+              Электронная почта
+              <input
+                className={styles.field}
+                type="email"
+                autoComplete="email"
+                maxLength={254}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+          )}
+          {!reset && delivery === "local" && (
+            <small className={styles.help}>
+              Сейчас восстановление работает через владельца локального сервера.
+              Для отправки писем администратор может подключить почту.
+            </small>
+          )}
+          {!reset && delivery === "disabled" && (
+            <div className={styles.alert} role="status">
+              Восстановление пока не настроено. Обратитесь к администратору.
+            </div>
+          )}
+          <button
+            className={styles.submit}
+            disabled={
+              loading ||
+              (reset ? !token : delivery === null || delivery === "disabled")
+            }
+            type="submit"
+          >
+            {loading ? (
+              <Loader2 className="animate-spin" size={18} />
+            ) : (
+              <>
+                {reset ? "Сохранить пароль" : "Получить ссылку"}
+                <ArrowRight size={18} />
+              </>
+            )}
+          </button>
+          {reset && !token && (
+            <Link className={styles.textLink} href="/forgot-password">
+              Запросить новую ссылку
+            </Link>
+          )}
+        </form>
+      )}
+      <div className={styles.security}>
+        <ShieldCheck size={15} />
+        <span>Ссылка одноразовая. Материалы аккаунта сохраняются.</span>
+      </div>
+      <p className={styles.switchRow}>
+        Вспомнили пароль? <Link href="/login">Войти в Q-ID</Link>
+      </p>
+    </IdentityShell>
   );
 }

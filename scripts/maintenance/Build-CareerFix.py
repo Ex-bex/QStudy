@@ -73,6 +73,16 @@ PAYLOAD = (
     'backend/tests/test_security.py',
     'backend/tests/smoke_bff.py',
     'frontend/components/auth-form.tsx',
+    'frontend/components/identity-shell.tsx',
+    'frontend/components/identity.module.css',
+    'frontend/lib/identity-brand.ts',
+    'frontend/public/brand/qid-placeholder.svg',
+    'frontend/components/recovery-form.tsx',
+    'frontend/app/login/page.tsx',
+    'frontend/app/register/page.tsx',
+    'frontend/app/forgot-password/page.tsx',
+    'frontend/app/reset-password/page.tsx',
+    'docs/host-update.md',
     'frontend/app/dashboard/modules/page.tsx',
     'frontend/app/dashboard/syllabi/page.tsx',
     'frontend/app/dashboard/profile/page.tsx',
@@ -152,6 +162,14 @@ QCareer использует существующий вход и роли QStud
 При старте добавляются только таблицы career_*. Учебный каталог создаётся
 один раз, без демонстрационных сотрудников или чужих аккаунтов.
 Удалённые администратором навыки не создаются повторно при перезапуске.
+
+Вход, регистрация и восстановление пароля оформлены под общим брендом Q-ID
+для QStudy, QCareer и QBall. Все текущие аккаунты и пароли продолжают работать:
+повторная регистрация или сброс аккаунтов не нужны. Выбор учебной группы
+при регистрации и назначение группы через админку сохранены.
+Восстановление пароля использует прежнюю общую базу и настройки почты.
+Временный логотип Q-ID можно заменить, когда будет готов основной логотип.
+Пошаговое обновление действующего хоста описано в docs/host-update.md.
 
 Навыки связаны с силабусами, дисциплинами, модулями, неделями и работами.
 Подтверждение рассчитывается по завершённым тестам учебной программы

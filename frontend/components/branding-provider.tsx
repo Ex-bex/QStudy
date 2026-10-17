@@ -9,6 +9,7 @@ import {
   type ProjectBranding,
 } from "@/lib/branding";
 import { createBrandingStore } from "@/lib/branding-store";
+import { isIdentityPath, QID_LOGO } from "@/lib/identity-brand";
 
 const store = createBrandingStore(DEFAULT_BRANDING, async () =>
   normalizeBranding(await api<ProjectBranding>("/branding")),
@@ -41,6 +42,7 @@ function DynamicProjectIcons() {
   const pathname = usePathname();
   useEffect(() => {
     if (pathname === "/qcareer" || pathname.startsWith("/qcareer/")) return;
+    const identity = isIdentityPath(pathname);
     for (const rel of ["icon", "apple-touch-icon"]) {
       let links = [
         ...document.head.querySelectorAll<HTMLLinkElement>(
@@ -54,8 +56,9 @@ function DynamicProjectIcons() {
         links = [link];
       }
       for (const link of links) {
-        link.href = branding.project_logo_url;
-        link.type = "image/png";
+        link.href = identity ? QID_LOGO : branding.project_logo_url;
+        link.type =
+          identity && QID_LOGO.endsWith(".svg") ? "image/svg+xml" : "image/png";
         link.sizes = "any";
       }
     }
