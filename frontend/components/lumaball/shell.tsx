@@ -50,7 +50,7 @@ export default function LumaShell({ children }: { children: ReactNode }) {
             </Link>
             {identity?.is_admin && (
               <Link
-                href="/dashboard/admin/qball"
+                href="/qcontrol/qball"
                 {...navigation}
                 className="lb-icon-link"
                 aria-label="Управление QBall"

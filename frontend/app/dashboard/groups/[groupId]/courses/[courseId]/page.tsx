@@ -1,5 +1,7 @@
 "use client";
 
+import { useStudyManagement, useStudyPath } from "@/lib/study-management";
+
 import Link from "next/link";
 import { useEffect } from "react";
 import { setActivity } from "@/lib/context";
@@ -11,7 +13,6 @@ import {
   GraduationCap,
   UserRound,
 } from "lucide-react";
-import { useAuth } from "@/lib/auth";
 import {
   useResource,
   PageTitle,
@@ -36,8 +37,8 @@ export default function CoursePage() {
     courseId: string;
   }>();
   const router = useRouter();
-  const { user } = useAuth();
-  const admin = user?.role === "admin";
+  const admin = useStudyManagement();
+  const studyPath = useStudyPath();
   const {
     data: course,
     loading,
@@ -58,7 +59,7 @@ export default function CoursePage() {
     <div>
       <Link
         className="academic-breadcrumb"
-        href={`/dashboard/groups/${groupId}`}
+        href={studyPath(`/dashboard/groups/${groupId}`)}
       >
         <ArrowLeft size={14} />
         {course.group_name || "Назад к группе"}
@@ -82,7 +83,9 @@ export default function CoursePage() {
               title="Удалить дисциплину?"
               description="Будут удалены занятия, программа, силабусы и работы этой дисциплины."
               endpoint={`/courses/${course.id}`}
-              onDeleted={() => router.push(`/dashboard/groups/${groupId}`)}
+              onDeleted={() =>
+                router.push(studyPath(`/dashboard/groups/${groupId}`))
+              }
             />
           </>
         )}
@@ -101,7 +104,7 @@ export default function CoursePage() {
         </span>
         <span>{course.weeks?.length || 0} недель в программе</span>
         <Link
-          href={`/dashboard/syllabi?course=${course.id}`}
+          href={studyPath(`/dashboard/syllabi?course=${course.id}`)}
           className="btn btn-secondary"
           style={{ marginLeft: "auto" }}
         >

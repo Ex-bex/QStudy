@@ -391,7 +391,7 @@ export default function LumaLobby() {
               </Link>
             )}
             {identity?.is_admin && (
-              <Link href="/dashboard/admin/qball">
+              <Link href="/qcontrol/qball">
                 Управление игрой <ArrowUpRight size={14} />
               </Link>
             )}

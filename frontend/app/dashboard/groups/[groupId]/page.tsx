@@ -1,5 +1,7 @@
 "use client";
 
+import { useStudyManagement, useStudyPath } from "@/lib/study-management";
+
 import { Suspense, useState } from "react";
 import {
   useParams,
@@ -20,7 +22,6 @@ import {
   Search,
   Users,
 } from "lucide-react";
-import { useAuth } from "@/lib/auth";
 import {
   civilDate,
   isoWeekStart,
@@ -68,8 +69,8 @@ function GroupContent() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const { user } = useAuth();
-  const admin = user?.role === "admin";
+  const admin = useStudyManagement();
+  const studyPath = useStudyPath();
   const {
     data: group,
     loading,
@@ -186,7 +187,10 @@ function GroupContent() {
   }
   return (
     <div>
-      <Link className="academic-breadcrumb" href="/dashboard/groups">
+      <Link
+        className="academic-breadcrumb"
+        href={studyPath("/dashboard/groups")}
+      >
         <ArrowLeft size={14} /> Все группы
       </Link>
       <PageTitle
@@ -212,7 +216,7 @@ function GroupContent() {
               title="Удалить группу?"
               description="Будут удалены дисциплины, расписание и учебный план этой группы."
               endpoint={`/groups/${group.id}`}
-              onDeleted={() => router.push("/dashboard/groups")}
+              onDeleted={() => router.push(studyPath("/dashboard/groups"))}
             />
           </>
         )}
@@ -409,7 +413,9 @@ function GroupContent() {
                             )}
                           </div>
                           <Link
-                            href={`/dashboard/groups/${group.id}/courses/${lesson.course_id}`}
+                            href={studyPath(
+                              `/dashboard/groups/${group.id}/courses/${lesson.course_id}`,
+                            )}
                           >
                             {lesson.course_title ||
                               group.courses.find(
@@ -560,7 +566,9 @@ function GroupContent() {
                   </p>
                 )}
                 <Link
-                  href={`/dashboard/groups/${group.id}/courses/${course.id}`}
+                  href={studyPath(
+                    `/dashboard/groups/${group.id}/courses/${course.id}`,
+                  )}
                   className="academic-card-link"
                 >
                   Программа и задания <ArrowUpRight size={17} />

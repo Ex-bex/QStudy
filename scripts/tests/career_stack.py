@@ -147,6 +147,26 @@ def main():
                 require(public.get('/api/career/me').status_code == 401, 'Anonymous profile exposed')
                 for account, email in ((admin,'career-admin@example.com'),(student,'career-student@example.com'),(other,'career-other@example.com')):
                     login(account,email)
+                stage = 'QControl server access and ecosystem logo separation'
+                restricted = public.get('/qcontrol')
+                require(restricted.status_code==307 and restricted.headers.get('location')=='/login?next=%2Fqcontrol','Anonymous QControl did not return to Q-ID')
+                restricted = student.get('/qcontrol')
+                require(restricted.status_code==307 and restricted.headers.get('location')=='/dashboard','Student received QControl access')
+                for page in ('/qcontrol','/qcontrol/accounts','/qcontrol/qstudy/groups','/qcontrol/qstudy/groups/1/courses/1',
+                    '/qcontrol/qstudy/syllabi','/qcontrol/qstudy/modules','/qcontrol/qstudy/subjects','/qcontrol/qcareer','/qcontrol/qball','/qcontrol/branding','/qcontrol/system','/qcontrol/operations'):
+                    require(admin.get(page).status_code==200,'Administrator cannot open '+page)
+                for old,new in (('/dashboard/admin','/qcontrol'),('/dashboard/admin/career','/qcontrol/qcareer'),('/dashboard/admin/qball','/qcontrol/qball')):
+                    legacy = public.get(old)
+                    require(legacy.status_code==307 and legacy.headers.get('location')==new,'Legacy management route did not move to QControl')
+                ecosystem = checked(public.get('/api/branding/ecosystem'))
+                require(ecosystem['identity_logo_url']=='/brand/qforcelogo_q-id.png' and ecosystem['control_logo_url']=='/brand/qforcelogo_qcontrol.png','Ecosystem defaults retained prototypes')
+                png = io.BytesIO()
+                Image.new('RGBA',(64,64),(220,40,50,128)).save(png,format='PNG')
+                require(student.put('/api/branding/control-logo',files={'file':('logo.png',png.getvalue(),'image/png')}).status_code==403,'Student changed QControl branding')
+                uploaded = checked(admin.put('/api/branding/control-logo',files={'file':('logo.png',png.getvalue(),'image/png')}))
+                require('/assets/qcontrol/' in uploaded['control_logo_url'] and not uploaded['identity_logo_custom'],'Independent QControl upload affected Q-ID')
+                require(public.get(uploaded['control_logo_url']).status_code==200,'Content-addressed QControl PNG was blocked by BFF')
+                checked(admin.delete('/api/branding/control-logo'))
                 stage = 'registration choice and existing-session group transfer'
                 choices = checked(public.get('/api/auth/registration-groups'))
                 require({row['id'] for row in choices}=={1,2} and all(set(row)=={'id','name'} for row in choices),'Public group choices leaked account data or omitted groups')
@@ -223,7 +243,7 @@ def main():
                     require(db.execute('SELECT score FROM test_sessions WHERE id=1').fetchone()[0]==100,'Academic test was overwritten')
                     require(db.execute('SELECT grade FROM work_submissions WHERE id=?',(submission['id'],)).fetchone()[0]==100,'Academic grade was overwritten')
                     require(db.execute('PRAGMA integrity_check').fetchone()==('ok',),'Shared database integrity failed')
-                print('PASS: production HTTP/BFF registration group choice, own timetable/syllabi/modules, administrator group transfer in existing session, shared HttpOnly login, student/admin isolation, curriculum mappings, real test completion, graded-work evidence, personal saved opportunities, publication expiry, transparent logo, restart persistence and revocation without academic data loss.')
+                print('PASS: production HTTP/BFF QControl server role gate, legacy redirects, ecosystem PNG management, registration group choice, own timetable/syllabi/modules, administrator group transfer in existing session, shared HttpOnly login, student/admin isolation, curriculum mappings, real test completion, graded-work evidence, personal saved opportunities, publication expiry, transparent logo, restart persistence and revocation without academic data loss.')
                 return 0
             finally:
                 stop_child(frontend)

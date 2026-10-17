@@ -25,7 +25,9 @@ from app.models import BrandingAsset, DeveloperDepartment, User
 from app.operational_models import AuditLog
 from app.routers import branding, developers
 from app.services.backups import BackupService, verify_backup
-from app.services.branding import DEFAULT_PROJECT_LOGO, DEFAULT_CAREER_LOGO, IMMUTABLE_CACHE, MAX_LOGO_BYTES, career_branding, normalize_png
+from app.services.branding import (DEFAULT_PROJECT_LOGO, DEFAULT_CAREER_LOGO, DEFAULT_IDENTITY_LOGO,
+                                  DEFAULT_CONTROL_LOGO, IMMUTABLE_CACHE, MAX_LOGO_BYTES,
+                                  career_branding, ecosystem_branding, normalize_png)
 from app.security import BodySizeLimitMiddleware
 
 
@@ -81,7 +83,8 @@ class BrandingTests(unittest.TestCase):
         self.assertNotIn("admin-private", response.text)
 
     def test_every_upload_and_reset_requires_current_active_admin(self):
-        paths = ["/api/branding/project-logo", "/api/branding/career-logo", f"/api/branding/departments/{self.department_id}/logo"]
+        paths = ["/api/branding/project-logo", "/api/branding/career-logo", "/api/branding/identity-logo",
+                 "/api/branding/control-logo", f"/api/branding/departments/{self.department_id}/logo"]
         for user_id, expected in ((None, 401), (self.student_id, 403)):
             if user_id:
                 self.as_user(user_id)
@@ -249,6 +252,86 @@ class BrandingTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/branding").json(), initial)
         with self.sessions() as db:
             self.assertEqual(db.query(AuditLog).count(), 1)
+
+    def test_ecosystem_public_defaults_preserve_existing_branding_contract(self):
+        response = self.client.get("/api/branding/ecosystem")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"identity_logo_url": DEFAULT_IDENTITY_LOGO,
+                                          "identity_logo_custom": False,
+                                          "control_logo_url": DEFAULT_CONTROL_LOGO,
+                                          "control_logo_custom": False})
+        self.assertEqual(self.client.get("/api/branding").json(),
+                         {"project_logo_url": DEFAULT_PROJECT_LOGO, "project_logo_custom": False})
+        with self.sessions() as db:
+            self.assertEqual(career_branding(db), {"logo_url": DEFAULT_CAREER_LOGO, "logo_custom": False})
+            self.assertEqual(db.query(BrandingAsset).count(), 0)
+        self.assertNotIn("PRIVATE", response.text)
+        self.assertNotIn("admin-private", response.text)
+
+    def test_ecosystem_logos_sanitize_cache_audit_and_reset_independently(self):
+        self.as_user(self.admin_id)
+        project = self.upload().json()
+        career = self.upload("/api/branding/career-logo").json()
+        identity = self.upload("/api/branding/identity-logo", content=png(metadata=True, trailing=True)).json()
+        self.assertTrue(identity["identity_logo_custom"])
+        self.assertFalse(identity["control_logo_custom"])
+        control = self.upload("/api/branding/control-logo", content=png(size=(96, 64))).json()
+        self.assertTrue(control["control_logo_custom"])
+        self.assertEqual(control["identity_logo_url"], identity["identity_logo_url"])
+        self.client.headers.clear()
+        self.assertEqual(self.client.get("/api/branding/ecosystem").json(), control)
+        for key, url in (("qid", control["identity_logo_url"]), ("qcontrol", control["control_logo_url"])):
+            with self.subTest(key=key):
+                self.assertIn(f"/assets/{key}/", url)
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers["cache-control"], IMMUTABLE_CACHE)
+                self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+                self.assertNotIn(b"PRIVATE", response.content)
+                with Image.open(io.BytesIO(response.content)) as decoded:
+                    self.assertEqual(decoded.mode, "RGBA")
+                    self.assertEqual(decoded.info, {})
+                self.assertEqual(self.client.get(url, headers={"If-None-Match": response.headers["etag"]}).status_code, 304)
+        self.as_user(self.admin_id)
+        reset = self.client.delete("/api/branding/identity-logo")
+        self.assertEqual(reset.status_code, 200)
+        self.assertEqual(reset.json()["identity_logo_url"], DEFAULT_IDENTITY_LOGO)
+        self.assertFalse(reset.json()["identity_logo_custom"])
+        self.assertEqual(reset.json()["control_logo_url"], control["control_logo_url"])
+        self.assertEqual(self.client.get(control["identity_logo_url"]).status_code, 404)
+        self.assertEqual(self.client.get(control["control_logo_url"]).status_code, 200)
+        reset = self.client.delete("/api/branding/control-logo")
+        self.assertEqual(reset.status_code, 200)
+        self.assertEqual(reset.json()["control_logo_url"], DEFAULT_CONTROL_LOGO)
+        self.assertFalse(reset.json()["control_logo_custom"])
+        self.assertEqual(self.client.get(control["control_logo_url"]).status_code, 404)
+        self.assertEqual(self.client.get("/api/branding").json(), project)
+        with self.sessions() as db:
+            self.assertEqual(career_branding(db), career)
+            self.assertEqual([row.key for row in db.query(BrandingAsset).order_by(BrandingAsset.key)], ["project", "qcareer"])
+            events = db.query(AuditLog).filter(AuditLog.object_id.in_(["qid", "qcontrol"])).order_by(AuditLog.id).all()
+            self.assertEqual([event.action for event in events], ["branding.identity_logo.upload", "branding.control_logo.upload",
+                                                                 "branding.identity_logo.reset", "branding.control_logo.reset"])
+            self.assertTrue(all(json.loads(event.fields_json) == ["logo"] for event in events))
+
+    def test_ecosystem_invalid_png_and_audit_failure_keep_both_logos_unchanged(self):
+        self.as_user(self.admin_id)
+        self.upload("/api/branding/identity-logo")
+        initial = self.upload("/api/branding/control-logo", content=png(size=(96, 64))).json()
+        for route in ("identity-logo", "control-logo"):
+            with self.subTest(route=route):
+                path = f"/api/branding/{route}"
+                for content, expected in ((b"<svg/>", 422), (png(mode="RGB"), 422), (png() + b"x" * MAX_LOGO_BYTES, 413)):
+                    self.assertEqual(self.upload(path, content=content).status_code, expected)
+                    self.assertEqual(self.client.get("/api/branding/ecosystem").json(), initial)
+                with patch("app.routers.branding.record_audit", side_effect=RuntimeError("audit unavailable")):
+                    self.assertEqual(self.upload(path, content=png(size=(128, 64))).status_code, 500)
+                    self.assertEqual(self.client.delete(path).status_code, 500)
+                self.assertEqual(self.client.get("/api/branding/ecosystem").json(), initial)
+        with self.sessions() as db:
+            self.assertEqual(db.query(BrandingAsset).count(), 2)
+            self.assertEqual(db.query(AuditLog).count(), 2)
+            self.assertEqual(ecosystem_branding(db), initial)
 
     def test_new_table_additive_upgrade_preserves_users_and_existing_logo(self):
         from app import main

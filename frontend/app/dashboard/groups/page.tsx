@@ -1,5 +1,7 @@
 "use client";
 
+import { useStudyManagement, useStudyPath } from "@/lib/study-management";
+
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -34,7 +36,8 @@ export default function GroupsPage() {
   const [query, setQuery] = useState("");
   const [studyYear, setStudyYear] = useState("all");
   const [limit, setLimit] = useState(12);
-  const admin = user?.role === "admin";
+  const admin = useStudyManagement();
+  const studyPath = useStudyPath();
   const filtered = filterGroups(groups || [], query, studyYear, user?.group_id);
   const years = [
     ...new Set(
@@ -164,7 +167,7 @@ export default function GroupsPage() {
                   </div>
                   <div>
                     <h2>
-                      <Link href={`/dashboard/groups/${group.id}`}>
+                      <Link href={studyPath(`/dashboard/groups/${group.id}`)}>
                         {group.name}
                       </Link>
                     </h2>
@@ -213,7 +216,7 @@ export default function GroupsPage() {
                   )}
                   <Link
                     className="academic-card-link"
-                    href={`/dashboard/groups/${group.id}`}
+                    href={studyPath(`/dashboard/groups/${group.id}`)}
                   >
                     Открыть группу <ArrowUpRight size={18} />
                   </Link>

@@ -1,4 +1,4 @@
-"""Package the preserving QCareer integration. No database, environment or user files."""
+"""Package the preserving QControl ecosystem integration. No database, environment or user files."""
 import argparse
 import hashlib
 import json
@@ -7,6 +7,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD = (
+    'frontend/next.config.ts',
     'frontend/package.json',
     'frontend/package-lock.json',
     'frontend/tsconfig.json',
@@ -126,6 +127,52 @@ PAYLOAD = (
     'frontend/components/career/brand.tsx',
     'frontend/components/career/admin.module.css',
     'frontend/components/career/admin-panel.tsx',
+    'frontend/app/qcontrol/layout.tsx',
+    'frontend/app/qcontrol/page.tsx',
+    'frontend/app/qcontrol/accounts/page.tsx',
+    'frontend/app/qcontrol/branding/page.tsx',
+    'frontend/app/qcontrol/operations/page.tsx',
+    'frontend/app/qcontrol/qball/page.tsx',
+    'frontend/app/qcontrol/qcareer/page.tsx',
+    'frontend/app/qcontrol/qstudy/page.tsx',
+    'frontend/app/qcontrol/qstudy/study.module.css',
+    'frontend/app/qcontrol/system/page.tsx',
+    'frontend/app/qcontrol/qstudy/groups/page.tsx',
+    'frontend/app/qcontrol/qstudy/modules/page.tsx',
+    'frontend/app/qcontrol/qstudy/subjects/page.tsx',
+    'frontend/app/qcontrol/qstudy/syllabi/page.tsx',
+    'frontend/app/qcontrol/qstudy/groups/[groupId]/page.tsx',
+    'frontend/app/qcontrol/qstudy/groups/[groupId]/courses/[courseId]/page.tsx',
+    'frontend/components/control/accounts.tsx',
+    'frontend/components/control/control.module.css',
+    'frontend/components/control/ecosystem-branding-admin.tsx',
+    'frontend/components/control/operations.module.css',
+    'frontend/components/control/OperationsPanel.tsx',
+    'frontend/components/control/ServerSettingsForm.tsx',
+    'frontend/components/control/shell.tsx',
+    'frontend/components/control/system.module.css',
+    'frontend/components/control/SystemPanel.tsx',
+    'frontend/lib/control-session.ts',
+    'frontend/lib/ecosystem-branding.ts',
+    'frontend/lib/ecosystem-branding.test.mjs',
+    'frontend/lib/study-management.ts',
+    'frontend/lib/study-routing.ts',
+    'frontend/lib/study-routing.test.mjs',
+    'frontend/components/ecosystem-branding.tsx',
+    'frontend/components/branding-admin.tsx',
+    'assets/brand/source/qforcelogo_q-id.png',
+    'assets/brand/source/qforcelogo_qcontrol.png',
+    'frontend/public/brand/qforcelogo_q-id.png',
+    'frontend/public/brand/qforcelogo_qcontrol.png',
+    'docs/qcontrol.md',
+    'frontend/app/dashboard/admin/qball/page.tsx',
+    'frontend/app/dashboard/groups/[groupId]/courses/[courseId]/page.tsx',
+    'frontend/app/dashboard/groups/[groupId]/page.tsx',
+    'frontend/app/dashboard/groups/page.tsx',
+    'frontend/app/dashboard/subjects/page.tsx',
+    'frontend/components/syllabus-document.tsx',
+    'frontend/components/work-card.tsx',
+    'frontend/lib/branding.ts',
 )
 STOP_HELPERS = (
     'scripts/launcher/Stop-Previous.ps1', 'scripts/launcher/Native.ps1',
@@ -140,16 +187,16 @@ chcp 65001 >nul
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0.qstudy-fix\\Apply.ps1" -Root "%~dp0." %*
 exit /b %errorlevel%
 '''.replace('\n', '\r\n').encode('ascii')
-README = '''QStudy / QCareer: общий вход, учебные навыки и карьерный путь
+README = '''QStudy / QCareer / QBall / Q-ID: единое управление QControl
 
 1. Распакуйте СОДЕРЖИМОЕ этого ZIP в существующую папку QStudy на Windows
    рядом с Start-QStudy-Internet.cmd. Появятся Apply-QBall-Fix.cmd и .qstudy-fix.
-   Название кнопки техническое: этот пакет добавляет QCareer и сохраняет QBall.
+   Название кнопки техническое: пакет обновляет всю экосистему и добавляет QControl.
 2. Дважды щёлкните Apply-QBall-Fix.cmd от того же пользователя Windows,
    которым запускали сайт. Дополнительные команды не нужны.
 3. Дождитесь сборки и повторного запуска прежнего режима сайта.
 4. Обновите страницы через Ctrl+F5. QCareer доступен по /qcareer,
-   личный путь — /qcareer/workspace, управление — /dashboard/admin/career.
+   личный путь — /qcareer/workspace, общее управление — /qcontrol.
 
 Пакет содержит только проверенные исходники. База, аккаунты, пароли, .env,
 документы, личные материалы и сохранённые логотипы не входят в этот ZIP
@@ -168,7 +215,13 @@ QCareer использует существующий вход и роли QStud
 повторная регистрация или сброс аккаунтов не нужны. Выбор учебной группы
 при регистрации и назначение группы через админку сохранены.
 Восстановление пароля использует прежнюю общую базу и настройки почты.
-Временный логотип Q-ID можно заменить, когда будет готов основной логотип.
+Установлены основные PNG-логотипы Q-ID и QControl. В разделе QControl →
+«Брендинг и команда» их можно независимо заменить PNG с прозрачным фоном.
+Управление аккаунтами, группами, силабусами, модулями, карьерным каталогом,
+QBall, сервером, резервными копиями и журналом перенесено в /qcontrol.
+Прежние адреса /dashboard/admin перенаправляют в QControl. Доступ — только
+действующим администраторам; учебные страницы QStudy остаются личным кабинетом.
+Оформление QControl — красное; инструкция: docs/qcontrol.md.
 Пошаговое обновление действующего хоста описано в docs/host-update.md.
 
 Навыки связаны с силабусами, дисциплинами, модулями, неделями и работами.
@@ -191,7 +244,7 @@ QCareer использует существующий вход и роли QStud
 
 
 def build(output: Path, mode: str) -> dict:
-    assert 1 <= len(PAYLOAD) <= 128 and len(PAYLOAD) == len(set(PAYLOAD))
+    assert 1 <= len(PAYLOAD) <= 256 and len(PAYLOAD) == len(set(PAYLOAD))
     contents = {path: (ROOT / path).read_bytes() for path in PAYLOAD}
     assert all(len(value) <= 4 * 1024 * 1024 for value in contents.values())
     assert sum(map(len, contents.values())) <= 32 * 1024 * 1024

@@ -12,10 +12,10 @@ from app.models import BrandingAsset
 from app.routers.developers import _department, department_public
 from app.services.audit import record_audit
 from app.services.branding import (IMMUTABLE_CACHE, MAX_LOGO_BYTES, department_asset_key,
-                                  normalize_png, project_branding, career_branding, put_asset)
+                                  normalize_png, project_branding, career_branding, ecosystem_branding, put_asset)
 
 router = APIRouter(prefix="/branding", tags=["branding"])
-AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|department-[1-9][0-9]{0,18})$")]
+AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|qid|qcontrol|department-[1-9][0-9]{0,18})$")]
 Digest = Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")]
 
 
@@ -36,7 +36,9 @@ def _persist(db, admin, key, logo, *, department_id=None):
         else:
             put_asset(db, key, logo, admin.id)
         action = ("branding.department_logo" if department_id is not None else
-                  "branding.career_logo" if key == "qcareer" else "branding.project_logo")
+                  "branding.career_logo" if key == "qcareer" else
+                  "branding.identity_logo" if key == "qid" else
+                  "branding.control_logo" if key == "qcontrol" else "branding.project_logo")
         record_audit(db, admin, action + (".reset" if logo is None else ".upload"),
                      "developer_department" if department_id is not None else "branding",
                      department_id if department_id is not None else key, fields=("logo",),
@@ -50,6 +52,37 @@ def _persist(db, admin, key, logo, *, department_id=None):
 @router.get("")
 def branding(db: Session = Depends(get_db)):
     return project_branding(db)
+
+
+@router.get("/ecosystem")
+def ecosystem(db: Session = Depends(get_db)):
+    return ecosystem_branding(db)
+
+
+@router.put("/identity-logo")
+async def upload_identity_logo(file: UploadFile = File(...), db: Session = Depends(get_db), admin=Depends(require_admin)):
+    logo = await _upload(file)
+    _persist(db, admin, "qid", logo)
+    return ecosystem_branding(db)
+
+
+@router.delete("/identity-logo")
+def reset_identity_logo(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    _persist(db, admin, "qid", None)
+    return ecosystem_branding(db)
+
+
+@router.put("/control-logo")
+async def upload_control_logo(file: UploadFile = File(...), db: Session = Depends(get_db), admin=Depends(require_admin)):
+    logo = await _upload(file)
+    _persist(db, admin, "qcontrol", logo)
+    return ecosystem_branding(db)
+
+
+@router.delete("/control-logo")
+def reset_control_logo(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    _persist(db, admin, "qcontrol", None)
+    return ecosystem_branding(db)
 
 
 @router.put("/project-logo")

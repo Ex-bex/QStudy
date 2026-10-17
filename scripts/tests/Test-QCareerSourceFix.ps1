@@ -35,12 +35,13 @@ try {
     $payloadBlock = [regex]::Match($builder, '(?ms)^PAYLOAD = \(\r?\n(?<paths>.*?)^\)')
     Assert-Fix $payloadBlock.Success 'source updater builder declares an explicit payload'
     $paths = @([regex]::Matches($payloadBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
-    Assert-Fix ($paths.Count -le 128 -and @($paths | Select-Object -Unique).Count -eq $paths.Count) 'reviewed source count fits the preserving helper and has no duplicate paths'
+    Assert-Fix ($paths.Count -le 256 -and @($paths | Select-Object -Unique).Count -eq $paths.Count) 'reviewed source count fits the preserving helper and has no duplicate paths'
     $helperBytes = [IO.File]::ReadAllBytes((Join-Path $workspace 'scripts/maintenance/Apply-QCareerFix.ps1'))
     Assert-Fix ($helperBytes.Length -gt 3 -and $helperBytes[0] -eq 239 -and $helperBytes[1] -eq 187 -and $helperBytes[2] -eq 191) 'Windows PowerShell helper keeps a UTF-8 BOM for Russian messages'
     $helperText = [Text.Encoding]::UTF8.GetString($helperBytes)
     Assert-Fix (-not [regex]::IsMatch($helperText, '(?<!\r)\n')) 'distributed Windows helper has CRLF line endings'
-    foreach ($required in @('frontend/lib/game-csp.mjs', 'frontend/lib/lumaball/engine.ts', 'frontend/lib/lumaball/room-state.ts', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json', 'frontend/components/lumaball/map-settings.tsx', 'frontend/components/lumaball/map-settings.module.css', 'frontend/components/lumaball/room-settings.tsx', 'frontend/components/lumaball/admin-panel.tsx', 'frontend/lib/lumaball/maps.ts', 'frontend/lib/lumaball/types.ts', 'frontend/types/lumaball.ts', 'frontend/lib/lumaball-maps.test.mjs', 'backend/app/lumaball_room_models.py', 'backend/app/main.py', 'backend/app/routers/lumaball_rooms.py', 'backend/app/services/lumaball_identity.py', 'backend/app/services/lumaball_rooms.py', 'backend/app/services/lumaball_realtime.py')) {
+    foreach ($required in @('frontend/lib/game-csp.mjs', 'frontend/lib/lumaball/engine.ts', 'frontend/lib/lumaball/room-state.ts', 'frontend/next.config.ts',
+        'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json', 'frontend/components/lumaball/map-settings.tsx', 'frontend/components/lumaball/map-settings.module.css', 'frontend/components/lumaball/room-settings.tsx', 'frontend/components/lumaball/admin-panel.tsx', 'frontend/lib/lumaball/maps.ts', 'frontend/lib/lumaball/types.ts', 'frontend/types/lumaball.ts', 'frontend/lib/lumaball-maps.test.mjs', 'backend/app/lumaball_room_models.py', 'backend/app/main.py', 'backend/app/routers/lumaball_rooms.py', 'backend/app/services/lumaball_identity.py', 'backend/app/services/lumaball_rooms.py', 'backend/app/services/lumaball_realtime.py')) {
         Assert-Fix ($paths -ccontains $required) ('complete original physics, map migration and runtime dependency included: ' + $required)
     }
     foreach ($required in @(
@@ -108,6 +109,58 @@ try {
         'frontend/components/career/admin.module.css',
         'frontend/components/career/admin-panel.tsx'
     )) { Assert-Fix ($paths -ccontains $required) ('QCareer/shared runtime dependency included: ' + $required) }
+    foreach ($required in @(
+        'frontend/app/qcontrol/layout.tsx',
+        'frontend/app/qcontrol/page.tsx',
+        'frontend/app/qcontrol/accounts/page.tsx',
+        'frontend/app/qcontrol/branding/page.tsx',
+        'frontend/app/qcontrol/operations/page.tsx',
+        'frontend/app/qcontrol/qball/page.tsx',
+        'frontend/app/qcontrol/qcareer/page.tsx',
+        'frontend/app/qcontrol/qstudy/page.tsx',
+        'frontend/app/qcontrol/qstudy/study.module.css',
+        'frontend/app/qcontrol/system/page.tsx',
+        'frontend/app/qcontrol/qstudy/groups/page.tsx',
+        'frontend/app/qcontrol/qstudy/modules/page.tsx',
+        'frontend/app/qcontrol/qstudy/subjects/page.tsx',
+        'frontend/app/qcontrol/qstudy/syllabi/page.tsx',
+        'frontend/app/qcontrol/qstudy/groups/[groupId]/page.tsx',
+        'frontend/app/qcontrol/qstudy/groups/[groupId]/courses/[courseId]/page.tsx',
+        'frontend/components/control/accounts.tsx',
+        'frontend/components/control/control.module.css',
+        'frontend/components/control/ecosystem-branding-admin.tsx',
+        'frontend/components/control/operations.module.css',
+        'frontend/components/control/OperationsPanel.tsx',
+        'frontend/components/control/ServerSettingsForm.tsx',
+        'frontend/components/control/shell.tsx',
+        'frontend/components/control/system.module.css',
+        'frontend/components/control/SystemPanel.tsx',
+        'frontend/lib/control-session.ts',
+        'frontend/lib/ecosystem-branding.ts',
+        'frontend/lib/ecosystem-branding.test.mjs',
+        'frontend/lib/study-management.ts',
+        'frontend/lib/study-routing.ts',
+        'frontend/lib/study-routing.test.mjs',
+        'frontend/components/ecosystem-branding.tsx',
+        'frontend/components/branding-admin.tsx',
+        'assets/brand/source/qforcelogo_q-id.png',
+        'assets/brand/source/qforcelogo_qcontrol.png',
+        'frontend/public/brand/qforcelogo_q-id.png',
+        'frontend/public/brand/qforcelogo_qcontrol.png',
+        'docs/qcontrol.md',
+        'frontend/app/dashboard/admin/qball/page.tsx',
+        'frontend/app/dashboard/groups/[groupId]/courses/[courseId]/page.tsx',
+        'frontend/app/dashboard/groups/[groupId]/page.tsx',
+        'frontend/app/dashboard/groups/page.tsx',
+        'frontend/app/dashboard/subjects/page.tsx',
+        'frontend/components/syllabus-document.tsx',
+        'frontend/components/work-card.tsx',
+        'frontend/lib/branding.ts'
+    )) { Assert-Fix ($paths -ccontains $required) ('QControl ecosystem runtime dependency included: ' + $required) }
+    $allowedBlock = [regex]::Match($helperText, '(?ms)^    \$allowed = @\(\r?\n(?<paths>.*?)^    \)')
+    Assert-Fix $allowedBlock.Success 'preserving helper declares its exact reviewed path allowlist'
+    $allowedPaths = @([regex]::Matches($allowedBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+    Assert-Fix ($allowedPaths.Count -eq $paths.Count -and @($allowedPaths | Where-Object { $paths -cnotcontains $_ }).Count -eq 0) 'builder and helper have the same exact reviewed paths without broader write access'
     $entries = @()
     foreach ($relative in $paths) {
         $source = Join-Path $package ('payload/' + $relative)

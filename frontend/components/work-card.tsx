@@ -1,9 +1,10 @@
 "use client";
 
+import { useStudyManagement } from "@/lib/study-management";
+
 import { useState } from "react";
 import { CalendarDays, ChevronDown, Check, Send, Save } from "lucide-react";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 import {
   DeleteButton,
   ErrorNotice,
@@ -30,8 +31,7 @@ export default function WorkCard({
   work: Work;
   onChanged: () => void | Promise<void>;
 }) {
-  const { user } = useAuth();
-  const admin = user?.role === "admin";
+  const admin = useStudyManagement();
   const [open, setOpen] = useState(false);
   const [submission, setSubmission] = useState(work.my_submission);
   const [content, setContent] = useState(work.my_submission?.content || "");

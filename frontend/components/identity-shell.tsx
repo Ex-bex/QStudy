@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, ArrowUpRight, Fingerprint, KeyRound } from "lucide-react";
-import { QID_LOGO } from "@/lib/identity-brand";
+import { EcosystemLogo } from "@/components/ecosystem-branding";
 import styles from "./identity.module.css";
 
 type IdentityMode = "login" | "register" | "forgot" | "reset";
@@ -70,9 +70,9 @@ export default function IdentityShell({
       </a>
       <header className={styles.header}>
         <Link href="/" className={styles.brand} aria-label="Q-ID — на главную">
-          <Image
+          <EcosystemLogo
+            kind="identity"
             className={styles.brandImage}
-            src={QID_LOGO}
             alt=""
             width={42}
             height={42}

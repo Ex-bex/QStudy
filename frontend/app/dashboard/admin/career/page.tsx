@@ -1,5 +1,5 @@
-import CareerAdminPanel from "@/components/career/admin-panel";
+import { redirect } from "next/navigation";
 
-export default function CareerAdminPage() {
-  return <CareerAdminPanel />;
+export default function LegacyAdminPage() {
+  redirect("/qcontrol/qcareer");
 }

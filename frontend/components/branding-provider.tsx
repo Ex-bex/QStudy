@@ -9,7 +9,11 @@ import {
   type ProjectBranding,
 } from "@/lib/branding";
 import { createBrandingStore } from "@/lib/branding-store";
-import { isIdentityPath, QID_LOGO } from "@/lib/identity-brand";
+import { isIdentityPath } from "@/lib/identity-brand";
+import {
+  EcosystemBrandingProvider,
+  useEcosystemBranding,
+} from "@/components/ecosystem-branding";
 
 const store = createBrandingStore(DEFAULT_BRANDING, async () =>
   normalizeBranding(await api<ProjectBranding>("/branding")),
@@ -39,10 +43,18 @@ export function useBranding() {
 
 function DynamicProjectIcons() {
   const { branding } = useBranding();
+  const { branding: ecosystem } = useEcosystemBranding();
   const pathname = usePathname();
   useEffect(() => {
     if (pathname === "/qcareer" || pathname.startsWith("/qcareer/")) return;
     const identity = isIdentityPath(pathname);
+    const control =
+      pathname === "/qcontrol" || pathname.startsWith("/qcontrol/");
+    const logo = identity
+      ? ecosystem.identity_logo_url
+      : control
+        ? ecosystem.control_logo_url
+        : branding.project_logo_url;
     for (const rel of ["icon", "apple-touch-icon"]) {
       let links = [
         ...document.head.querySelectorAll<HTMLLinkElement>(
@@ -56,13 +68,17 @@ function DynamicProjectIcons() {
         links = [link];
       }
       for (const link of links) {
-        link.href = identity ? QID_LOGO : branding.project_logo_url;
-        link.type =
-          identity && QID_LOGO.endsWith(".svg") ? "image/svg+xml" : "image/png";
+        link.href = logo;
+        link.type = logo.endsWith(".svg") ? "image/svg+xml" : "image/png";
         link.sizes = "any";
       }
     }
-  }, [branding.project_logo_url, pathname]);
+  }, [
+    branding.project_logo_url,
+    ecosystem.identity_logo_url,
+    ecosystem.control_logo_url,
+    pathname,
+  ]);
   return null;
 }
 
@@ -83,9 +99,9 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     };
   }, []);
   return (
-    <>
+    <EcosystemBrandingProvider>
       <DynamicProjectIcons />
       {children}
-    </>
+    </EcosystemBrandingProvider>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowUpRight, FileUp, Sparkles } from "lucide-react";
 import { useAuth, type User } from "@/lib/auth";
+import { useStudyManagement, useStudyPath } from "@/lib/study-management";
 import { api } from "@/lib/api";
 import {
   useResource,
@@ -27,7 +28,9 @@ export default function SyllabiPage() {
 }
 
 function SyllabiContent({ user }: { user: User }) {
-  const admin = user.role === "admin";
+  const admin = useStudyManagement();
+  const studyPath = useStudyPath();
+  const hasGlobalAccess = user.role === "admin";
   const [courseId, setCourseId] = useState("");
   const [courses, setCourses] = useState<Course[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
@@ -42,9 +45,11 @@ function SyllabiContent({ user }: { user: User }) {
     : "";
   const query = new URLSearchParams();
   if (selectedCourse) query.set("course_id", selectedCourse);
-  if (!admin && user.group_id) query.set("group_id", String(user.group_id));
+  if (!hasGlobalAccess && user.group_id)
+    query.set("group_id", String(user.group_id));
   const canLoad =
-    admin || Boolean(user.group_id && !coursesLoading && !coursesError);
+    hasGlobalAccess ||
+    Boolean(user.group_id && !coursesLoading && !coursesError);
   const {
     data: documents,
     loading,
@@ -63,7 +68,7 @@ function SyllabiContent({ user }: { user: User }) {
     let active = true;
     async function load() {
       try {
-        const details = admin
+        const details = hasGlobalAccess
           ? await api<Group[]>("/groups").then((groups) =>
               Promise.all(
                 groups.map((group) => api<GroupDetail>(`/groups/${group.id}`)),
@@ -99,7 +104,7 @@ function SyllabiContent({ user }: { user: User }) {
     return () => {
       active = false;
     };
-  }, [admin, user.group_id]);
+  }, [hasGlobalAccess, user.group_id]);
   async function upload(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const element = e.currentTarget;
@@ -146,14 +151,14 @@ function SyllabiContent({ user }: { user: User }) {
         description="От учебного документа — к понятному плану на каждую неделю."
       >
         <Link
-          href={
-            !admin && user.group_id
+          href={studyPath(
+            !hasGlobalAccess && user.group_id
               ? `/dashboard/groups/${user.group_id}`
-              : "/dashboard/groups"
-          }
+              : "/dashboard/groups",
+          )}
           className="btn btn-secondary"
         >
-          {!admin && user.group_id ? "Моя группа" : "К группам"}{" "}
+          {!hasGlobalAccess && user.group_id ? "Моя группа" : "К группам"}{" "}
           <ArrowUpRight size={16} />
         </Link>
       </PageTitle>
@@ -242,7 +247,7 @@ function SyllabiContent({ user }: { user: User }) {
           {success}
         </p>
       )}
-      {!admin && !user.group_id ? (
+      {!hasGlobalAccess && !user.group_id ? (
         <Empty title="Учебная группа пока не назначена">
           Попросите администратора назначить вашу группу в настройках аккаунта.
           После назначения здесь появятся опубликованные силабусы её дисциплин,
@@ -262,7 +267,9 @@ function SyllabiContent({ user }: { user: User }) {
                 onChange={(e) => setCourseId(e.target.value)}
               >
                 <option value="">
-                  {admin ? "Все дисциплины" : "Все дисциплины моей группы"}
+                  {hasGlobalAccess
+                    ? "Все дисциплины"
+                    : "Все дисциплины моей группы"}
                 </option>
                 {courses.map((course) => (
                   <option value={course.id} key={course.id}>

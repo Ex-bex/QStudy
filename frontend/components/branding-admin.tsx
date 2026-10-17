@@ -20,7 +20,7 @@ export function BrandingAdmin() {
     >
       <div className="academic-section-heading">
         <div>
-          <h2 id="branding-admin-title">Логотип проекта</h2>
+          <h2 id="branding-admin-title">Логотип QStudy</h2>
           <p className="muted branding-admin-description">
             Обновляется на всех страницах, в 3D-сцене и значке вкладки.
           </p>

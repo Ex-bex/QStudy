@@ -1,5 +1,7 @@
 "use client";
 
+import { useStudyManagement, useStudyPath } from "@/lib/study-management";
+
 import {
   useCallback,
   useEffect,
@@ -20,7 +22,6 @@ import {
 } from "lucide-react";
 import { api, API_URL, formatBytes } from "@/lib/api";
 import { normalizeSyllabusDraft } from "@/lib/syllabus-draft";
-import { useAuth } from "@/lib/auth";
 import {
   DeleteButton,
   RecordEditor,
@@ -134,8 +135,8 @@ export default function SyllabusDocument({
   document: Syllabus;
   onChanged: () => void | Promise<void>;
 }) {
-  const { user } = useAuth();
-  const admin = user?.role === "admin";
+  const admin = useStudyManagement();
+  const studyPath = useStudyPath();
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<Syllabus | null>(null);
   const [draft, setDraft] = useState<SyllabusDraft>(() =>
@@ -396,7 +397,9 @@ export default function SyllabusDocument({
                           ? "btn btn-primary"
                           : "btn btn-secondary"
                       }
-                      href={`/dashboard/groups/${current.group_id}/courses/${current.course_id}`}
+                      href={studyPath(
+                        `/dashboard/groups/${current.group_id}/courses/${current.course_id}`,
+                      )}
                     >
                       {current.status === "published"
                         ? "Открыть учебный план"

@@ -1,4 +1,6 @@
 "use client";
+
+import { useStudyManagement } from "@/lib/study-management";
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -8,7 +10,6 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 import type { Subject, Topic } from "@/types";
 import {
   PageTitle,
@@ -31,8 +32,7 @@ const topicFields: FieldDefinition[] = [
   { name: "description", label: "Описание", type: "textarea" },
 ];
 export default function SubjectsPage() {
-  const { user } = useAuth();
-  const admin = user.role === "admin";
+  const admin = useStudyManagement();
   const {
     data: subjects,
     loading,

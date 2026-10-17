@@ -95,11 +95,13 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
       setLoading(false);
     }
   }
-  const destination = returnTo.startsWith("/qcareer")
-    ? "QCareer"
-    : returnTo.startsWith("/qball")
-      ? "QBall"
-      : "QStudy";
+  const destination = returnTo.startsWith("/qcontrol")
+    ? "QControl"
+    : returnTo.startsWith("/qcareer")
+      ? "QCareer"
+      : returnTo.startsWith("/qball")
+        ? "QBall"
+        : "QStudy";
   return (
     <IdentityShell mode={register ? "register" : "login"}>
       <p className={styles.context}>

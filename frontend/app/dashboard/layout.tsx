@@ -26,7 +26,6 @@ import {
   X,
   Workflow,
   Gamepad2,
-  Power,
   Compass,
 } from "lucide-react";
 import Brand from "@/components/brand";
@@ -245,30 +244,13 @@ function Shell({ children }: { children: React.ReactNode }) {
           ))}
           {user.role === "admin" && (
             <>
-              <div className="nav-section">УПРАВЛЕНИЕ</div>
+              <div className="nav-section">ЭКОСИСТЕМА</div>
               <Link
                 onClick={() => setOpen(false)}
-                href="/dashboard/admin"
-                className={`nav-link ${pathname.startsWith("/dashboard/admin") ? "active" : ""}`}
-              >
-                <ShieldCheck />
-                Администратор
-              </Link>
-              <Link
-                onClick={() => setOpen(false)}
-                href="/dashboard/admin/career"
-                className={`nav-link ${pathname.startsWith("/dashboard/admin/career") ? "active" : ""}`}
-              >
-                <Compass />
-                Управление QCareer
-              </Link>
-              <Link
-                onClick={() => setOpen(false)}
-                href="/dashboard/admin#system-host"
+                href="/qcontrol"
                 className="nav-link"
               >
-                <Power />
-                Остановить сайт
+                <ShieldCheck /> QControl
               </Link>
             </>
           )}

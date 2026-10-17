@@ -17,6 +17,8 @@ MAX_PIXELS = 4 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 DEFAULT_PROJECT_LOGO = "/brand/qforce_logo_main.png"
 DEFAULT_CAREER_LOGO = "/brand/qforcelogo_qcareer.png"
+DEFAULT_IDENTITY_LOGO = "/brand/qforcelogo_q-id.png"
+DEFAULT_CONTROL_LOGO = "/brand/qforcelogo_qcontrol.png"
 IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
 
 
@@ -84,6 +86,16 @@ def career_branding(db) -> dict:
     asset = db.get(BrandingAsset, "qcareer", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
     return {"logo_url": asset_url(asset) if asset else DEFAULT_CAREER_LOGO,
             "logo_custom": asset is not None}
+
+
+def ecosystem_branding(db) -> dict:
+    """Expose only the two public ecosystem logos, never their uploader metadata."""
+    identity = db.get(BrandingAsset, "qid", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
+    control = db.get(BrandingAsset, "qcontrol", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
+    return {"identity_logo_url": asset_url(identity) if identity else DEFAULT_IDENTITY_LOGO,
+            "identity_logo_custom": identity is not None,
+            "control_logo_url": asset_url(control) if control else DEFAULT_CONTROL_LOGO,
+            "control_logo_custom": control is not None}
 
 
 def department_asset_key(department_id: int) -> str:

@@ -11,7 +11,22 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/dashboard/admin/lumaball",
-        destination: "/dashboard/admin/qball",
+        destination: "/qcontrol/qball",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/admin/career",
+        destination: "/qcontrol/qcareer",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/admin/qball",
+        destination: "/qcontrol/qball",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/admin",
+        destination: "/qcontrol",
         permanent: false,
       },
     ];

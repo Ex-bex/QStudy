@@ -1,5 +1,5 @@
-import LumaAdminPanel from "@/components/lumaball/admin-panel";
+import { redirect } from "next/navigation";
 
-export default function QBallAdminPage() {
-  return <LumaAdminPanel />;
+export default function LegacyAdminPage() {
+  redirect("/qcontrol/qball");
 }

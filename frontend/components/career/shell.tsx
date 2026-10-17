@@ -29,7 +29,7 @@ export default function CareerShell({ children }: { children: ReactNode }) {
             О проекте
           </Link>
           {user?.role === "admin" && (
-            <Link href="/dashboard/admin/career" className={styles.adminLink}>
+            <Link href="/qcontrol/qcareer" className={styles.adminLink}>
               <ShieldCheck size={16} />
               <span>Управление</span>
             </Link>

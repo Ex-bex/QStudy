@@ -1,5 +1,5 @@
-// Replace this asset when the final Q-ID logo is ready.
-export const QID_LOGO = "/brand/qid-placeholder.svg";
+export const QID_LOGO = "/brand/qforcelogo_q-id.png";
+export const CONTROL_LOGO = "/brand/qforcelogo_qcontrol.png";
 
 export function isIdentityPath(pathname: string): boolean {
   return [

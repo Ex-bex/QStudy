@@ -549,7 +549,7 @@ export default function LumaAdminPanel() {
                 основном центре.
               </p>
             </div>
-            <Link href="/dashboard/admin">
+            <Link href="/qcontrol">
               Аккаунты QStudy <ArrowUpRight size={13} />
             </Link>
           </div>
@@ -1004,7 +1004,7 @@ function SettingsForm({
             Игроки QStudy входят без повторной регистрации. Блокировка игрового
             профиля ограничивает доступ только к QBall.
           </p>
-          <Link href="/dashboard/admin">
+          <Link href="/qcontrol">
             Управлять аккаунтами <ArrowUpRight size={14} />
           </Link>
         </div>

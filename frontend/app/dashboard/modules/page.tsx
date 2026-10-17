@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { useAuth, type User } from "@/lib/auth";
+import { useStudyPath } from "@/lib/study-management";
 import {
   useResource,
   PageTitle,
@@ -25,6 +26,7 @@ export default function ModulesPage() {
 }
 
 function ModulesContent({ user }: { user: User }) {
+  const studyPath = useStudyPath();
   const admin = user.role === "admin";
   const [groupId, setGroupId] = useState("");
   const [courseId, setCourseId] = useState("");
@@ -69,11 +71,11 @@ function ModulesContent({ user }: { user: User }) {
       >
         <Link
           className="btn btn-secondary"
-          href={
+          href={studyPath(
             !admin && user.group_id
               ? `/dashboard/groups/${user.group_id}`
-              : "/dashboard/groups"
-          }
+              : "/dashboard/groups",
+          )}
         >
           К дисциплинам <ArrowUpRight size={16} />
         </Link>
@@ -109,7 +111,7 @@ function ModulesContent({ user }: { user: User }) {
               <>
                 <Link
                   className="badge"
-                  href={`/dashboard/groups/${ownGroup.id}`}
+                  href={studyPath(`/dashboard/groups/${ownGroup.id}`)}
                 >
                   Моя группа · {ownGroup.name}
                 </Link>

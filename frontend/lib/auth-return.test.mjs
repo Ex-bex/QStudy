@@ -49,3 +49,23 @@ test("authentication rejects external, encoded and unrelated return destinations
   ])
     assert.equal(authReturnPath(value), "/dashboard");
 });
+
+test("QControl returns stay inside known management routes and reject ambiguous paths", () => {
+  for (const value of [
+    "/qcontrol",
+    "/qcontrol/accounts",
+    "/qcontrol/system",
+    "/qcontrol/qstudy/groups/2/courses/31",
+  ])
+    assert.equal(authReturnPath(value), value);
+  for (const value of [
+    "/qcontrol//evil.example",
+    "/qcontrol/../admin",
+    "/qcontrol/system?next=https://evil.example",
+    "/qcontrol%2fsystem",
+    "/qcontrol/unknown",
+    "/qcontrol/qstudy/groups/0",
+    "/qcontrol/qstudy/groups/2/courses/-1",
+  ])
+    assert.equal(authReturnPath(value), "/dashboard");
+});

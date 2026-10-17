@@ -38,7 +38,10 @@ const backend = createServer((request, response) => {
     );
   else if (request.url === "/api/lumaball/session") {
     const member = request.headers.authorization === "Bearer fixture-session";
-    if (request.headers.authorization === "Bearer expired-session" || request.headers["x-lumaball-session"] === "expired") {
+    if (
+      request.headers.authorization === "Bearer expired-session" ||
+      request.headers["x-lumaball-session"] === "expired"
+    ) {
       response.statusCode = 401;
       response.end(JSON.stringify({ detail: "Session expired" }));
       return;
@@ -65,11 +68,12 @@ const backend = createServer((request, response) => {
       if (request.headers["x-lumaball-session"] !== guestSecret)
         response.statusCode = 401;
       response.end(
-      JSON.stringify({
-        guestValid: request.headers["x-lumaball-session"] === guestSecret,
-        memberValid: request.headers.authorization === "Bearer fixture-session",
-      }),
-    );
+        JSON.stringify({
+          guestValid: request.headers["x-lumaball-session"] === guestSecret,
+          memberValid:
+            request.headers.authorization === "Bearer fixture-session",
+        }),
+      );
     };
     if (request.url.endsWith("?delayed=1")) {
       releaseIdentityResponse = reply;
@@ -277,37 +281,58 @@ try {
   });
   assert.equal(expiredGuest.status, 401);
   for (const previousCookie of [undefined, "lumaball_guest=expired"]) {
-    const identityStarted = new Promise((resolve) => { identityResponseStarted = resolve; });
+    const identityStarted = new Promise((resolve) => {
+      identityResponseStarted = resolve;
+    });
     const initialRead = fetch(origin + "/api/lumaball/me?delayed=1", {
       headers: previousCookie ? { Cookie: previousCookie } : {},
     });
     await identityStarted;
     const freshEntry = await fetch(origin + "/api/lumaball/session", {
-      method: "POST", headers: { Origin: origin },
+      method: "POST",
+      headers: { Origin: origin },
     });
     assert.equal(freshEntry.status, 200);
     const newCookie = freshEntry.headers.get("set-cookie").split(";", 1)[0];
     releaseIdentityResponse();
     const staleRead = await initialRead;
     assert.equal(staleRead.status, 401);
-    assert.equal(staleRead.headers.get("set-cookie"), null,
-      "an initial /me response arriving after guest creation must not delete the new credential");
-    const stillSignedIn = await fetch(origin + "/api/lumaball/me", { headers: { Cookie: newCookie } });
+    assert.equal(
+      staleRead.headers.get("set-cookie"),
+      null,
+      "an initial /me response arriving after guest creation must not delete the new credential",
+    );
+    const stillSignedIn = await fetch(origin + "/api/lumaball/me", {
+      headers: { Cookie: newCookie },
+    });
     assert.equal(stillSignedIn.status, 200);
   }
-  assert.equal(expiredGuest.headers.get("set-cookie"), null, "read-only checks cannot mutate guest credentials");
+  assert.equal(
+    expiredGuest.headers.get("set-cookie"),
+    null,
+    "read-only checks cannot mutate guest credentials",
+  );
   for (const [sessionCookie, status, mayReset] of [
     ["lumaball_guest=expired", 401, true],
     ["lumaball_guest=banned", 403, false],
     ["qstudy_session=expired-session; lumaball_guest=expired", 401, false],
   ]) {
     const entry = await fetch(origin + "/api/lumaball/session", {
-      method: "POST", headers: { Origin: origin, Cookie: sessionCookie },
+      method: "POST",
+      headers: { Origin: origin, Cookie: sessionCookie },
     });
     assert.equal(entry.status, status);
-    assert.equal(entry.headers.get("X-QBall-Guest-Reset"), mayReset ? "1" : null);
-    if (mayReset) assert.match(entry.headers.get("set-cookie"), /lumaball_guest=;/);
-    else assert.doesNotMatch(entry.headers.get("set-cookie") || "", /lumaball_guest=;/);
+    assert.equal(
+      entry.headers.get("X-QBall-Guest-Reset"),
+      mayReset ? "1" : null,
+    );
+    if (mayReset)
+      assert.match(entry.headers.get("set-cookie"), /lumaball_guest=;/);
+    else
+      assert.doesNotMatch(
+        entry.headers.get("set-cookie") || "",
+        /lumaball_guest=;/,
+      );
   }
   const gameIntroduction = await fetch(origin + "/qball");
   assert.equal(
@@ -315,15 +340,26 @@ try {
     200,
     "production build serves the public introduction",
   );
-  const policies = gameIntroduction.headers.get("content-security-policy").split(",");
+  const policies = gameIntroduction.headers
+    .get("content-security-policy")
+    .split(",");
   for (const policy of policies) {
-    const connect = policy.split(";").find((directive) => directive.trim().startsWith("connect-src "));
-    assert.ok(connect?.trim().split(/\s+/).includes("ws://127.0.0.1:" + port),
-      "every production policy explicitly permits this runtime port's same-origin WebSocket");
+    const connect = policy
+      .split(";")
+      .find((directive) => directive.trim().startsWith("connect-src "));
+    assert.ok(
+      connect
+        ?.trim()
+        .split(/\s+/)
+        .includes("ws://127.0.0.1:" + port),
+      "every production policy explicitly permits this runtime port's same-origin WebSocket",
+    );
   }
-  assert.doesNotMatch(gameIntroduction.headers.get("content-security-policy"),
+  assert.doesNotMatch(
+    gameIntroduction.headers.get("content-security-policy"),
     /(?:^|\s)(?:ws:|wss:)(?:\s|;|$)/,
-    "production CSP never enables WebSockets to arbitrary hosts");
+    "production CSP never enables WebSockets to arbitrary hosts",
+  );
   assert.equal(
     (await fetch(origin + "/qball/play")).status,
     200,
@@ -336,7 +372,7 @@ try {
       "/lumaball/room/" + "a".repeat(32) + "?from=invite",
       "/qball/room/" + "a".repeat(32) + "?from=invite",
     ],
-    ["/dashboard/admin/lumaball", "/dashboard/admin/qball"],
+    ["/dashboard/admin/lumaball", "/qcontrol/qball"],
   ]) {
     const redirect = await fetch(origin + before, { redirect: "manual" });
     assert.equal(redirect.status, 307);

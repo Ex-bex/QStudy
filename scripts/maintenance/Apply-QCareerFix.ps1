@@ -21,8 +21,9 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
     $manifestPath = Resolve-QCareerFixPath $Package 'manifest.json'
     $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
     if ($manifest.version -ne 1 -or $manifest.id -cnotmatch '^[a-z0-9][a-z0-9-]{1,70}$' -or $manifest.target_mode -cnotin @('local', 'lan', 'internet')) { throw 'Неизвестный формат пакета исправления.' }
-    # Keep the preserving updater restricted to the exact reviewed QCareer integration and existing QBall source payload.
+    # Keep the preserving updater restricted to the exact reviewed QControl ecosystem integration and existing QBall source payload.
     $allowed = @(
+        'frontend/next.config.ts',
         'frontend/package.json',
         'frontend/package-lock.json',
         'frontend/tsconfig.json',
@@ -141,7 +142,53 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         'frontend/components/career/career.module.css',
         'frontend/components/career/brand.tsx',
         'frontend/components/career/admin.module.css',
-        'frontend/components/career/admin-panel.tsx'
+        'frontend/components/career/admin-panel.tsx',
+        'frontend/app/qcontrol/layout.tsx',
+        'frontend/app/qcontrol/page.tsx',
+        'frontend/app/qcontrol/accounts/page.tsx',
+        'frontend/app/qcontrol/branding/page.tsx',
+        'frontend/app/qcontrol/operations/page.tsx',
+        'frontend/app/qcontrol/qball/page.tsx',
+        'frontend/app/qcontrol/qcareer/page.tsx',
+        'frontend/app/qcontrol/qstudy/page.tsx',
+        'frontend/app/qcontrol/qstudy/study.module.css',
+        'frontend/app/qcontrol/system/page.tsx',
+        'frontend/app/qcontrol/qstudy/groups/page.tsx',
+        'frontend/app/qcontrol/qstudy/modules/page.tsx',
+        'frontend/app/qcontrol/qstudy/subjects/page.tsx',
+        'frontend/app/qcontrol/qstudy/syllabi/page.tsx',
+        'frontend/app/qcontrol/qstudy/groups/[groupId]/page.tsx',
+        'frontend/app/qcontrol/qstudy/groups/[groupId]/courses/[courseId]/page.tsx',
+        'frontend/components/control/accounts.tsx',
+        'frontend/components/control/control.module.css',
+        'frontend/components/control/ecosystem-branding-admin.tsx',
+        'frontend/components/control/operations.module.css',
+        'frontend/components/control/OperationsPanel.tsx',
+        'frontend/components/control/ServerSettingsForm.tsx',
+        'frontend/components/control/shell.tsx',
+        'frontend/components/control/system.module.css',
+        'frontend/components/control/SystemPanel.tsx',
+        'frontend/lib/control-session.ts',
+        'frontend/lib/ecosystem-branding.ts',
+        'frontend/lib/ecosystem-branding.test.mjs',
+        'frontend/lib/study-management.ts',
+        'frontend/lib/study-routing.ts',
+        'frontend/lib/study-routing.test.mjs',
+        'frontend/components/ecosystem-branding.tsx',
+        'frontend/components/branding-admin.tsx',
+        'assets/brand/source/qforcelogo_q-id.png',
+        'assets/brand/source/qforcelogo_qcontrol.png',
+        'frontend/public/brand/qforcelogo_q-id.png',
+        'frontend/public/brand/qforcelogo_qcontrol.png',
+        'docs/qcontrol.md',
+        'frontend/app/dashboard/admin/qball/page.tsx',
+        'frontend/app/dashboard/groups/[groupId]/courses/[courseId]/page.tsx',
+        'frontend/app/dashboard/groups/[groupId]/page.tsx',
+        'frontend/app/dashboard/groups/page.tsx',
+        'frontend/app/dashboard/subjects/page.tsx',
+        'frontend/components/syllabus-document.tsx',
+        'frontend/components/work-card.tsx',
+        'frontend/lib/branding.ts'
     )
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $files = @(); $size = 0
@@ -149,7 +196,7 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         $relative = [string]$entry.path
         if ($relative.Contains('\') -or $relative.Contains('//') -or $relative -match '(^|/)(\.|\.env[^/]*|\.next|node_modules|uploads|\.git|\.local)(/|$)' -or
             $allowed -cnotcontains $relative -or
-            [string]$entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not $seen.Add($relative)) { throw 'Пакет содержит запрещённый или повторный путь. Допускаются только проверенные исходники QCareer/QStudy, закреплённые зависимости и совместимые изменения QBall.' }
+            [string]$entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not $seen.Add($relative)) { throw 'Пакет содержит запрещённый или повторный путь. Допускаются только проверенные исходники QControl/Q-ID/QCareer/QStudy, закреплённые зависимости и совместимые изменения QBall.' }
         $source = Resolve-QCareerFixPath $Package ('payload/' + $relative)
         $target = Resolve-QCareerFixPath $Root $relative
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'В пакете отсутствует исходник.' }
@@ -158,7 +205,7 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         if ((Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath $target -PathType Leaf)) { throw 'На месте исходника находится каталог.' }
         $files += [pscustomobject]@{ path = $relative; source = $source; target = $target; sha256 = $entry.sha256 }
     }
-    if ($files.Count -lt 1 -or $files.Count -gt 128) { throw 'Пакет должен содержать от 1 до 128 исходников.' }
+    if ($files.Count -lt 1 -or $files.Count -gt 256) { throw 'Пакет должен содержать от 1 до 256 исходников.' }
     return [pscustomobject]@{ manifest = $manifest; files = $files }
 }
 
@@ -256,10 +303,10 @@ try {
     $stage = 'сборка и повторный запуск'
     & $powershell -NoProfile -ExecutionPolicy Bypass -File $start -Mode $chosenMode -NoBrowser -NoPause
     if ($LASTEXITCODE -ne 0) { throw 'Исходники обновлены, но штатный запуск не завершён. Исправьте указанную стартером причину и повторите Start-QStudy.' }
-    Write-Host 'QCareer добавлен в QStudy, штатный запуск завершён. Текущие база, аккаунты и настройки сохранены.' -ForegroundColor Green
+    Write-Host 'QControl и экосистема обновлены, штатный запуск завершён. Текущие база, аккаунты и настройки сохранены.' -ForegroundColor Green
 } catch {
     $failed = $true
-    Write-Host ('QCareer: этап «' + $stage + '» не завершён. ' + $_.Exception.Message) -ForegroundColor Red
+    Write-Host ('QControl: этап «' + $stage + '» не завершён. ' + $_.Exception.Message) -ForegroundColor Red
     Write-Host 'База и .env не импортировались и не заменялись. Автоматический откат не выполнялся.'
 } finally {
     if ($null -ne $lock) { $lock.Dispose() }

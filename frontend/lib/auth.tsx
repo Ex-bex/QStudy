@@ -29,9 +29,11 @@ const AuthContext = createContext<{
 export function AuthProvider({
   children,
   loginPath = "/login",
+  loadingMark,
 }: {
   children: React.ReactNode;
   loginPath?: string;
+  loadingMark?: React.ReactNode;
 }) {
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState("");
@@ -94,7 +96,7 @@ export function AuthProvider({
   if (!user)
     return (
       <div className="app-loading">
-        <BrandMark />
+        {loadingMark || <BrandMark />}
         <p>{error || "Открываем ваше пространство…"}</p>
         {error && (
           <button className="btn btn-primary" onClick={refreshUser}>

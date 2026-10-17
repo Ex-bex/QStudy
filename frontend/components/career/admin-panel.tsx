@@ -1088,7 +1088,7 @@ function StudentReview({
             </ol>
           </section>
           <p className={styles.hint}>{data.disclaimer}</p>
-          <Link className="btn btn-secondary" href="/dashboard/admin">
+          <Link className="btn btn-secondary" href="/qcontrol">
             Управление аккаунтами <ArrowUpRight size={15} />
           </Link>
         </div>
@@ -1800,7 +1800,7 @@ export default function CareerAdminPanel() {
                 изменяются в общей панели QStudy.
               </p>
             </div>
-            <Link href="/dashboard/admin" className={styles.mutedLink}>
+            <Link href="/qcontrol" className={styles.mutedLink}>
               Аккаунты <ArrowUpRight size={14} />
             </Link>
           </div>
