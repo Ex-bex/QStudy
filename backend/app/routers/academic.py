@@ -606,12 +606,15 @@ def grade_submission(submission_id: int, payload: GradeInput, db: Session = Depe
 
 
 @router.get("/syllabi")
-def syllabi(course_id: int | None = Query(default=None, gt=0), db: Session = Depends(get_db), user=Depends(get_current_user)):
+def syllabi(course_id: int | None = Query(default=None, gt=0), group_id: int | None = Query(default=None, gt=0),
+            db: Session = Depends(get_db), user=Depends(get_current_user)):
     query = db.query(SyllabusDocument)
+    if group_id is not None:
+        query = query.join(Course, SyllabusDocument.course_id == Course.id).filter(Course.group_id == group_id)
     if course_id is not None:
-        query = query.filter_by(course_id=course_id)
+        query = query.filter(SyllabusDocument.course_id == course_id)
     if user.role != "admin":
-        query = query.filter_by(status="published")
+        query = query.filter(SyllabusDocument.status == "published")
     return [_syllabus_data(db, document, admin=user.role == "admin") for document in query.order_by(SyllabusDocument.created_at.desc()).all()]
 
 

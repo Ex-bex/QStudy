@@ -25,9 +25,9 @@ FIXTURE = '''import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.database import Base, engine, SessionLocal
-from app.models import User, StudentGroup, Course, SyllabusDocument, CurriculumWeek, ModuleWork, TestSession, TestQuestion
+from app.models import User, StudentGroup, Course, SyllabusDocument, CurriculumWeek, ModuleWork, TestSession, TestQuestion, ScheduleEntry
 from app.auth import hash_password
-from app.routers import auth_routes, career, tests, academic, branding
+from app.routers import auth_routes, career, tests, academic, branding, admin
 from app.services.career import initialize_career
 
 @asynccontextmanager
@@ -40,12 +40,18 @@ async def lifespan(app):
             db.add_all([User(id=1, email='career-admin@example.com', name='Administrator', role='admin', hashed_password=hash_password('FixtureCareer4729')),
                 User(id=2, email='career-student@example.com', name='Student', role='student', group_id=1, hashed_password=hash_password('FixtureCareer4729')),
                 User(id=3, email='career-other@example.com', name='Other student', role='student', group_id=2, hashed_password=hash_password('FixtureCareer4729'))])
-            db.add(Course(id=1, group_id=1, title='Fixture subject', description='Controlled learning material'))
+            db.add_all([Course(id=1, group_id=1, title='Fixture subject', description='Controlled learning material'),
+                Course(id=2, group_id=2, title='Other group subject')])
             db.flush()
             db.add(SyllabusDocument(id=1, course_id=1, uploaded_by=1, title='Fixture syllabus', filename='fixture.pdf', filepath='fixture.pdf', size=1, status='published'))
+            db.add(SyllabusDocument(id=2, course_id=2, uploaded_by=1, title='Other syllabus', filename='other.pdf', filepath='other.pdf', size=1, status='published'))
             db.flush()
             db.add(CurriculumWeek(id=1, course_id=1, week_number=1, title='Fixture week', module='Module 1', source_syllabus_id=1))
             db.add(ModuleWork(id=1, course_id=1, title='Fixture assignment', module='Module 1', week_number=1, max_score=100, source_syllabus_id=1))
+            db.add(CurriculumWeek(id=2, course_id=2, week_number=1, title='Other week', module='Module 2', source_syllabus_id=2))
+            db.add(ModuleWork(id=2, course_id=2, title='Other assignment', module='Module 2', week_number=1, source_syllabus_id=2))
+            db.add(ScheduleEntry(id=1, course_id=1, day_of_week=1, start_time='09:00', room='A13'))
+            db.add(ScheduleEntry(id=2, course_id=2, day_of_week=2, start_time='10:00', room='B24'))
             provenance = {'version':1,'mode':'course','course_id':1,'group_id':1,'module':'Module 1','week_numbers':[1],'work_ids':[1],
                 'weeks':[{'week_number':1,'module':'Module 1','source_syllabus_id':1}],
                 'works':[{'id':1,'week_number':1,'module':'Module 1','source_syllabus_id':1}], 'syllabi':[{'id':1,'title':'Fixture syllabus'}]}
@@ -60,7 +66,7 @@ async def lifespan(app):
         engine.dispose()
 
 app = FastAPI(lifespan=lifespan)
-for module in (auth_routes, career, tests, academic, branding):
+for module in (auth_routes, career, tests, academic, branding, admin):
     app.include_router(module.router, prefix='/api')
 
 @app.get('/api/health')
@@ -141,6 +147,24 @@ def main():
                 require(public.get('/api/career/me').status_code == 401, 'Anonymous profile exposed')
                 for account, email in ((admin,'career-admin@example.com'),(student,'career-student@example.com'),(other,'career-other@example.com')):
                     login(account,email)
+                stage = 'registration choice and existing-session group transfer'
+                choices = checked(public.get('/api/auth/registration-groups'))
+                require({row['id'] for row in choices}=={1,2} and all(set(row)=={'id','name'} for row in choices),'Public group choices leaked account data or omitted groups')
+                registered = client()
+                account = checked(registered.post('/api/auth/register',json={'email':'registered@example.com','name':'New student','password':'FixtureCareer4729','group_id':2}),201)
+                require(account['group_id']==2 and account['role']=='student' and 'access_token' not in account and registered.cookies.get('qstudy_session'),'Registration lost selected group or shared cookie login')
+                require(checked(registered.get('/api/auth/me'))['group_id']==2,'Selected group not in authenticated profile')
+                program = checked(registered.get('/api/courses/2'))
+                require(program['weeks'] and program['works'] and program['syllabi'],'New student cannot read own curriculum')
+                require(checked(registered.get('/api/groups/2'))['schedule'][0]['room']=='B24','Own timetable/classroom missing')
+                require([row['id'] for row in checked(registered.get('/api/syllabi?group_id=2'))]==[2],'Own syllabus filter included another group')
+                require([row['id'] for row in checked(registered.get('/api/works?group_id=2'))]==[2],'Own modules filter failed')
+                require(registered.patch('/api/auth/me',json={'name':'Forged','group_id':1}).status_code==422,'Student changed own group')
+                require(registered.patch('/api/admin/users/2',json={'group_id':2}).status_code==403,'Student changed another account group')
+                checked(admin.patch(f"/api/admin/users/{account['id']}",json={'group_id':1}))
+                require(checked(registered.get('/api/auth/me'))['group_id']==1,'Administrator transfer failed for existing session')
+                require(checked(registered.get('/api/groups/1'))['schedule'][0]['room']=='A13','Transferred account cannot read new timetable')
+                require([row['id'] for row in checked(registered.get('/api/syllabi?group_id=1'))]==[1],'Transferred account cannot read new syllabi')
                 require(student.get('/api/admin/career/config').status_code == 403, 'Student became global administrator')
                 require(student.patch('/api/career/profile',json={'user_id':3,'about':'forged'}).status_code == 422, 'Student could target someone else')
                 stage = 'administrator skills, direction and curriculum mappings'
@@ -188,17 +212,18 @@ def main():
                 require(restored['profile']['target_direction_id']==direction['id'] and restored['summary']==workspace['summary'],'Career state did not survive API restart')
                 require(checked(public.get('/api/career/config'))['logo_url']==logo['logo_url'],'Logo did not survive API restart')
                 require(checked(student.get('/api/career/opportunities?saved=true'))['items'],'Saved opportunity did not survive restart')
+                require(checked(registered.get('/api/auth/me'))['group_id']==1,'Registered account/group transfer did not survive restart')
                 stage = 'deletion revokes derived evidence without deleting academic records'
                 checked(admin.delete(f"/api/admin/career/learning-links/{work_link['id']}"))
                 require(next(s for s in checked(student.get('/api/career/me'))['skills'] if s['id']==skill['id'])['level']==2,'Deleted mapping retained evidence')
                 checked(admin.delete(f"/api/admin/career/learning-links/{link['id']}"))
                 require(next(s for s in checked(student.get('/api/career/me'))['skills'] if s['id']==skill['id'])['level']==0,'Deleted mapping retained test evidence')
                 with closing(sqlite3.connect(database)) as db:
-                    require(db.execute('SELECT COUNT(*) FROM users').fetchone()[0]==3,'Unexpected accounts created')
+                    require(db.execute('SELECT COUNT(*) FROM users').fetchone()[0]==4,'Unexpected accounts created')
                     require(db.execute('SELECT score FROM test_sessions WHERE id=1').fetchone()[0]==100,'Academic test was overwritten')
                     require(db.execute('SELECT grade FROM work_submissions WHERE id=?',(submission['id'],)).fetchone()[0]==100,'Academic grade was overwritten')
                     require(db.execute('PRAGMA integrity_check').fetchone()==('ok',),'Shared database integrity failed')
-                print('PASS: QCareer production HTTP/BFF shared HttpOnly login, student/admin isolation, curriculum mappings, real test completion, graded-work evidence, personal saved opportunities, publication expiry, transparent logo, restart persistence and revocation without academic data loss.')
+                print('PASS: production HTTP/BFF registration group choice, own timetable/syllabi/modules, administrator group transfer in existing session, shared HttpOnly login, student/admin isolation, curriculum mappings, real test completion, graded-work evidence, personal saved opportunities, publication expiry, transparent logo, restart persistence and revocation without academic data loss.')
                 return 0
             finally:
                 stop_child(frontend)

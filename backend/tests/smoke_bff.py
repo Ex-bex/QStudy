@@ -166,9 +166,11 @@ try:
     no_origin = httpx.post(BASE + '/api/auth/login', data={'username': admin_email, 'password': password}, timeout=30)
     checked(no_origin, 403, 'missing Origin denied')
     students = []
+    registration_groups = checked(admin.get('/api/auth/registration-groups'), 200, 'public registration groups').json()
+    selected_group = registration_groups[0]['id'] if registration_groups else None
     for index in (1, 2):
         student = client()
-        response = checked(student.post('/api/auth/register', json={'email': f'qa-student-{index}-{name}@example.com', 'password': password, 'name': 'Temporary QA student'}), 201, f'student {index} registration')
+        response = checked(student.post('/api/auth/register', json={'email': f'qa-student-{index}-{name}@example.com', 'password': password, 'name': 'Temporary QA student', 'group_id': selected_group}), 201, f'student {index} registration')
         created_users.append(response.json()['id'])
         created_emails.add(response.json()['email'].lower())
         assert response.json()['role'] == 'student'

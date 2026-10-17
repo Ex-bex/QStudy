@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowUpRight, FileUp, Sparkles } from "lucide-react";
-import { useAuth } from "@/lib/auth";
+import { useAuth, type User } from "@/lib/auth";
 import { api } from "@/lib/api";
 import {
   useResource,
@@ -18,20 +18,39 @@ import type { Course, Group, GroupDetail, Syllabus } from "@/types/academic";
 
 export default function SyllabiPage() {
   const { user } = useAuth();
-  const admin = user?.role === "admin";
+  return (
+    <SyllabiContent
+      key={`${user.id}:${user.role}:${user.group_id ?? "unassigned"}`}
+      user={user}
+    />
+  );
+}
+
+function SyllabiContent({ user }: { user: User }) {
+  const admin = user.role === "admin";
   const [courseId, setCourseId] = useState("");
   const [courses, setCourses] = useState<Course[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(true);
+  const [coursesError, setCoursesError] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [success, setSuccess] = useState("");
+  const selectedCourse = courses.some(
+    (course) => String(course.id) === courseId,
+  )
+    ? courseId
+    : "";
+  const query = new URLSearchParams();
+  if (selectedCourse) query.set("course_id", selectedCourse);
+  if (!admin && user.group_id) query.set("group_id", String(user.group_id));
+  const canLoad =
+    admin || Boolean(user.group_id && !coursesLoading && !coursesError);
   const {
     data: documents,
     loading,
     error,
     reload,
-  } = useResource<Syllabus[]>(
-    `/syllabi${courseId ? `?course_id=${courseId}` : ""}`,
-  );
+  } = useResource<Syllabus[]>(canLoad ? `/syllabi?${query.toString()}` : null);
   const importing = documents?.some((document) =>
     ["queued", "running"].includes(document.status),
   );
@@ -44,33 +63,43 @@ export default function SyllabiPage() {
     let active = true;
     async function load() {
       try {
-        const groups = await api<Group[]>("/groups");
-        const details = await Promise.all(
-          groups.map((group) => api<GroupDetail>(`/groups/${group.id}`)),
-        );
+        const details = admin
+          ? await api<Group[]>("/groups").then((groups) =>
+              Promise.all(
+                groups.map((group) => api<GroupDetail>(`/groups/${group.id}`)),
+              ),
+            )
+          : user.group_id
+            ? [await api<GroupDetail>(`/groups/${user.group_id}`)]
+            : [];
         if (active) {
-          setCourses(
-            details.flatMap((group) =>
-              group.courses.map((course) => ({
-                ...course,
-                group_name: group.name,
-              })),
-            ),
+          const availableCourses = details.flatMap((group) =>
+            group.courses.map((course) => ({
+              ...course,
+              group_name: group.name,
+            })),
           );
+          setCourses(availableCourses);
           const selected = new URLSearchParams(window.location.search).get(
             "course",
           );
-          if (selected) setCourseId(selected);
+          if (
+            selected &&
+            availableCourses.some((course) => String(course.id) === selected)
+          )
+            setCourseId(selected);
         }
       } catch (e) {
-        if (active) setUploadError(errorMessage(e));
+        if (active) setCoursesError(errorMessage(e));
+      } finally {
+        if (active) setCoursesLoading(false);
       }
     }
     void load();
     return () => {
       active = false;
     };
-  }, []);
+  }, [admin, user.group_id]);
   async function upload(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const element = e.currentTarget;
@@ -88,16 +117,20 @@ export default function SyllabiPage() {
     }
     setBusy(true);
     try {
-      const document = await api<Syllabus>("/syllabi/upload", { method: "POST", body: form });
+      const document = await api<Syllabus>("/syllabi/upload", {
+        method: "POST",
+        body: form,
+      });
       await reload();
       element.reset();
-      setSuccess(document.duplicate
-        ? "Этот документ уже загружен в выбранную дисциплину. Откройте его, чтобы увидеть результат импорта."
-        : document.status === "needs_configuration"
-          ? "Документ сохранён. Для автоматического импорта настройте ключ ИИ на сервере, затем повторите импорт в карточке документа."
-          : document.status === "needs_ocr"
-            ? "Документ сохранён. Откройте его карточку: для PDF доступно автоматическое распознавание текста. Если текст не распознаётся, проверьте качество документа."
-            : "Силабус загружен. ИИ автоматически добавит недели и работы в выбранную дисциплину. Если учебный план уже есть, результат останется черновиком для проверки.",
+      setSuccess(
+        document.duplicate
+          ? "Этот документ уже загружен в выбранную дисциплину. Откройте его, чтобы увидеть результат импорта."
+          : document.status === "needs_configuration"
+            ? "Документ сохранён. Для автоматического импорта настройте ключ ИИ на сервере, затем повторите импорт в карточке документа."
+            : document.status === "needs_ocr"
+              ? "Документ сохранён. Откройте его карточку: для PDF доступно автоматическое распознавание текста. Если текст не распознаётся, проверьте качество документа."
+              : "Силабус загружен. ИИ автоматически добавит недели и работы в выбранную дисциплину. Если учебный план уже есть, результат останется черновиком для проверки.",
       );
     } catch (e) {
       setUploadError(errorMessage(e));
@@ -112,8 +145,16 @@ export default function SyllabiPage() {
         title="Силабусы"
         description="От учебного документа — к понятному плану на каждую неделю."
       >
-        <Link href="/dashboard/groups" className="btn btn-secondary">
-          К группам <ArrowUpRight size={16} />
+        <Link
+          href={
+            !admin && user.group_id
+              ? `/dashboard/groups/${user.group_id}`
+              : "/dashboard/groups"
+          }
+          className="btn btn-secondary"
+        >
+          {!admin && user.group_id ? "Моя группа" : "К группам"}{" "}
+          <ArrowUpRight size={16} />
         </Link>
       </PageTitle>
       {admin && (
@@ -122,14 +163,16 @@ export default function SyllabiPage() {
             <div>
               <h2>Добавить силабус</h2>
               <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                Выберите дисциплину и загрузите документ. ИИ извлечёт программу и
-                автоматически добавит недели и работы. Если план уже заполнен,
+                Выберите дисциплину и загрузите документ. ИИ извлечёт программу
+                и автоматически добавит недели и работы. Если план уже заполнен,
                 система сохранит черновик для проверки.
               </p>
             </div>
             <Sparkles size={23} color="#638361" />
           </div>
-          {courses.length ? (
+          {coursesLoading ? (
+            <Loading />
+          ) : courses.length ? (
             <form onSubmit={upload} className="academic-stack">
               <div className="form-grid">
                 <label className="academic-field">
@@ -137,9 +180,9 @@ export default function SyllabiPage() {
                   <select
                     name="course_id"
                     className="field"
-                    defaultValue={courseId}
+                    defaultValue={selectedCourse}
                     required
-                    key={courseId}
+                    key={selectedCourse}
                   >
                     <option value="">Выберите дисциплину</option>
                     {courses.map((course) => (
@@ -192,49 +235,68 @@ export default function SyllabiPage() {
           )}
         </section>
       )}
+      <ErrorNotice message={coursesError} />
       <ErrorNotice message={uploadError} />
       {success && (
         <p className="academic-success" role="status">
           {success}
         </p>
       )}
-      <div className="academic-section-heading">
-        <h2>{admin ? "Документы и черновики" : "Учебные документы"}</h2>
-      </div>
-      <div className="academic-filter">
-        <label className="academic-field">
-          <span className="sr-only">Фильтр по дисциплине</span>
-          <select
-            className="field"
-            value={courseId}
-            onChange={(e) => setCourseId(e.target.value)}
-          >
-            <option value="">Все дисциплины</option>
-            {courses.map((course) => (
-              <option value={course.id} key={course.id}>
-                {course.title} · {course.group_name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <ErrorNotice message={error} />
-      {loading ? (
-        <Loading />
-      ) : documents?.length ? (
-        documents.map((document) => (
-          <SyllabusDocument
-            key={document.id}
-            document={document}
-            onChanged={reload}
-          />
-        ))
-      ) : (
-        <Empty title={admin ? "Силабусы ещё не добавлены" : "Силабусы ещё не опубликованы"}>
-          {admin
-            ? "Выберите дисциплину и загрузите её силабус. Автоматический импорт заполнит учебные недели и работы."
-            : "Учебные документы появятся здесь после обработки и публикации силабуса."}
+      {!admin && !user.group_id ? (
+        <Empty title="Учебная группа пока не назначена">
+          Попросите администратора назначить вашу группу в настройках аккаунта.
+          После назначения здесь появятся опубликованные силабусы её дисциплин,
+          а на странице группы — расписание и учебные модули.
         </Empty>
+      ) : (
+        <>
+          <div className="academic-section-heading">
+            <h2>{admin ? "Документы и черновики" : "Учебные документы"}</h2>
+          </div>
+          <div className="academic-filter">
+            <label className="academic-field">
+              <span className="sr-only">Фильтр по дисциплине</span>
+              <select
+                className="field"
+                value={selectedCourse}
+                onChange={(e) => setCourseId(e.target.value)}
+              >
+                <option value="">
+                  {admin ? "Все дисциплины" : "Все дисциплины моей группы"}
+                </option>
+                {courses.map((course) => (
+                  <option value={course.id} key={course.id}>
+                    {course.title} · {course.group_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <ErrorNotice message={error} />
+          {loading || coursesLoading ? (
+            <Loading />
+          ) : documents?.length ? (
+            documents.map((document) => (
+              <SyllabusDocument
+                key={document.id}
+                document={document}
+                onChanged={reload}
+              />
+            ))
+          ) : (
+            <Empty
+              title={
+                admin
+                  ? "Силабусы ещё не добавлены"
+                  : "Силабусы ещё не опубликованы"
+              }
+            >
+              {admin
+                ? "Выберите дисциплину и загрузите её силабус. Автоматический импорт заполнит учебные недели и работы."
+                : "Учебные документы появятся здесь после обработки и публикации силабуса."}
+            </Empty>
+          )}
+        </>
       )}
     </div>
   );

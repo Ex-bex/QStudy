@@ -24,6 +24,7 @@ class RegisterData(BaseModel):
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
     name: str = Field(default="", max_length=120)
+    group_id: int | None = Field(default=None, gt=0, strict=True)
     _password = field_validator("password")(validate_password)
 
 
@@ -86,6 +87,16 @@ def session_response(user):
             "token_type": "bearer", "user": user_public(user)}
 
 
+@router.get("/registration-groups")
+def registration_groups(db: Session = Depends(get_db)):
+    if not settings.REGISTRATION_ENABLED:
+        raise HTTPException(403, "Регистрация закрыта. Обратитесь к администратору")
+    # Registration needs group names, not the authenticated directory's student
+    # counts, curator details, source warnings or schedule metadata.
+    return [{"id": group.id, "name": group.name} for group in
+            db.query(StudentGroup).order_by(StudentGroup.name, StudentGroup.id).all()]
+
+
 @router.post("/register", status_code=201)
 def register(data: RegisterData, request: Request, db: Session = Depends(get_db)):
     if not settings.REGISTRATION_ENABLED:
@@ -94,9 +105,13 @@ def register(data: RegisterData, request: Request, db: Session = Depends(get_db)
     email = str(data.email).strip().lower()
     if db.query(User).filter(func.lower(User.email) == email).first():
         raise HTTPException(409, "Этот email уже используется")
-    default_group = db.query(StudentGroup).filter(StudentGroup.name == "ИП-26-3кс").first()
+    if data.group_id is None:
+        if db.query(StudentGroup.id).first() is not None:
+            raise HTTPException(422, "Выберите свою учебную группу")
+    elif db.get(StudentGroup, data.group_id) is None:
+        raise HTTPException(422, "Выбранная группа больше недоступна. Обновите список и выберите группу снова")
     user = User(email=email, name=data.name.strip(), hashed_password=hash_password(data.password),
-                role="student", group_id=default_group.id if default_group else None)
+                role="student", group_id=data.group_id)
     db.add(user)
     try:
         db.commit()

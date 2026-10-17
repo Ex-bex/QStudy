@@ -10,6 +10,8 @@ import PasswordInput from "./password-input";
 import { api, setToken } from "@/lib/api";
 import { authReturnPath } from "@/lib/auth-return";
 
+type RegistrationGroup = { id: number; name: string };
+
 export default function AuthForm({ register = false }: { register?: boolean }) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -19,14 +21,51 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [returnTo, setReturnTo] = useState("/dashboard");
+  const [groups, setGroups] = useState<RegistrationGroup[]>([]);
+  const [groupId, setGroupId] = useState("");
+  const [groupsLoading, setGroupsLoading] = useState(register);
+  const [groupsError, setGroupsError] = useState("");
+  const [groupsRevision, setGroupsRevision] = useState(0);
   useEffect(() => {
     setReturnTo(
       authReturnPath(new URLSearchParams(window.location.search).get("next")),
     );
   }, []);
+  useEffect(() => {
+    if (!register) return;
+    let active = true;
+    void api<RegistrationGroup[]>("/auth/registration-groups")
+      .then((value) => {
+        if (!active) return;
+        setGroups(value);
+        setGroupsError("");
+      })
+      .catch((cause) => {
+        if (active)
+          setGroupsError(
+            cause instanceof Error
+              ? cause.message
+              : "Не удалось загрузить группы",
+          );
+      })
+      .finally(() => {
+        if (active) setGroupsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [register, groupsRevision]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (register && (groupsLoading || groupsError)) {
+      setError("Дождитесь загрузки групп или повторите попытку.");
+      return;
+    }
+    if (register && groups.length > 0 && !groupId) {
+      setError("Выберите вашу учебную группу.");
+      return;
+    }
     if (register && password !== confirmPassword) {
       setError("Пароли не совпадают");
       return;
@@ -40,7 +79,12 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
       await api(register ? "/auth/register" : "/auth/login", {
         method: "POST",
         body: register
-          ? JSON.stringify({ name, email, password })
+          ? JSON.stringify({
+              name,
+              email,
+              password,
+              group_id: groupId ? Number(groupId) : null,
+            })
           : new URLSearchParams({ username: email, password }),
       });
       setToken("cookie");
@@ -143,6 +187,57 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
             </label>
             {register && (
               <label>
+                Учебная группа
+                <select
+                  name="group_id"
+                  className="field"
+                  value={groupId}
+                  onChange={(e) => setGroupId(e.target.value)}
+                  required={groups.length > 0}
+                  disabled={loading || groupsLoading || Boolean(groupsError)}
+                  aria-describedby="registration-group-help"
+                >
+                  <option value="">
+                    {groupsLoading
+                      ? "Загружаем группы…"
+                      : "Выберите вашу группу"}
+                  </option>
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+                <small className="muted" id="registration-group-help">
+                  {groupsLoading
+                    ? "Получаем список учебных групп."
+                    : groups.length
+                      ? "По группе откроются ваше расписание, силабусы, модули и учебные рекомендации. Позже группу сможет изменить администратор."
+                      : groupsError
+                        ? "Пока список недоступен, регистрация приостановлена."
+                        : "Группы пока не созданы. Можно зарегистрироваться без группы — администратор назначит её позже."}
+                </small>
+                {groupsError && (
+                  <span role="alert">
+                    {groupsError}{" "}
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={groupsLoading}
+                      onClick={() => {
+                        setGroupsLoading(true);
+                        setGroupsError("");
+                        setGroupsRevision((value) => value + 1);
+                      }}
+                    >
+                      Повторить загрузку
+                    </button>
+                  </span>
+                )}
+              </label>
+            )}
+            {register && (
+              <label>
                 Повторите пароль
                 <PasswordInput
                   className="field"
@@ -156,7 +251,9 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={loading}
+              disabled={
+                loading || (register && (groupsLoading || Boolean(groupsError)))
+              }
             >
               {loading ? (
                 <Loader2 className="animate-spin" size={18} />

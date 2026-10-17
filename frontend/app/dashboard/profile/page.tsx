@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { LockKeyhole, Save, UserRound } from "lucide-react";
+import Link from "next/link";
+import {
+  ArrowUpRight,
+  LockKeyhole,
+  Save,
+  UserRound,
+  Users,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import PasswordInput from "@/components/password-input";
@@ -10,10 +17,19 @@ import {
   ErrorNotice,
   Loading,
   errorMessage,
+  useResource,
 } from "@/components/academic";
+import type { GroupDetail } from "@/types/academic";
 
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
+  const {
+    data: group,
+    loading: groupLoading,
+    error: groupError,
+  } = useResource<GroupDetail>(
+    user.group_id ? `/groups/${user.group_id}` : null,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -124,6 +140,41 @@ export default function ProfilePage() {
             </button>
           </div>
         </form>
+      </section>
+      <section className="panel">
+        <div className="academic-card-top">
+          <h2>
+            <Users size={18} style={{ display: "inline", marginRight: 10 }} />
+            Учебная группа
+          </h2>
+          {group && <span className="badge">{group.name}</span>}
+        </div>
+        <ErrorNotice message={groupError} />
+        {groupLoading ? (
+          <Loading />
+        ) : group ? (
+          <>
+            <p className="muted" style={{ marginTop: 14 }}>
+              С этой группой связаны ваше расписание, силабусы, учебные модули и
+              рекомендации QCareer. Изменить назначенную группу может
+              администратор.
+            </p>
+            <div className="academic-form-actions">
+              <Link
+                className="btn btn-secondary"
+                href={`/dashboard/groups/${group.id}`}
+              >
+                Расписание и дисциплины <ArrowUpRight size={16} />
+              </Link>
+            </div>
+          </>
+        ) : !user.group_id ? (
+          <p className="muted" style={{ marginTop: 14 }}>
+            Группа пока не назначена. Попросите администратора выбрать вашу
+            группу в настройках аккаунта, чтобы видеть её расписание, силабусы и
+            модули.
+          </p>
+        ) : null}
       </section>
       <section className="panel">
         <h2>

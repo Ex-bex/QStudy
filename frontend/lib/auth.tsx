@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -34,14 +35,23 @@ export function AuthProvider({
 }) {
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState("");
+  const revision = useRef(0);
+  const invalidate = useCallback(() => {
+    revision.current++;
+  }, []);
   const router = useRouter();
   const refreshUser = useCallback(async () => {
+    const request = ++revision.current;
     setError("");
     try {
-      setUser(await api<User>("/auth/me"));
+      const current = await api<User>("/auth/me");
+      if (request === revision.current) setUser(current);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) router.replace(loginPath);
-      else
+      if (request !== revision.current) return;
+      if (e instanceof ApiError && e.status === 401) {
+        setUser(null);
+        router.replace(loginPath);
+      } else
         setError(
           e instanceof Error ? e.message : "Не удалось загрузить профиль",
         );
@@ -49,14 +59,38 @@ export function AuthProvider({
   }, [router, loginPath]);
   useEffect(() => {
     setToken("cookie");
-    refreshUser();
+    void refreshUser();
+    let timer: number | undefined;
+    const updated = () => {
+      if (document.visibilityState === "hidden") return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void refreshUser(), 120);
+    };
+    const storage = (event: StorageEvent) => {
+      if (event.key === "qstudy:account-updated") updated();
+    };
     const expired = () => {
+      invalidate();
       setUser(null);
       router.replace(loginPath);
     };
     window.addEventListener("qstudy:unauthorized", expired);
-    return () => window.removeEventListener("qstudy:unauthorized", expired);
-  }, [refreshUser, router, loginPath]);
+    window.addEventListener("qstudy:account-updated", updated);
+    window.addEventListener("focus", updated);
+    window.addEventListener("storage", storage);
+    document.addEventListener("visibilitychange", updated);
+    const polling = window.setInterval(updated, 60000);
+    return () => {
+      invalidate();
+      window.clearTimeout(timer);
+      window.clearInterval(polling);
+      window.removeEventListener("qstudy:unauthorized", expired);
+      window.removeEventListener("qstudy:account-updated", updated);
+      window.removeEventListener("focus", updated);
+      window.removeEventListener("storage", storage);
+      document.removeEventListener("visibilitychange", updated);
+    };
+  }, [refreshUser, router, loginPath, invalidate]);
   if (!user)
     return (
       <div className="app-loading">

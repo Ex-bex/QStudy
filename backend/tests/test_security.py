@@ -79,7 +79,7 @@ class SecurityApiTests(unittest.TestCase):
         return result.json()['id']
 
     def test_registration_and_invalid_tokens(self):
-        data = {'email': 'NEW@example.com', 'password': self.password, 'name': 'Новый'}
+        data = {'email': 'NEW@example.com', 'password': self.password, 'name': 'Новый', 'group_id': self.group_id}
         self.assertEqual(self.client.post('/api/auth/register', json={**data, 'role': 'admin'}).status_code, 422)
         result = self.client.post('/api/auth/register', json=data)
         self.assertEqual(result.status_code, 201, result.text)
