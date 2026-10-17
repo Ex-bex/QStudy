@@ -53,6 +53,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QBallSourceFix.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QCareerSourceFix.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QBallFieldDownload.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/tests/Test-QBallFieldDownload.ps1 -Variant physics
@@ -96,6 +98,8 @@ jobs:
         run: node lib/native-server.integration.mjs
       - name: QBall production WebSocket and persistence integration
         run: python scripts/tests/lumaball_stack.py --run
+      - name: QCareer shared login, assessment and persistence integration
+        run: python scripts/tests/career_stack.py --run
 
   production:
     runs-on: ubuntu-latest

@@ -10,3 +10,4 @@ assets/distribution/Update-QBall-Maps.cmd -text whitespace=cr-at-eol
 # Keep the original physics oracle byte-identical on Windows and Linux.
 frontend/lib/fixtures/lumaball-original/*.ts.txt text eol=lf
 scripts/maintenance/Apply-QBallFix.ps1 text eol=crlf
+scripts/maintenance/Apply-QCareerFix.ps1 text eol=crlf

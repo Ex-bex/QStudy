@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <title>QCareer — временный знак</title>
+  <rect x="6" y="6" width="84" height="84" rx="25" fill="#F47932"/>
+  <path d="M61 59a24 24 0 1 1 8-18" stroke="#FFF8F0" stroke-width="10" stroke-linecap="round"/>
+  <path d="m51 51 20 20M60 24h14v14" stroke="#FFF8F0" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m56 42 17-17" stroke="#FFF8F0" stroke-width="8" stroke-linecap="round"/>
+</svg>

@@ -40,6 +40,7 @@ function DynamicProjectIcons() {
   const { branding } = useBranding();
   const pathname = usePathname();
   useEffect(() => {
+    if (pathname === "/qcareer" || pathname.startsWith("/qcareer/")) return;
     for (const rel of ["icon", "apple-touch-icon"]) {
       let links = [
         ...document.head.querySelectorAll<HTMLLinkElement>(

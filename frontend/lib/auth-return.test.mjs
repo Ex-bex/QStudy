@@ -16,6 +16,18 @@ test("old game sign-in destinations return to the matching QBall page", () => {
     assert.equal(authReturnPath(`/lumaball${suffix}`), `/qball${suffix}`);
 });
 
+test("QCareer reuses QStudy login with exact safe workspace destinations", () => {
+  for (const value of ["/qcareer", "/qcareer/workspace"])
+    assert.equal(authReturnPath(value), value);
+  for (const value of [
+    "/qcareer//evil.example",
+    "/qcareer/workspace?next=https://evil.example",
+    "/qcareer%2fworkspace",
+    "/qcareer/../admin",
+  ])
+    assert.equal(authReturnPath(value), "/dashboard");
+});
+
 test("authentication rejects external, encoded and unrelated return destinations", () => {
   for (const value of [
     undefined,

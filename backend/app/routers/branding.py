@@ -12,10 +12,10 @@ from app.models import BrandingAsset
 from app.routers.developers import _department, department_public
 from app.services.audit import record_audit
 from app.services.branding import (IMMUTABLE_CACHE, MAX_LOGO_BYTES, department_asset_key,
-                                  normalize_png, project_branding, put_asset)
+                                  normalize_png, project_branding, career_branding, put_asset)
 
 router = APIRouter(prefix="/branding", tags=["branding"])
-AssetKey = Annotated[str, Path(pattern=r"^(?:project|department-[1-9][0-9]{0,18})$")]
+AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|department-[1-9][0-9]{0,18})$")]
 Digest = Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")]
 
 
@@ -35,10 +35,11 @@ def _persist(db, admin, key, logo, *, department_id=None):
                 db.delete(asset)
         else:
             put_asset(db, key, logo, admin.id)
-        action = "branding.department_logo" if department_id is not None else "branding.project_logo"
+        action = ("branding.department_logo" if department_id is not None else
+                  "branding.career_logo" if key == "qcareer" else "branding.project_logo")
         record_audit(db, admin, action + (".reset" if logo is None else ".upload"),
                      "developer_department" if department_id is not None else "branding",
-                     department_id if department_id is not None else "project", fields=("logo",),
+                     department_id if department_id is not None else key, fields=("logo",),
                      metadata={"size_bytes": len(logo.payload)} if logo else {})
         db.commit()
     except Exception:
@@ -56,6 +57,19 @@ async def upload_project_logo(file: UploadFile = File(...), db: Session = Depend
     logo = await _upload(file)
     _persist(db, admin, "project", logo)
     return project_branding(db)
+
+
+@router.put("/career-logo")
+async def upload_career_logo(file: UploadFile = File(...), db: Session = Depends(get_db), admin=Depends(require_admin)):
+    logo = await _upload(file)
+    _persist(db, admin, "qcareer", logo)
+    return career_branding(db)
+
+
+@router.delete("/career-logo")
+def reset_career_logo(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    _persist(db, admin, "qcareer", None)
+    return career_branding(db)
 
 
 @router.delete("/project-logo")

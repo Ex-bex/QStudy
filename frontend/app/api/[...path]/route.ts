@@ -34,7 +34,8 @@ async function proxy(
     path.length === 4 &&
     path[0] === "branding" &&
     path[1] === "assets" &&
-    /^(project|department-[1-9][0-9]*)$/.exec(path[2])?.[0] === path[2] &&
+    /^(project|qcareer|department-[1-9][0-9]*)$/.exec(path[2])?.[0] ===
+      path[2] &&
     /^[a-f0-9]{64}\.png$/.exec(path[3])?.[0] === path[3];
   const brandingUpload =
     request.method === "PUT" &&
@@ -43,7 +44,8 @@ async function proxy(
       path[1] === "lumaball" &&
       path[2] === "logo") ||
       (path[0] === "branding" &&
-        ((path.length === 2 && path[1] === "project-logo") ||
+        ((path.length === 2 &&
+          ["project-logo", "career-logo"].includes(path[1])) ||
           (path.length === 4 &&
             path[1] === "departments" &&
             /^[1-9][0-9]*$/.test(path[2]) &&

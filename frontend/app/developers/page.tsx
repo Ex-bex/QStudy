@@ -20,6 +20,7 @@ export default function DevelopersPage() {
           <Brand />
           <nav aria-label="Навигация страницы команды">
             <Link href="/">Главная</Link>
+            <Link href="/qcareer">QCareer</Link>
             <Link href="/login" className="btn btn-dark">
               Войти <ArrowUpRight size={15} />
             </Link>

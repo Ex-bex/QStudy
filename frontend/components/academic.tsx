@@ -213,6 +213,7 @@ export type FieldDefinition = {
   placeholder?: string;
   min?: number;
   max?: number;
+  maxLength?: number;
   options?: { value: string | number; label: string }[];
   hint?: string;
   nullable?: boolean;
@@ -336,6 +337,7 @@ export function RecordEditor({
                       className="field"
                       rows={4}
                       required={field.required}
+                      maxLength={field.maxLength}
                       defaultValue={String(initial[field.name] ?? "")}
                       placeholder={field.placeholder}
                     />
@@ -381,7 +383,7 @@ export function RecordEditor({
                       required={field.required}
                       min={field.min}
                       max={field.max}
-                      maxLength={500}
+                      maxLength={field.maxLength ?? 500}
                       defaultValue={
                         field.type === "times" &&
                         Array.isArray(initial[field.name])

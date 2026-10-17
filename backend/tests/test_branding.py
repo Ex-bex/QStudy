@@ -25,7 +25,7 @@ from app.models import BrandingAsset, DeveloperDepartment, User
 from app.operational_models import AuditLog
 from app.routers import branding, developers
 from app.services.backups import BackupService, verify_backup
-from app.services.branding import DEFAULT_PROJECT_LOGO, IMMUTABLE_CACHE, MAX_LOGO_BYTES, normalize_png
+from app.services.branding import DEFAULT_PROJECT_LOGO, DEFAULT_CAREER_LOGO, IMMUTABLE_CACHE, MAX_LOGO_BYTES, career_branding, normalize_png
 from app.security import BodySizeLimitMiddleware
 
 
@@ -81,7 +81,7 @@ class BrandingTests(unittest.TestCase):
         self.assertNotIn("admin-private", response.text)
 
     def test_every_upload_and_reset_requires_current_active_admin(self):
-        paths = ["/api/branding/project-logo", f"/api/branding/departments/{self.department_id}/logo"]
+        paths = ["/api/branding/project-logo", "/api/branding/career-logo", f"/api/branding/departments/{self.department_id}/logo"]
         for user_id, expected in ((None, 401), (self.student_id, 403)):
             if user_id:
                 self.as_user(user_id)
@@ -205,6 +205,36 @@ class BrandingTests(unittest.TestCase):
             self.assertEqual(db.query(BrandingAsset).count(), 0)
             self.assertEqual([e.action for e in db.query(AuditLog).order_by(AuditLog.id)],
                 ["branding.project_logo.upload", "branding.project_logo.reset", "branding.project_logo.reset"])
+
+    def test_career_transparent_logo_uses_same_private_database_public_digest_and_audit(self):
+        with self.sessions() as db:
+            self.assertEqual(career_branding(db), {"logo_url": DEFAULT_CAREER_LOGO, "logo_custom": False})
+        self.as_user(self.admin_id)
+        project = self.upload().json()
+        career = self.upload("/api/branding/career-logo", content=png(size=(120, 64), metadata=True, trailing=True))
+        self.assertEqual(career.status_code, 200, career.text)
+        logo = career.json()
+        self.assertTrue(logo["logo_custom"])
+        self.assertIn("/assets/qcareer/", logo["logo_url"])
+        self.client.headers.clear()
+        pixels = self.client.get(logo["logo_url"])
+        self.assertEqual(pixels.status_code, 200)
+        self.assertEqual(pixels.headers["cache-control"], IMMUTABLE_CACHE)
+        self.assertNotIn(b"PRIVATE_", pixels.content)
+        self.assertEqual(self.client.get(logo["logo_url"], headers={"If-None-Match": pixels.headers["etag"]}).status_code, 304)
+        self.assertEqual(self.client.get("/api/branding").json(), project)
+        self.as_user(self.admin_id)
+        rejected = self.upload("/api/branding/career-logo", content=png(mode="RGB"))
+        self.assertEqual(rejected.status_code, 422)
+        with self.sessions() as db:
+            self.assertEqual(career_branding(db), logo)
+        reset = self.client.delete("/api/branding/career-logo")
+        self.assertEqual(reset.json(), {"logo_url": DEFAULT_CAREER_LOGO, "logo_custom": False})
+        self.assertEqual(self.client.get(logo["logo_url"]).status_code, 404)
+        self.assertEqual(self.client.get("/api/branding").json(), project)
+        with self.sessions() as db:
+            self.assertEqual([r.action for r in db.query(AuditLog).filter(AuditLog.object_id == "qcareer").order_by(AuditLog.id)],
+                             ["branding.career_logo.upload", "branding.career_logo.reset"])
 
     def test_upload_and_reset_audit_failures_roll_back_atomically(self):
         self.as_user(self.admin_id)

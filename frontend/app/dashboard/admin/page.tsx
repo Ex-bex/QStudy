@@ -10,6 +10,7 @@ import {
   GraduationCap,
   Gamepad2,
   ArrowUpRight,
+  Compass,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -162,6 +163,38 @@ export default function AdminPage() {
         </div>
       </section>
       <OperationsPanel />
+      <section
+        className="panel"
+        style={{
+          padding: 24,
+          marginBottom: 24,
+          background: "#fff7ed",
+          borderColor: "#fed7aa",
+        }}
+      >
+        <div className="academic-section-heading" style={{ marginBottom: 0 }}>
+          <div>
+            <h2 style={{ color: "#a84d17" }}>
+              <Compass
+                size={20}
+                style={{
+                  display: "inline",
+                  marginRight: 8,
+                  verticalAlign: "-3px",
+                }}
+              />
+              QCareer
+            </h2>
+            <p className="muted" style={{ marginTop: 7 }}>
+              Навыки из обучения, карьерные направления, практика и дальнейшее
+              образование.
+            </p>
+          </div>
+          <Link href="/dashboard/admin/career" className="btn btn-secondary">
+            Управлять QCareer <ArrowUpRight size={16} />
+          </Link>
+        </div>
+      </section>
       <BrandingAdmin />
       <DeveloperDirectoryAdmin />
       <div className="academic-section-heading">

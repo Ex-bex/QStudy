@@ -23,6 +23,7 @@ export default function Home() {
           <a href="#how-it-works">Как это работает</a>
           <a href="#assistant">ИИ-помощник</a>
           <Link href="/qball">QBall</Link>
+          <Link href="/qcareer">QCareer</Link>
           <Link href="/developers">Разработчики</Link>
         </nav>
         <div className="landing-actions">
@@ -314,6 +315,7 @@ export default function Home() {
         <span>Учиться. Понимать. Расти.</span>
         <span>QStudy © 2026</span>
         <Link href="/developers">Связь с разработчиками</Link>
+        <Link href="/qcareer">QCareer · после учёбы</Link>
         <a href="#">Наверх ↑</a>
       </footer>
     </div>

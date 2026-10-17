@@ -16,6 +16,7 @@ MAX_SIDE = 4096
 MAX_PIXELS = 4 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 DEFAULT_PROJECT_LOGO = "/brand/qforce_logo_main.png"
+DEFAULT_CAREER_LOGO = "/brand/qcareer-placeholder.svg"
 IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
 
 
@@ -77,6 +78,12 @@ def project_branding(db) -> dict:
     asset = db.get(BrandingAsset, "project", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
     return {"project_logo_url": asset_url(asset) if asset else DEFAULT_PROJECT_LOGO,
             "project_logo_custom": asset is not None}
+
+
+def career_branding(db) -> dict:
+    asset = db.get(BrandingAsset, "qcareer", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
+    return {"logo_url": asset_url(asset) if asset else DEFAULT_CAREER_LOGO,
+            "logo_custom": asset is not None}
 
 
 def department_asset_key(department_id: int) -> str:

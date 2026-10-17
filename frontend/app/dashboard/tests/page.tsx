@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { setActivity } from "@/lib/context";
 import { learningSourceActivity } from "@/lib/learning-selection";
+import { assessmentSessionFromQuery } from "@/lib/assessment-link";
 import {
   LearningSourceSelector,
   SourceContext,
@@ -62,6 +63,22 @@ export default function TestsPage() {
   const current = unanswered[0] ?? null;
   const answeredCount = (test?.questions.length ?? 0) - unanswered.length;
   const feedbackQ = test?.questions.find((q) => q.id === feedbackFor) ?? null;
+
+  useEffect(() => {
+    const requested = assessmentSessionFromQuery(window.location.search);
+    if (!requested) return;
+    let active = true;
+    api<TestSession>(`/tests/${requested}`)
+      .then((value) => {
+        if (active) setTest(value);
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(errorMessage(cause));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {

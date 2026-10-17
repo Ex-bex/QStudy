@@ -27,12 +27,14 @@ import {
   Workflow,
   Gamepad2,
   Power,
+  Compass,
 } from "lucide-react";
 import Brand from "@/components/brand";
 import NotificationsBell from "@/lib/notifications";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { api, setToken } from "@/lib/api";
 import LumaNavLink from "@/components/lumaball/nav-link";
+import CareerNavLink from "@/components/career/nav-link";
 
 const sections = [
   {
@@ -48,6 +50,11 @@ const sections = [
         icon: MessageSquare,
       },
       { href: "/qball", label: "QBall", icon: Gamepad2 },
+      {
+        href: "/qcareer/workspace",
+        label: "QCareer · мой путь",
+        icon: Compass,
+      },
     ],
   },
   {
@@ -249,6 +256,14 @@ function Shell({ children }: { children: React.ReactNode }) {
               </Link>
               <Link
                 onClick={() => setOpen(false)}
+                href="/dashboard/admin/career"
+                className={`nav-link ${pathname.startsWith("/dashboard/admin/career") ? "active" : ""}`}
+              >
+                <Compass />
+                Управление QCareer
+              </Link>
+              <Link
+                onClick={() => setOpen(false)}
                 href="/dashboard/admin#system-host"
                 className="nav-link"
               >
@@ -306,6 +321,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <strong>{label}</strong>
           </div>
           <div className="topbar-right">
+            <CareerNavLink />
             <LumaNavLink />
             <span className="topbar-date">
               <CalendarDays

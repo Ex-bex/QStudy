@@ -25,7 +25,13 @@ const AuthContext = createContext<{
   refreshUser: () => Promise<void>;
 } | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+  loginPath = "/login",
+}: {
+  children: React.ReactNode;
+  loginPath?: string;
+}) {
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState("");
   const router = useRouter();
@@ -34,23 +40,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setUser(await api<User>("/auth/me"));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) router.replace("/login");
+      if (e instanceof ApiError && e.status === 401) router.replace(loginPath);
       else
         setError(
           e instanceof Error ? e.message : "Не удалось загрузить профиль",
         );
     }
-  }, [router]);
+  }, [router, loginPath]);
   useEffect(() => {
     setToken("cookie");
     refreshUser();
     const expired = () => {
       setUser(null);
-      router.replace("/login");
+      router.replace(loginPath);
     };
     window.addEventListener("qstudy:unauthorized", expired);
     return () => window.removeEventListener("qstudy:unauthorized", expired);
-  }, [refreshUser, router]);
+  }, [refreshUser, router, loginPath]);
   if (!user)
     return (
       <div className="app-loading">

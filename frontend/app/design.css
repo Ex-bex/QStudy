@@ -845,11 +845,23 @@
 @media (max-width: 700px) {
   .landing-nav {
     padding: 20px;
+    flex-wrap: wrap;
+    gap: 18px;
   }
   .landing-nav > .brand {
     font-size: 22px;
   }
   .landing-nav nav {
+    display: flex;
+    order: 3;
+    width: 100%;
+    justify-content: center;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+    gap: 28px;
+    font-size: 11px;
+  }
+  .landing-nav nav a[href^="#"] {
     display: none;
   }
   .landing-actions {
