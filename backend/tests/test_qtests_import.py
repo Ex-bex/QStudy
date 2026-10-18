@@ -3,10 +3,11 @@ import io
 import unittest
 import warnings
 import zipfile
+from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 from app.services.qtests_import import (
-    MAX_MEMBER_BYTES, MAX_QUESTIONS, QTestsImportError,
+    MAX_MEMBER_BYTES, MAX_QUESTIONS, OBJECTS_WARNING, QTestsImportError,
     extract_docx_questions, extract_docx_text,
 )
 
@@ -61,6 +62,15 @@ def sample(number=1, *, answer=None):
     if answer:
         lines.append(f"Ответ: {answer}")
     return lines
+
+
+def replace_package_part(document, name, payload):
+    """Build an in-memory fixture without duplicate ZIP members."""
+    output = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(document)) as original, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        for item in original.infolist():
+            archive.writestr(item.filename, payload if item.filename == name else original.read(item))
+    return output.getvalue()
 
 
 class QTestsWordImportTests(unittest.TestCase):
@@ -283,6 +293,111 @@ class QTestsWordImportTests(unittest.TestCase):
         result = extract_docx_questions(word(sample(), extra={"word/_rels/document.xml.rels": relationships,
                                                              "word/printerSettings/printerSettings1.bin": b"ordinary printer metadata"}), "first")
         self.assertEqual(len(result["questions"]), 1)
+
+    def test_three_hundred_questions_with_ole_are_imported_without_reading_binary_objects(self):
+        lines = [line for number in range(1, 301) for line in sample(number)]
+        relationships = b'''<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="ole1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="embeddings/oleObject1.bin"/>
+            </Relationships>'''
+        document = word(lines, extra={
+            "word/embeddings/oleObject1.bin": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1PRIVATE_EMBEDDED_CONTENT",
+            "word/_rels/document.xml.rels": relationships,
+        })
+        original_read = zipfile.ZipFile.read
+        reads = []
+
+        def guarded_read(archive, member, *args, **kwargs):
+            name = member.filename if isinstance(member, zipfile.ZipInfo) else member
+            reads.append(name)
+            if name.casefold().startswith("word/embeddings/") and name.casefold().endswith(".bin"):
+                raise AssertionError("The import must never read an embedded binary object")
+            return original_read(archive, member, *args, **kwargs)
+
+        with patch.object(zipfile.ZipFile, "read", new=guarded_read):
+            result = extract_docx_questions(document, "first")
+            text = extract_docx_text(document)
+        self.assertEqual(len(result["questions"]), 300)
+        self.assertEqual(result["rejected"], 0)
+        self.assertEqual({question["source_number"] for question in result["questions"]}, set(range(1, 301)))
+        self.assertTrue(all(question["correct_index"] == 0 for question in result["questions"]))
+        self.assertEqual(result["warnings"].count(OBJECTS_WARNING), 1)
+        self.assertNotIn("PRIVATE_EMBEDDED_CONTENT", result["source_text"])
+        self.assertNotIn("PRIVATE_EMBEDDED_CONTENT", text)
+        self.assertNotIn("word/embeddings/oleObject1.bin", reads)
+
+    def test_empty_embeddings_directory_does_not_claim_any_objects_were_omitted(self):
+        plain = extract_docx_questions(word(sample()), "first")
+        directory = extract_docx_questions(word(sample(), extra={"word/embeddings/": b""}), "first")
+        self.assertEqual(directory["questions"], plain["questions"])
+        self.assertEqual(directory["warnings"], plain["warnings"])
+        self.assertNotIn(OBJECTS_WARNING, directory["warnings"])
+
+    def test_explicit_executables_inside_embeddings_are_still_rejected(self):
+        for name in ("word/embeddings/program.exe", "word/embeddings/script.js", "word/embeddings/start.cmd",
+                     "word/embeddings/START.CMD", "word/embeddings/library.dll", "word/embeddings/script.ps1"):
+            with self.subTest(name=name), self.assertRaisesRegex(QTestsImportError, "исполняемое"):
+                extract_docx_questions(word(sample(), extra={name: b"never executed"}), "first")
+
+    def test_renamed_vba_project_is_rejected_by_relationship_type(self):
+        for relation_type in ("vbaProject", "vbaData", "VbaProjectSignature"):
+            relationship = f'''<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                <Relationship Id="project" Type="http://schemas.microsoft.com/office/2006/relationships/{relation_type}" Target="embeddings/ordinary.bin"/>
+                </Relationships>'''.encode()
+            with self.subTest(relation_type=relation_type), self.assertRaisesRegex(QTestsImportError, "макросами"):
+                extract_docx_questions(word(sample(), extra={
+                    "word/_rels/document.xml.rels": relationship,
+                    "word/embeddings/ordinary.bin": b"not inspected",
+                }), "first")
+
+    def test_renamed_vba_parts_are_rejected_by_content_type(self):
+        document = word(sample(), extra={"word/embeddings/ordinary.bin": b"not inspected"})
+        for content_type in ("application/vnd.ms-office.vbaProject", "application/vnd.ms-word.vbaData+xml",
+                             "application/vnd.ms-office.VbaProjectSignature"):
+            types = TYPES.replace(b"</Types>", (
+                f'<Override PartName="/word/embeddings/ordinary.bin" ContentType="{content_type}"/></Types>'
+            ).encode())
+            with self.subTest(content_type=content_type), self.assertRaisesRegex(QTestsImportError, "макросами"):
+                extract_docx_questions(replace_package_part(document, "[Content_Types].xml", types), "first")
+
+    def test_ignored_embeddings_still_obey_size_path_and_duplicate_guards(self):
+        for payload in (b"0" * (MAX_MEMBER_BYTES + 1), b"0" * 1_100_000):
+            with self.subTest(size=len(payload)), self.assertRaisesRegex(QTestsImportError, "сжатый"):
+                extract_docx_questions(word(sample(), extra={"word/embeddings/oleObject1.bin": payload}), "first")
+        for name in ("word/embeddings/../unsafe.bin", "word/embeddings/./unsafe.bin"):
+            with self.subTest(name=name), self.assertRaisesRegex(QTestsImportError, "недопустимые пути"):
+                extract_docx_questions(word(sample(), extra={name: b"ignored"}), "first")
+        output = io.BytesIO(word(sample(), extra={"word/embeddings/oleObject1.bin": b"first"}))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with zipfile.ZipFile(output, "a") as archive:
+                archive.writestr("word/embeddings/oleObject1.bin", b"second")
+        with self.assertRaisesRegex(QTestsImportError, "повторяющиеся"):
+            extract_docx_questions(output.getvalue(), "first")
+
+    def test_embedded_xml_and_relationships_keep_xml_and_external_link_guards(self):
+        hostile_xml = b'<!DOCTYPE x [<!ENTITY secret "injected">]><x>&secret;</x>'
+        with self.assertRaisesRegex(QTestsImportError, "XML"):
+            extract_docx_questions(word(sample(), extra={"word/embeddings/metadata.xml": hostile_xml}), "first")
+        external = b'''<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="ole1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" TargetMode="External" Target="https://example.com/linked-object"/>
+            </Relationships>'''
+        with self.assertRaisesRegex(QTestsImportError, "внешние связи"):
+            extract_docx_questions(word(sample(), extra={"word/embeddings/_rels/object.xml.rels": external}), "first")
+
+    def test_native_math_and_drawing_loss_is_reported_without_fabricating_their_contents(self):
+        for tag in ("{http://schemas.openxmlformats.org/officeDocument/2006/math}oMath", W + "drawing", W + "object", W + "pict"):
+            question = paragraph("1. Вопрос с объектом?")
+            node = ET.SubElement(question, tag)
+            node.text = "PRIVATE_OBJECT_ONLY_CONTENT"
+            if tag.endswith("oMath"):
+                ET.SubElement(node, "{http://schemas.openxmlformats.org/officeDocument/2006/math}t").text = "2+2"
+            with self.subTest(tag=tag):
+                result = extract_docx_questions(word(elements=[question, *[paragraph(line) for line in sample()[1:]]]), "first")
+                self.assertEqual(len(result["questions"]), 1)
+                self.assertEqual(result["warnings"].count(OBJECTS_WARNING), 1)
+                self.assertEqual(result["questions"][0]["question"], "Вопрос с объектом?")
+                self.assertNotIn("PRIVATE_OBJECT_ONLY_CONTENT", result["source_text"])
+                self.assertNotIn("2+2", result["source_text"])
 
     def test_xml_entities_are_rejected_in_utf8_and_utf16_before_parsing(self):
         xml = f'''<?xml version="1.0"?><!DOCTYPE x [<!ENTITY secret "injected">]><w:document xmlns:w="{W[1:-1]}"><w:body><w:p><w:r><w:t>&secret;</w:t></w:r></w:p></w:body></w:document>'''

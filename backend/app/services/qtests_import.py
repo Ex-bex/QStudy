@@ -22,6 +22,9 @@ MAX_TEXT_CHARS = 2_000_000
 MAX_QUESTIONS = 2000
 MAX_OPTIONS = 10
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+M = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+OBJECTS_WARNING = ("Встроенные объекты Word, рисунки и формулы не распознавались: прочитаны обычный текст и таблицы. "
+                  "Если в объектах были условия или варианты ответов, перенесите их в обычный текст и проверьте банк перед тренировкой.")
 _LETTERS = "A-JА-ЯЁ"
 _OPTION = re.compile(rf"^\s*(?P<mark>[✓✔☑*+]\s*)?(?P<label>[{_LETTERS}])\s*[).:\-]\s*(?P<text>.+)$", re.I)
 _INLINE_OPTION = re.compile(rf"(?<!\S)(?:[✓✔☑*+]\s*)?[{_LETTERS}]\s*[).]\s*(?=\S)", re.I)
@@ -51,7 +54,7 @@ def _xml(data: bytes) -> ET.Element:
         raise QTestsImportError("Повреждён XML внутри DOCX. Откройте файл в Word и сохраните новую копию.") from error
 
 
-def _read_package(data: bytes) -> dict[str, bytes]:
+def _read_package(data: bytes, *, warnings: list[str] | None = None) -> dict[str, bytes]:
     if not data:
         raise QTestsImportError("Файл Word пустой.")
     if len(data) > MAX_FILE_BYTES:
@@ -77,14 +80,24 @@ def _read_package(data: bytes) -> dict[str, bytes]:
                     raise QTestsImportError("DOCX защищён паролем. Загрузите незашифрованную копию.")
                 if item.file_size > MAX_MEMBER_BYTES or (item.file_size > 1024 * 1024 and item.file_size > max(1, item.compress_size) * 1000):
                     raise QTestsImportError("Слишком большой или чрезмерно сжатый файл внутри DOCX.")
-                if ("vbaproject" in name.casefold() or name.casefold().startswith("word/embeddings/") or
-                        name.casefold().endswith((".exe", ".dll", ".js", ".vbs"))):
-                    raise QTestsImportError("Макросы и вложенные исполняемые файлы в банке тестов не поддерживаются.")
-                if name.endswith((".xml", ".rels")) or name == "[Content_Types].xml":
+                lower_name = name.casefold()
+                if "vbaproject" in lower_name:
+                    raise QTestsImportError("В DOCX обнаружен проект макросов VBA. Сохраните новую копию Word без макросов в формате .docx.")
+                if lower_name.endswith((".exe", ".dll", ".js", ".vbs", ".com", ".scr", ".bat", ".cmd", ".ps1", ".vbe", ".hta", ".msi")):
+                    raise QTestsImportError("В DOCX есть исполняемое вложение. Удалите его в Word и сохраните новую копию .docx.")
+                # An OLE equation or embedded spreadsheet is not a VBA project.
+                # Keep checking archive metadata, but never read, unpack or run
+                # binary objects. The private original is preserved, not sanitized.
+                if lower_name.startswith("word/embeddings/") and not item.is_dir() and warnings is not None and OBJECTS_WARNING not in warnings:
+                    warnings.append(OBJECTS_WARNING)
+                if lower_name.endswith((".xml", ".rels")) or name == "[Content_Types].xml":
                     payload = archive.read(item)
                     root = _xml(payload)
-                    if name.endswith(".rels"):
+                    if lower_name.endswith(".rels"):
                         for relationship in root:
+                            relation_type = relationship.attrib.get("Type", "").casefold().rsplit("/", 1)[-1]
+                            if relation_type.startswith(("vbaproject", "vbadata")):
+                                raise QTestsImportError("Документы Word с макросами не поддерживаются. Сохраните копию DOCX без макросов.")
                             # A plain hyperlink is just visible source text: we
                             # never follow it or make a network request. Linked
                             # templates, OLE objects and other external content
@@ -94,9 +107,10 @@ def _read_package(data: bytes) -> dict[str, bytes]:
                             if external and not hyperlink:
                                 raise QTestsImportError("В DOCX есть внешние связи. Удалите связанные объекты и внешние ссылки, затем сохраните копию.")
                     if name == "[Content_Types].xml" and any(
-                            "macroenabled" in node.attrib.get("ContentType", "").casefold()
+                            any(marker in node.attrib.get("ContentType", "").casefold()
+                                for marker in ("macroenabled", "vbaproject", "vbadata"))
                             for node in root):
-                        raise QTestsImportError("Документы Word с макросами не поддерживаются. Используйте обычный DOCX.")
+                        raise QTestsImportError("Документы Word с макросами не поддерживаются. Сохраните копию DOCX без макросов.")
                     package[name] = payload
             if "word/document.xml" not in package or "[Content_Types].xml" not in package:
                 raise QTestsImportError("Файл не является полноценным документом Word DOCX.")
@@ -238,12 +252,15 @@ def _table_lines(table: ET.Element, numbering: _Numbering) -> list[str]:
     return result
 
 
-def _document_lines(data: bytes) -> list[str]:
-    package = _read_package(data)
+def _document_lines(data: bytes, *, warnings: list[str] | None = None) -> list[str]:
+    package = _read_package(data, warnings=warnings)
     root = _xml(package["word/document.xml"])
     body = root.find(W + "body")
     if body is None:
         raise QTestsImportError("В Word-файле не найден основной текст документа.")
+    if (warnings is not None and OBJECTS_WARNING not in warnings and
+            any(node.tag in {W + "object", W + "drawing", W + "pict", M + "oMath"} for node in body.iter())):
+        warnings.append(OBJECTS_WARNING)
     numbering = _Numbering(package)
     lines: list[str] = []
     for child in body:
@@ -412,8 +429,10 @@ def extract_docx_questions(data: bytes, answer_mode: str = "marked") -> dict:
     """
     if answer_mode not in {"first", "marked"}:
         raise QTestsImportError("Выберите режим ответов: первый вариант или ответы, отмеченные в документе.")
-    lines = _document_lines(data)
+    document_warnings: list[str] = []
+    lines = _document_lines(data, warnings=document_warnings)
     blocks, global_keys, warnings = _extract_blocks(lines)
+    warnings = document_warnings + warnings
     if len(blocks) > MAX_QUESTIONS:
         raise QTestsImportError("В одном банке поддерживается не более 2000 вопросов. Разделите документ.")
     results: list[dict] = []

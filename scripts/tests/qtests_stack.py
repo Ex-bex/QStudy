@@ -17,6 +17,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
+from xml.etree import ElementTree as ET
 
 from lumaball_stack import ROOT, StackFailure, base_environment, free_port, require, stop_child, wait_healthy
 
@@ -74,7 +76,7 @@ def login(client, email):
     require("httponly" in cookie and "samesite=strict" in cookie, "Q-ID cookie protections were lost")
 
 
-def document_bank(question_prefix="Fixture", answer_prefix="Correct answer"):
+def document_bank(question_prefix="Fixture", answer_prefix="Correct answer", *, embedded_object=False):
     from docx import Document
     document = Document()
     document.add_paragraph("A controlled 300-question import fixture")
@@ -87,7 +89,27 @@ def document_bank(question_prefix="Fixture", answer_prefix="Correct answer"):
         document.add_paragraph(f"Explanation: Source explanation for question {number}: this is the documented correct answer.")
     target = io.BytesIO()
     document.save(target)
-    return target.getvalue()
+    if not embedded_object:
+        return target.getvalue()
+    # Simulate a normal internal OLE attachment. It is never opened by import;
+    # every visible source question remains ordinary Word text.
+    with zipfile.ZipFile(io.BytesIO(target.getvalue())) as original:
+        members = {part.filename: original.read(part) for part in original.infolist()}
+    rels = ET.fromstring(members['word/_rels/document.xml.rels'])
+    ET.SubElement(rels, '{http://schemas.openxmlformats.org/package/2006/relationships}Relationship', {
+        'Id': 'rIdQTestsInertObject', 'Type': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject',
+        'Target': 'embeddings/oleObject1.bin'})
+    members['word/_rels/document.xml.rels'] = ET.tostring(rels, encoding='utf-8')
+    types = ET.fromstring(members['[Content_Types].xml'])
+    ET.SubElement(types, '{http://schemas.openxmlformats.org/package/2006/content-types}Default', {
+        'Extension': 'bin', 'ContentType': 'application/vnd.openxmlformats-officedocument.oleObject'})
+    members['[Content_Types].xml'] = ET.tostring(types, encoding='utf-8')
+    members['word/embeddings/oleObject1.bin'] = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1INERT_OBJECT_NOT_QUESTION_TEXT'
+    combined = io.BytesIO()
+    with zipfile.ZipFile(combined, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    return combined.getvalue()
 
 
 def document_without_questions():
@@ -221,7 +243,7 @@ def main():
                 require(any(row["id"] == lesson_id for row in checked(student.get("/api/qtests/lessons"))),
                         "Created lesson did not appear in the student's lesson list")
                 require(not checked(other.get("/api/qtests/lessons")), "Other student saw a private lesson")
-                source_bytes = document_bank()
+                source_bytes = document_bank(embedded_object=True)
                 uploaded = checked(student.post("/api/qtests/banks", files={"file": ("fixture-300.docx", source_bytes,
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
                     data={"title": "Controlled 300-question bank", "answer_mode": "first", "lesson_id": str(lesson_id)}), 202)
@@ -252,6 +274,7 @@ def main():
                 require(bank["question_count"] == 300 and len(bank["questions"]) == 300, "Restart import truncated the source bank")
                 require(all(question["correct_index"] == 0 for question in bank["questions"]), "All-first import lost the source answer key")
                 require(bank["warnings"], "Explicit all-first rule was not recorded")
+                require(any('Встроенные объекты' in warning for warning in bank['warnings']), 'Ignored Word objects were not reported to the user')
                 require(bank["lesson_id"] == lesson_id and bank["lesson_title"] == "Computer science",
                         "Lesson association was lost during the worker restart")
                 require(student.get(f"/api/qtests/banks/{bank_id}/document").content == source_bytes,
@@ -434,7 +457,7 @@ def main():
                     require(db.execute("SELECT content FROM notes WHERE id=1").fetchone() == ("Existing learning content",), "Existing QStudy note was changed")
                     require(db.execute("SELECT score FROM test_sessions WHERE id=1").fetchone() == (75,), "QTests overwrote academic test history")
                     require(db.execute("PRAGMA integrity_check").fetchone() == ("ok",) and not db.execute("PRAGMA foreign_key_check").fetchall(), "Shared database integrity failed")
-                print("PASS: production HTTP/BFF QTests landing and QControl role gate, shared HttpOnly Q-ID login, CSRF, private lessons and ownership, safe DOCX validation, durable 300-question import across API restart, byte-for-byte private Word downloads, saved lesson statistics and reassignment, atomic Word replacement across restart, failed replacement and retry preserving the usable bank, lesson deletion preserving sources and attempts, random 40 unique questions, independently shuffled correct-answer mapping, hidden keys, source explanations, immutable answers and attempt snapshots, resumed attempts, complete 39/40 grading, administrator settings, source deletion with result preservation, and unchanged earlier QStudy data. No paid AI used.")
+                print("PASS: production HTTP/BFF QTests landing and QControl role gate, shared HttpOnly Q-ID login, CSRF, private lessons and ownership, safe DOCX validation, 300-question Word with inert OLE accepted with a persisted warning across restart, byte-for-byte private Word downloads, saved lesson statistics and reassignment, atomic Word replacement across restart, failed replacement and retry preserving the usable bank, lesson deletion preserving sources and attempts, random 40 unique questions, independently shuffled correct-answer mapping, hidden keys, source explanations, immutable answers and attempt snapshots, resumed attempts, complete 39/40 grading, administrator settings, source deletion with result preservation, and unchanged earlier QStudy data. No paid AI used.")
                 return 0
             finally:
                 stop_child(frontend)
