@@ -12,8 +12,8 @@ param([string]$Root = '', [switch]$Library)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$script:QBallFieldHash = '22c7a449b1727d1a9a77715edccd9586fe59848cdd71ee8c3f273411c4d8db46'
-$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/23068152396d2dd014349b3915e1fce527dc3796/assets/distribution/QStudy-QCareer-Integration.zip'
+$script:QBallFieldHash = '3d108ccb27ab1d6e6af8cdb9cfbe97b5f500e68d3f9f889cbae1fc88816f1e2a'
+$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/12786abaf1d8b7f189a68fec6d828acc529b53a0/assets/distribution/QStudy-QCareer-Integration.zip'
 
 function Resolve-QBallFieldPath([string]$Base, [string]$Relative = '') {
     $basePath = [IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
@@ -49,7 +49,7 @@ function Install-QBallFieldPackage([string]$Project, [string]$Archive, [string]$
         $zip = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Read, $true)
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $plan = @(); $size = 0
-        if ($zip.Entries.Count -lt 4 -or $zip.Entries.Count -gt 200) { throw 'Неизвестный состав пакета обновления.' }
+        if ($zip.Entries.Count -lt 4 -or $zip.Entries.Count -gt 320) { throw 'Неизвестный состав пакета обновления.' }
         foreach ($entry in $zip.Entries) {
             $name = $entry.FullName
             if ($name.Contains('\') -or $name.Contains('//') -or $name -match '(^|/)(\.|\.\.|\.env[^/]*)(/|$)' -or
@@ -127,7 +127,7 @@ function Invoke-QBallFieldApply([string]$Project) {
 
 if ($Library) { return }
 try {
-    Write-Host 'QCareer: добавляем карьерное пространство. Учебные данные, аккаунты и настройки QStudy сохраняются.' -ForegroundColor Cyan
+    Write-Host 'QTests: добавляем тесты из Word и обновляем экосистему. Текущие данные, аккаунты и настройки сохраняются.' -ForegroundColor Cyan
     if (-not $Root -and (Test-QBallFieldRoot $env:QBALL_FIELD_FIX_HOME)) { $Root = $env:QBALL_FIELD_FIX_HOME }
     if (-not $Root) {
         Add-Type -AssemblyName System.Windows.Forms
