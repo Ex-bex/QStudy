@@ -110,7 +110,8 @@ export default function QTestsShell({ children }: { children: ReactNode }) {
             QTests <b>·</b> Разобраться, а не угадать.
           </span>
           <nav aria-label="Проекты экосистемы">
-            <Link href="/">QStudy</Link>
+            <Link href="/qstudy">QStudy</Link>
+            <Link href="/">QForce</Link>
             <Link href="/qcareer">QCareer</Link>
             <Link href="/qball">QBall</Link>
             <Link href="/developers">Команда</Link>

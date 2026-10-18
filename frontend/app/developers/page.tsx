@@ -1,15 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
-import Brand from "@/components/brand";
-import { ProjectLogo } from "@/components/project-logo";
+import Image from "next/image";
 import { PublicDeveloperDirectory } from "@/components/developer-directory";
 import "./developers.css";
 
 export const metadata: Metadata = {
-  title: "Связь с разработчиками",
+  title: { absolute: "Команда и контакты · QForce" },
   description:
-    "Команда QForce: подразделения, руководители и официальные контакты разработчиков QStudy.",
+    "Команда QForce: подразделения, руководители и официальные контакты разработчиков проектов экосистемы.",
 };
 
 export default function DevelopersPage() {
@@ -17,7 +16,16 @@ export default function DevelopersPage() {
     <div className="dev-page">
       <header className="dev-header">
         <div className="dev-header-inner">
-          <Brand />
+          <Link href="/" className="brand" aria-label="QForce — главная">
+            <Image
+              src="/brand/qforce_logo_main.png"
+              alt=""
+              width={38}
+              height={38}
+              unoptimized
+            />
+            <span>QForce</span>
+          </Link>
           <nav aria-label="Навигация страницы команды">
             <Link href="/">Главная</Link>
             <Link href="/qcareer">QCareer</Link>
@@ -29,22 +37,23 @@ export default function DevelopersPage() {
       </header>
       <main className="dev-main">
         <Link href="/" className="dev-back">
-          <ArrowLeft size={14} /> Назад в QStudy
+          <ArrowLeft size={14} /> На главную QForce
         </Link>
         <section className="dev-hero" aria-labelledby="dev-page-title">
           <div className="dev-hero-copy">
-            <p className="dev-eyebrow">QFORCE · КОМАНДА QSTUDY</p>
+            <p className="dev-eyebrow">QFORCE · КОМАНДА ЭКОСИСТЕМЫ</p>
             <h1 id="dev-page-title">
               Связь с<br />
               разработчиками<span>.</span>
             </h1>
             <p className="dev-intro">
-              Люди, которые создают QStudy. Подразделения, руководители и
-              официальные контакты команды QForce.
+              Люди, которые создают проекты экосистемы. Подразделения,
+              руководители и официальные контакты команды QForce.
             </p>
           </div>
           <div className="dev-main-logo">
-            <ProjectLogo
+            <Image
+              src="/brand/qforce_logo_main.png"
               alt="QForce"
               fill
               unoptimized
@@ -69,9 +78,9 @@ export default function DevelopersPage() {
       </main>
       <footer className="dev-footer">
         <div>
-          <span>QStudy · QForce</span>
+          <span>Команда QForce</span>
           <Link href="/">
-            Вернуться в QStudy <ArrowUpRight size={14} />
+            Главная QForce <ArrowUpRight size={14} />
           </Link>
         </div>
       </footer>

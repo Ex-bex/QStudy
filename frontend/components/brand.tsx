@@ -18,7 +18,7 @@ export function BrandMark({ className = "" }: { className?: string }) {
 
 export default function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <Link href="/" className="brand" aria-label="QStudy — главная">
+    <Link href="/qstudy" className="brand" aria-label="QStudy — главная">
       <BrandMark />
       {!compact && (
         <span>

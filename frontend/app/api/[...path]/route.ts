@@ -34,7 +34,7 @@ async function proxy(
     path.length === 4 &&
     path[0] === "branding" &&
     path[1] === "assets" &&
-    /^(project|qcareer|qtests|qid|qcontrol|department-[1-9][0-9]*)$/.exec(
+    /^(project|qcareer|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]*)$/.exec(
       path[2],
     )?.[0] === path[2] &&
     /^[a-f0-9]{64}\.png$/.exec(path[3])?.[0] === path[3];
@@ -56,7 +56,7 @@ async function proxy(
           (path.length === 4 &&
             path[1] === "departments" &&
             /^[1-9][0-9]*$/.test(path[2]) &&
-            path[3] === "logo"))));
+            ["logo", "director-photo"].includes(path[3])))));
   const bodyLimit = systemImport
     ? MAX_SYSTEM_ARCHIVE_BYTES
     : brandingUpload

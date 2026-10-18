@@ -1,11 +1,11 @@
-"""Strict PNG normalization and public, content-addressed logo URLs."""
+"""Normalized public branding images with content-addressed URLs."""
 import hashlib
 import io
 import warnings
 from dataclasses import dataclass
 
 from fastapi import HTTPException
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.orm import load_only
 
 from app.models import BrandingAsset
@@ -72,6 +72,45 @@ def normalize_png(content: bytes) -> NormalizedLogo:
         raise HTTPException(422, "PNG повреждён или имеет неподдерживаемый формат") from error
 
 
+def normalize_director_photo(content: bytes) -> NormalizedLogo:
+    """Accept an ordinary photo, apply EXIF orientation and discard metadata."""
+    if len(content) > MAX_LOGO_BYTES:
+        raise HTTPException(413, "Фотография должна занимать не более 2 МБ")
+    if not (content.startswith(PNG_SIGNATURE) or content.startswith(b"\xff\xd8\xff")):
+        raise HTTPException(422, "Загрузите фотографию в формате PNG или JPEG")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(content)) as image:
+                if image.format not in {"PNG", "JPEG"}:
+                    raise HTTPException(422, "Загрузите фотографию в формате PNG или JPEG")
+                width, height = image.size
+                if not (MIN_SIDE <= width <= MAX_SIDE and MIN_SIDE <= height <= MAX_SIDE) or width * height > MAX_PIXELS:
+                    raise HTTPException(422, "Размер фотографии: от 32 до 4096 пикселей по каждой стороне, до 4 мегапикселей")
+                if getattr(image, "is_animated", False) or getattr(image, "n_frames", 1) != 1:
+                    raise HTTPException(422, "Анимированные фотографии не поддерживаются")
+                image.verify()
+            with Image.open(io.BytesIO(content)) as image:
+                image.load()
+                pixels = ImageOps.exif_transpose(image).convert("RGBA")
+                if pixels.getchannel("A").getextrema()[1] == 0:
+                    raise HTTPException(422, "Фотография полностью прозрачная: изображение не видно")
+                width, height = pixels.size
+                normalized = Image.new("RGBA", (width, height))
+                normalized.paste(pixels)
+                output = io.BytesIO()
+                normalized.save(output, format="PNG", compress_level=6)
+                payload = output.getvalue()
+        if len(payload) > MAX_LOGO_BYTES:
+            raise HTTPException(413, "После обработки фотография превышает 2 МБ; уменьшите размер изображения")
+        return NormalizedLogo(payload, hashlib.sha256(payload).hexdigest(), width, height)
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning) as error:
+        raise HTTPException(422, "Фотография повреждена или имеет неподдерживаемый формат") from error
+
+
 def asset_url(asset: BrandingAsset) -> str:
     return f"/api/branding/assets/{asset.key}/{asset.digest}.png"
 
@@ -108,10 +147,16 @@ def department_asset_key(department_id: int) -> str:
     return f"department-{department_id}"
 
 
+def director_photo_asset_key(department_id: int) -> str:
+    return f"director-{department_id}"
+
+
 def put_asset(db, key: str, logo: NormalizedLogo, admin_id: int):
     asset = db.get(BrandingAsset, key)
     if asset is None:
-        asset = BrandingAsset(key=key, department_id=int(key[11:]) if key.startswith("department-") else None)
+        department_id = (int(key[11:]) if key.startswith("department-") else
+                         int(key[9:]) if key.startswith("director-") else None)
+        asset = BrandingAsset(key=key, department_id=department_id)
         db.add(asset)
     asset.digest, asset.payload = logo.digest, logo.payload
     asset.width, asset.height = logo.width, logo.height

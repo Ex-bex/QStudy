@@ -45,7 +45,7 @@ const products = [
   {
     name: "QStudy",
     description: "Учиться",
-    href: "/",
+    href: "/qstudy",
     logo: "/brand/qforce_logo_main.png",
   },
   {

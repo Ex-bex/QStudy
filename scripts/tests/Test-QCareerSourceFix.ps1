@@ -188,6 +188,25 @@ try {
         'backend/tests/test_qtests_lessons.py',
         'frontend/components/control/qtests-lessons.tsx'
     )) { Assert-Fix ($paths -ccontains $required) ('Saved QTests lessons dependency included: ' + $required) }
+    foreach ($required in @(
+        'backend/app/routers/developers.py',
+        'backend/tests/test_developers.py',
+        'backend/tests/test_director_photos.py',
+        'docs/user-guide.md',
+        'frontend/app/qstudy/page.tsx',
+        'frontend/components/brand.tsx',
+        'frontend/components/developer-directory.tsx',
+        'frontend/components/director-photo-upload.tsx',
+        'frontend/components/qforce/home.module.css',
+        'frontend/components/qforce/home.tsx',
+        'frontend/lib/branding.test.mjs',
+        'frontend/lib/qtests-upload.test.mjs',
+        'frontend/lib/qtests-upload.ts',
+        'frontend/types/developers.ts',
+        'scripts/tests/qforce_dom.mjs',
+        'scripts/tests/qforce_stack.py',
+        'scripts/tests/qtests_upload_dom.mjs'
+    )) { Assert-Fix ($paths -ccontains $required) ('QForce and Word upload dependency included: ' + $required) }
     $allowedBlock = [regex]::Match($helperText, '(?ms)^    \$allowed = @\(\r?\n(?<paths>.*?)^    \)')
     Assert-Fix $allowedBlock.Success 'preserving helper declares its exact reviewed path allowlist'
     $allowedPaths = @([regex]::Matches($allowedBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })

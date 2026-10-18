@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
 import {
   DEFAULT_BRANDING,
+  DEFAULT_PROJECT_LOGO,
   normalizeBranding,
   type ProjectBranding,
 } from "@/lib/branding";
@@ -53,13 +54,15 @@ function DynamicProjectIcons() {
     const control =
       pathname === "/qcontrol" || pathname.startsWith("/qcontrol/");
     const logo =
-      pathname === "/qtests" || pathname.startsWith("/qtests/")
-        ? tests.logo_url
-        : identity
-          ? ecosystem.identity_logo_url
-          : control
-            ? ecosystem.control_logo_url
-            : branding.project_logo_url;
+      pathname === "/" || pathname === "/developers"
+        ? DEFAULT_PROJECT_LOGO
+        : pathname === "/qtests" || pathname.startsWith("/qtests/")
+          ? tests.logo_url
+          : identity
+            ? ecosystem.identity_logo_url
+            : control
+              ? ecosystem.control_logo_url
+              : branding.project_logo_url;
     for (const rel of ["icon", "apple-touch-icon"]) {
       let links = [
         ...document.head.querySelectorAll<HTMLLinkElement>(

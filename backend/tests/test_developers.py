@@ -60,8 +60,10 @@ class DeveloperDirectoryTests(unittest.TestCase):
         for row in rows:
             for field in ("email", "telegram", "website", "description"):
                 self.assertEqual(row[field], "")
-            self.assertEqual(set(row), {"id", "name", "director", "description", "email", "telegram", "website", "logo", "logo_url", "logo_custom", "display_order"})
+            self.assertEqual(set(row), {"id", "name", "director", "description", "email", "telegram", "website", "logo", "logo_url", "logo_custom", "director_photo_url", "director_photo_custom", "display_order"})
             self.assertFalse(row["logo_custom"])
+            self.assertIsNone(row["director_photo_url"])
+            self.assertFalse(row["director_photo_custom"])
             self.assertEqual(row["logo_url"], f'/brand/qforce_logo_{row["logo"]}.jpeg')
         self.assertNotIn("PRIVATE", response.text)
         self.assertNotIn("admin-private", response.text)

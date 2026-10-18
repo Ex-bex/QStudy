@@ -816,12 +816,44 @@
   color: #849ba5;
 }
 .dropzone input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
+  display: block;
+  position: relative;
+  min-width: 0;
   width: 100%;
-  height: 100%;
+  max-width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 7px;
+  border: 1px solid #bcd7df;
+  border-radius: 6px;
+  background: #fff;
+  color: #46606f;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dropzone input::file-selector-button {
+  min-height: 30px;
+  margin-right: 8px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: #0c7184;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.fileLabel {
+  margin-top: 14px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.uploadFeedback {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+.uploadFeedback .error,
+.uploadFeedback .fieldHint {
+  margin: 0;
 }
 .field {
   display: flex;

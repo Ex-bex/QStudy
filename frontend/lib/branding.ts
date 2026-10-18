@@ -24,8 +24,9 @@ export function safeBrandingAsset(
   key: string,
 ): value is string {
   if (
-    /^(project|qtests|qid|qcontrol|department-[1-9][0-9]*)$/.exec(key)?.[0] !==
-    key
+    /^(project|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]*)$/.exec(
+      key,
+    )?.[0] !== key
   )
     return false;
   return (
@@ -42,6 +43,17 @@ export function normalizeBranding(value: unknown): ProjectBranding {
   return safeBrandingAsset(logo, "project")
     ? { project_logo_url: logo, project_logo_custom: true }
     : DEFAULT_BRANDING;
+}
+
+export function safeDirectorPhotoUrl(
+  department: Pick<DeveloperDepartment, "id" | "director_photo_url">,
+): string | null {
+  return safeBrandingAsset(
+    department.director_photo_url,
+    `director-${department.id}`,
+  )
+    ? department.director_photo_url!
+    : null;
 }
 
 export function departmentLogoUrl(

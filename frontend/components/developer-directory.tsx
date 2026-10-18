@@ -21,7 +21,8 @@ import {
   type FieldDefinition,
 } from "@/components/academic";
 import { useAuth } from "@/lib/auth";
-import { departmentLogoUrl } from "@/lib/branding";
+import { departmentLogoUrl, safeDirectorPhotoUrl } from "@/lib/branding";
+import DirectorPhotoUpload from "@/components/director-photo-upload";
 import {
   useBranding,
   notifyBrandingChanged,
@@ -162,10 +163,26 @@ export function PublicDeveloperDirectory() {
             </div>
             <div className="dev-department-copy">
               <h3>{department.name}</h3>
-              {department.director && (
+              {(department.director || safeDirectorPhotoUrl(department)) && (
                 <div className="dev-director">
+                  {safeDirectorPhotoUrl(department) && (
+                    <Image
+                      src={safeDirectorPhotoUrl(department)!}
+                      alt={department.director || "Фото руководителя"}
+                      width={64}
+                      height={72}
+                      unoptimized
+                      style={{
+                        objectFit: "cover",
+                        borderRadius: 14,
+                        marginBottom: 8,
+                      }}
+                    />
+                  )}
                   <span>Директор</span>
-                  <strong>{department.director}</strong>
+                  <strong>
+                    {department.director || "Имя пока не указано"}
+                  </strong>
                 </div>
               )}
               {department.description && (
@@ -356,6 +373,21 @@ export function DeveloperDirectoryAdmin() {
                     )}
                     custom={department.logo_custom}
                     endpoint={`/branding/departments/${department.id}/logo`}
+                    onSaved={(updated) => {
+                      setData((directory) =>
+                        directory
+                          ? {
+                              departments: directory.departments.map((item) =>
+                                item.id === updated.id ? updated : item,
+                              ),
+                            }
+                          : directory,
+                      );
+                      notifyBrandingChanged();
+                    }}
+                  />
+                  <DirectorPhotoUpload
+                    department={department}
                     onSaved={(updated) => {
                       setData((directory) =>
                         directory

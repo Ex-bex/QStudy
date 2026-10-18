@@ -59,7 +59,8 @@ export default function CareerShell({ children }: { children: ReactNode }) {
         <CareerBrand />
         <p>Ваши знания обретают направление.</p>
         <div>
-          <Link href="/">QStudy</Link>
+          <Link href="/qstudy">QStudy</Link>
+          <Link href="/">QForce</Link>
           <Link href="/qball">QBall</Link>
           <Link href="/qtests">QTests</Link>
           <Link href="/developers">Разработчики</Link>

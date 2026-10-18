@@ -11,6 +11,8 @@ export interface DeveloperDepartment {
   logo: DepartmentLogo;
   logo_url: string;
   logo_custom: boolean;
+  director_photo_url?: string | null;
+  director_photo_custom?: boolean;
   display_order: number;
 }
 

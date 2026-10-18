@@ -39,6 +39,7 @@ import {
   type QTestsLesson,
   type QTestsQuestionInput,
 } from "@/lib/qtests";
+import { qtestsDocumentError } from "@/lib/qtests-upload";
 import QuestionEditor from "./question-editor";
 import styles from "./qtests.module.css";
 
@@ -68,6 +69,7 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
   );
   const [replacing, setReplacing] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [replacementError, setReplacementError] = useState("");
   const replacementInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const invalidate = useCallback(() => {
@@ -206,24 +208,25 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
       setReplacementFile(null);
       return;
     }
-    if (
-      !/\.docx$/i.test(file.name) ||
-      !file.size ||
-      file.size > 10 * 1024 * 1024
-    ) {
+    const message = qtestsDocumentError(file);
+    setReplacementError(message);
+    if (message) {
       setReplacementFile(null);
-      setError(
-        "Выберите непустой Word .docx размером не более 10 МБ. Старый .doc сначала сохраните как .docx.",
-      );
+      if (replacementInput.current) replacementInput.current.value = "";
       return;
     }
     setReplacementFile(file);
-    setError("");
   }
   async function replaceDocument() {
-    if (!replacementFile || replacing) return;
+    if (replacing) return;
+    const message = qtestsDocumentError(replacementFile);
+    if (message || !replacementFile) {
+      setReplacementError(message);
+      replacementInput.current?.focus();
+      return;
+    }
     setReplacing(true);
-    setError("");
+    setReplacementError("");
     try {
       const body = new FormData();
       body.set("file", replacementFile);
@@ -248,7 +251,7 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
       );
       await refresh();
     } catch (cause) {
-      setError(qtestsError(cause));
+      setReplacementError(qtestsError(cause));
     } finally {
       setReplacing(false);
     }
@@ -506,9 +509,14 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
               </p>
               <form
                 className={styles.form}
+                aria-label="Замена документа Word"
+                aria-busy={replacing}
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (replacementFile) setConfirmReplace(true);
+                  const message = qtestsDocumentError(replacementFile);
+                  setReplacementError(message);
+                  if (!message) setConfirmReplace(true);
+                  else replacementInput.current?.focus();
                 }}
               >
                 <label className={styles.field}>
@@ -521,7 +529,8 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
                       chooseReplacement(event.target.files?.[0] ?? null)
                     }
                     disabled={!editable || replacing}
-                    required
+                    aria-describedby="qtests-replacement-feedback"
+                    aria-invalid={!!replacementError}
                   />
                 </label>
                 <label className={styles.field}>
@@ -544,9 +553,27 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
                     </option>
                   </select>
                 </label>
+                <div
+                  id="qtests-replacement-feedback"
+                  className={styles.uploadFeedback}
+                >
+                  {replacementError ? (
+                    <p className={styles.error} role="alert">
+                      {replacementError}
+                    </p>
+                  ) : (
+                    <p className={styles.fieldHint} role="status">
+                      {replacing
+                        ? "Передаём новый Word на сервер. Прежний документ и вопросы сохраняются до успешного чтения."
+                        : replacementFile
+                          ? `Выбран файл «${replacementFile.name}». Нажмите «Прочитать новый Word» и подтвердите замену.`
+                          : "Выберите Word .docx. Прежний документ сохранится, если новый не удастся прочитать."}
+                    </p>
+                  )}
+                </div>
                 <button
                   className={styles.secondary}
-                  disabled={!replacementFile || !editable || replacing}
+                  disabled={!editable || replacing}
                 >
                   <FileUp size={16} /> Прочитать новый Word
                 </button>

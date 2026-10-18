@@ -318,7 +318,9 @@ function ControlWorkspace({ children }: { children: ReactNode }) {
         </main>
         <footer className={styles.footer}>
           <span>QControl · Единый центр управления</span>
-          <span>QStudy / QCareer / QBall / Q-ID</span>
+          <span>
+            Экосистема QForce · QStudy / QTests / QCareer / QBall / Q-ID
+          </span>
         </footer>
       </div>
     </div>

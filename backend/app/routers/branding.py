@@ -12,19 +12,20 @@ from app.models import BrandingAsset
 from app.routers.developers import _department, department_public
 from app.services.audit import record_audit
 from app.services.branding import (IMMUTABLE_CACHE, MAX_LOGO_BYTES, department_asset_key,
-                                  normalize_png, project_branding, career_branding, tests_branding, ecosystem_branding, put_asset)
+                                  director_photo_asset_key, normalize_director_photo, normalize_png,
+                                  project_branding, career_branding, tests_branding, ecosystem_branding, put_asset)
 
 router = APIRouter(prefix="/branding", tags=["branding"])
-AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|qtests|qid|qcontrol|department-[1-9][0-9]{0,18})$")]
+AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]{0,18})$")]
 Digest = Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")]
 
 
-async def _upload(file: UploadFile):
+async def _upload(file: UploadFile, *, director_photo=False):
     try:
         content = await file.read(MAX_LOGO_BYTES + 1)
     finally:
         await file.close()
-    return await run_in_threadpool(normalize_png, content)
+    return await run_in_threadpool(normalize_director_photo if director_photo else normalize_png, content)
 
 
 def _persist(db, admin, key, logo, *, department_id=None):
@@ -35,7 +36,9 @@ def _persist(db, admin, key, logo, *, department_id=None):
                 db.delete(asset)
         else:
             put_asset(db, key, logo, admin.id)
-        action = ("branding.department_logo" if department_id is not None else
+        is_photo = key.startswith("director-")
+        action = ("branding.director_photo" if is_photo else
+                  "branding.department_logo" if department_id is not None else
                   "branding.career_logo" if key == "qcareer" else
                   "branding.identity_logo" if key == "qid" else
                   "branding.control_logo" if key == "qcontrol" else "branding.project_logo")
@@ -43,7 +46,8 @@ def _persist(db, admin, key, logo, *, department_id=None):
             action = "branding.tests_logo"
         record_audit(db, admin, action + (".reset" if logo is None else ".upload"),
                      "developer_department" if department_id is not None else "branding",
-                     department_id if department_id is not None else key, fields=("logo",),
+                     department_id if department_id is not None else key,
+                     fields=("director_photo" if is_photo else "logo",),
                      metadata={"size_bytes": len(logo.payload)} if logo else {})
         db.commit()
     except Exception:
@@ -147,6 +151,22 @@ def reset_department_logo(department_id: int, db: Session = Depends(get_db), adm
     return department_public(row, db)
 
 
+@router.put("/departments/{department_id}/director-photo")
+async def upload_director_photo(department_id: int, file: UploadFile = File(...),
+                                db: Session = Depends(get_db), admin=Depends(require_admin)):
+    row = _department(db, department_id)
+    photo = await _upload(file, director_photo=True)
+    _persist(db, admin, director_photo_asset_key(row.id), photo, department_id=row.id)
+    return department_public(row, db)
+
+
+@router.delete("/departments/{department_id}/director-photo")
+def reset_director_photo(department_id: int, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    row = _department(db, department_id)
+    _persist(db, admin, director_photo_asset_key(row.id), None, department_id=row.id)
+    return department_public(row, db)
+
+
 @router.get("/assets/{key}/{digest}.png")
 def public_asset(key: AssetKey, digest: Digest, request: Request, db: Session = Depends(get_db)):
     asset = db.get(BrandingAsset, key)
@@ -154,6 +174,8 @@ def public_asset(key: AssetKey, digest: Digest, request: Request, db: Session = 
         raise HTTPException(404, "Логотип не найден")
     if key.startswith("department-"):
         _department(db, int(key[11:]))
+    elif key.startswith("director-"):
+        _department(db, int(key[9:]))
     headers = {"Cache-Control": IMMUTABLE_CACHE, "ETag": f'"{digest}"',
                "X-Content-Type-Options": "nosniff"}
     if request.headers.get("if-none-match") in (headers["ETag"], "*"):

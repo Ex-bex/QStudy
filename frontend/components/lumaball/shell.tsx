@@ -45,7 +45,7 @@ export default function LumaShell({ children }: { children: ReactNode }) {
           </nav>
           <div className="lb-header-actions">
             <Link
-              href={identity?.kind === "user" ? "/dashboard" : "/"}
+              href={identity?.kind === "user" ? "/dashboard" : "/qstudy"}
               {...navigation}
               className="lb-qstudy-link"
             >

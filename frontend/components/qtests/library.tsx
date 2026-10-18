@@ -38,9 +38,12 @@ import {
   type QTestsLesson,
   type QTestsOverview,
 } from "@/lib/qtests";
+import {
+  QTESTS_TITLE_LIMIT,
+  qtestsDocumentError,
+  qtestsDocumentTitle,
+} from "@/lib/qtests-upload";
 import styles from "./qtests.module.css";
-
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export default function QTestsLibrary() {
   const { user } = useAuth();
@@ -49,6 +52,9 @@ export default function QTestsLibrary() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [creatingManual, setCreatingManual] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [createdBankId, setCreatedBankId] = useState<number | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [answerMode, setAnswerMode] = useState<"first" | "marked">("first");
@@ -73,6 +79,7 @@ export default function QTestsLibrary() {
     generation.current++;
   }, []);
   const input = useRef<HTMLInputElement>(null);
+  const uploadBusy = uploading || creatingManual;
 
   const refresh = useCallback(async (silent = false) => {
     const request = ++generation.current;
@@ -120,32 +127,33 @@ export default function QTestsLibrary() {
 
   function chooseFile(next: File | null) {
     if (!next) return;
-    if (!/\.docx$/i.test(next.name)) {
-      setError(
-        "Выберите документ .docx. Старый .doc сначала сохраните в Word как .docx.",
-      );
-      return;
-    }
-    if (next.size > MAX_FILE_BYTES) {
-      setError("Документ слишком большой. Максимальный размер — 10 МБ.");
-      return;
-    }
-    if (!next.size) {
-      setError("Файл пуст. Выберите документ с вопросами.");
+    if (uploadBusy) return;
+    setCreatedBankId(null);
+    const message = qtestsDocumentError(next);
+    setUploadError(message);
+    if (message) {
+      setFile(null);
+      if (input.current) input.current.value = "";
       return;
     }
     setFile(next);
-    setError("");
-    if (!title.trim()) setTitle(next.name.replace(/\.docx$/i, ""));
+    if (!title.trim()) setTitle(qtestsDocumentTitle(next.name));
   }
   async function upload(event: FormEvent) {
     event.preventDefault();
-    if (!file || uploading) return;
+    if (uploadBusy) return;
+    const message = qtestsDocumentError(file);
+    if (message || !file) {
+      setUploadError(message);
+      input.current?.focus();
+      return;
+    }
     setUploading(true);
-    setError("");
+    setUploadError("");
+    setCreatedBankId(null);
     const body = new FormData();
     body.set("file", file);
-    body.set("title", title.trim() || file.name.replace(/\.docx$/i, ""));
+    body.set("title", title.trim() || qtestsDocumentTitle(file.name));
     body.set("answer_mode", answerMode);
     if (uploadLesson) body.set("lesson_id", uploadLesson);
     try {
@@ -153,17 +161,19 @@ export default function QTestsLibrary() {
         method: "POST",
         body,
       });
+      setCreatedBankId(result.bank.id);
       router.push(`/qtests/banks/${result.bank.id}`);
     } catch (cause) {
-      setError(qtestsError(cause));
+      setUploadError(qtestsError(cause));
     } finally {
       setUploading(false);
     }
   }
   async function createManual() {
-    if (uploading) return;
-    setUploading(true);
-    setError("");
+    if (uploadBusy) return;
+    setCreatingManual(true);
+    setUploadError("");
+    setCreatedBankId(null);
     try {
       const bank = await api<{ id: number }>("/qtests/banks/manual", {
         method: "POST",
@@ -172,10 +182,11 @@ export default function QTestsLibrary() {
           lesson_id: uploadLesson ? Number(uploadLesson) : null,
         }),
       });
+      setCreatedBankId(bank.id);
       router.push(`/qtests/banks/${bank.id}`);
     } catch (cause) {
-      setError(qtestsError(cause));
-      setUploading(false);
+      setUploadError(qtestsError(cause));
+      setCreatingManual(false);
     }
   }
   async function deleteAttempt(id: number) {
@@ -578,7 +589,20 @@ export default function QTestsLibrary() {
             </div>
             <FileUp size={27} />
           </div>
-          <form onSubmit={upload} className={styles.form}>
+          <form
+            onSubmit={upload}
+            className={styles.form}
+            aria-label="Загрузка банка вопросов из Word"
+            aria-busy={uploadBusy}
+            onInvalid={(event) => {
+              const field = event.target;
+              setUploadError(
+                field instanceof HTMLInputElement
+                  ? field.validationMessage
+                  : "Проверьте поля перед загрузкой Word.",
+              );
+            }}
+          >
             <label
               htmlFor="qtests-file"
               className={`${styles.dropzone} ${dragging ? styles.dragging : ""}`}
@@ -594,21 +618,25 @@ export default function QTestsLibrary() {
               }}
             >
               <FileUp size={29} />
-              <strong>
+              <strong aria-live="polite">
                 {file ? file.name : "Выберите или перетащите Word"}
               </strong>
               <span>
                 {file
-                  ? `${formatBytes(file.size)} · Нажмите, чтобы заменить`
+                  ? `${formatBytes(file.size)} · Можно выбрать другой файл`
                   : "DOCX · до 10 МБ"}
               </span>
+              <span className={styles.fileLabel}>Документ Word</span>
               <input
                 ref={input}
                 id="qtests-file"
+                name="file"
                 type="file"
                 accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
-                disabled={uploading}
+                disabled={uploadBusy}
+                aria-describedby="qtests-upload-feedback"
+                aria-invalid={!!uploadError}
               />
             </label>
             <label className={styles.field}>
@@ -616,9 +644,9 @@ export default function QTestsLibrary() {
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                maxLength={180}
+                maxLength={QTESTS_TITLE_LIMIT}
                 placeholder="Например, история · итоговый экзамен"
-                disabled={uploading}
+                disabled={uploadBusy}
               />
             </label>
             <label className={styles.field}>
@@ -626,7 +654,7 @@ export default function QTestsLibrary() {
               <select
                 value={uploadLesson}
                 onChange={(event) => setUploadLesson(event.target.value)}
-                disabled={uploading}
+                disabled={uploadBusy}
               >
                 <option value="">Пока без урока</option>
                 {lessons.map((lesson) => (
@@ -643,7 +671,7 @@ export default function QTestsLibrary() {
                 onChange={(e) =>
                   setAnswerMode(e.target.value as "first" | "marked")
                 }
-                disabled={uploading}
+                disabled={uploadBusy}
               >
                 <option value="first">
                   Везде правильный первый вариант (A)
@@ -658,10 +686,33 @@ export default function QTestsLibrary() {
                 ? "Первый вариант каждого исходного вопроса будет ключом. Затем варианты перемешаются, и правильный ответ уже может оказаться под любой буквой."
                 : "У каждого вопроса нужен явный ключ: например, «Ответ: B» или «Правильный ответ: 2». Вопросы без однозначного ключа попадут в предупреждения."}
             </p>
+            <div id="qtests-upload-feedback" className={styles.uploadFeedback}>
+              {uploadError ? (
+                <p className={styles.error} role="alert">
+                  {uploadError}
+                </p>
+              ) : createdBankId !== null ? (
+                <p className={styles.success} role="status">
+                  Банк создан на сервере.{" "}
+                  <Link href={`/qtests/banks/${createdBankId}`}>
+                    Открыть банк и проверить вопросы
+                  </Link>
+                  .
+                </p>
+              ) : (
+                <p className={styles.fieldHint} role="status">
+                  {uploading
+                    ? "Передаём Word на сервер. После загрузки откроется банк со статусом чтения документа."
+                    : file
+                      ? `Файл «${file.name}» выбран. Нажмите «Загрузить Word», чтобы сохранить его и извлечь вопросы.`
+                      : "Сначала выберите файл, затем нажмите кнопку загрузки ниже. Поддерживается Word .docx."}
+                </p>
+              )}
+            </div>
             <button
               type="submit"
               className={styles.primary}
-              disabled={!file || uploading}
+              disabled={uploadBusy}
             >
               {uploading ? (
                 <>
@@ -670,7 +721,7 @@ export default function QTestsLibrary() {
                 </>
               ) : (
                 <>
-                  Создать банк вопросов <ArrowUpRight size={18} />
+                  Загрузить Word и создать банк <ArrowUpRight size={18} />
                 </>
               )}
             </button>
@@ -678,9 +729,12 @@ export default function QTestsLibrary() {
               type="button"
               className={styles.textLink}
               onClick={() => void createManual()}
-              disabled={uploading}
+              disabled={uploadBusy}
             >
-              Или создать пустой банк вручную <ArrowRight size={15} />
+              {creatingManual
+                ? "Создаём пустой банк…"
+                : "Или создать пустой банк вручную"}{" "}
+              <ArrowRight size={15} />
             </button>
           </form>
           <p className={styles.privacy}>

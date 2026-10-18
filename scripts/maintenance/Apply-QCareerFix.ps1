@@ -215,7 +215,24 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         'frontend/public/brand/qtests-prototype.svg',
         'scripts/tests/qtests_stack.py',
         'backend/tests/test_qtests_lessons.py',
-        'frontend/components/control/qtests-lessons.tsx'
+        'frontend/components/control/qtests-lessons.tsx',
+        'backend/app/routers/developers.py',
+        'backend/tests/test_developers.py',
+        'backend/tests/test_director_photos.py',
+        'docs/user-guide.md',
+        'frontend/app/qstudy/page.tsx',
+        'frontend/components/brand.tsx',
+        'frontend/components/developer-directory.tsx',
+        'frontend/components/director-photo-upload.tsx',
+        'frontend/components/qforce/home.module.css',
+        'frontend/components/qforce/home.tsx',
+        'frontend/lib/branding.test.mjs',
+        'frontend/lib/qtests-upload.test.mjs',
+        'frontend/lib/qtests-upload.ts',
+        'frontend/types/developers.ts',
+        'scripts/tests/qforce_dom.mjs',
+        'scripts/tests/qforce_stack.py',
+        'scripts/tests/qtests_upload_dom.mjs'
     )
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $files = @(); $size = 0

@@ -6,6 +6,7 @@ import {
   departmentLogoUrl,
   normalizeBranding,
   safeBrandingAsset,
+  safeDirectorPhotoUrl,
 } from "./branding.ts";
 
 const hash = "a".repeat(64);
@@ -15,6 +16,26 @@ const department = {
   logo: "coding",
   logo_url: `/api/branding/assets/department-7/${hash}.png`,
 };
+
+test("director photos are restricted to the same department's sanitized local PNG", () => {
+  const path = `/api/branding/assets/director-7/${hash}.png`;
+  assert.equal(safeDirectorPhotoUrl({ id: 7, director_photo_url: path }), path);
+  for (const url of [
+    null,
+    "",
+    "javascript:alert(1)",
+    `https://external.example${path}`,
+    `${path}?token=private`,
+    `/api/branding/assets/director-8/${hash}.png`,
+    `/api/branding/assets/department-7/${hash}.png`,
+    path.replace(".png", ".jpg"),
+  ])
+    assert.equal(
+      safeDirectorPhotoUrl({ id: 7, director_photo_url: url }),
+      null,
+    );
+  assert.equal(safeBrandingAsset(path, "director-0"), false);
+});
 
 test("uploaded logos only accept exact local PNG assets for the matching owner", () => {
   assert.equal(safeBrandingAsset(project, "project"), true);

@@ -200,6 +200,23 @@ PAYLOAD = (
     'scripts/tests/qtests_stack.py',
     'backend/tests/test_qtests_lessons.py',
     'frontend/components/control/qtests-lessons.tsx',
+    'backend/app/routers/developers.py',
+    'backend/tests/test_developers.py',
+    'backend/tests/test_director_photos.py',
+    'docs/user-guide.md',
+    'frontend/app/qstudy/page.tsx',
+    'frontend/components/brand.tsx',
+    'frontend/components/developer-directory.tsx',
+    'frontend/components/director-photo-upload.tsx',
+    'frontend/components/qforce/home.module.css',
+    'frontend/components/qforce/home.tsx',
+    'frontend/lib/branding.test.mjs',
+    'frontend/lib/qtests-upload.test.mjs',
+    'frontend/lib/qtests-upload.ts',
+    'frontend/types/developers.ts',
+    'scripts/tests/qforce_dom.mjs',
+    'scripts/tests/qforce_stack.py',
+    'scripts/tests/qtests_upload_dom.mjs',
 )
 STOP_HELPERS = (
     'scripts/launcher/Stop-Previous.ps1', 'scripts/launcher/Native.ps1',
@@ -231,6 +248,15 @@ README = '''QStudy / QTests / QCareer / QBall / Q-ID: единое управл�
 штатно останавливаются на время обновления. Изменяемые исходники сохраняются
 в закрытой папке .local/source-updates. Автоматического отката данных нет.
 Чужие процессы и запуски другого пользователя Windows не завершаются.
+
+Главная / представляет QForce: команду, подразделения и шесть проектов.
+Учебная главная QStudy сохранена на /qstudy, кабинет — /dashboard.
+Имена, контакты и фото руководителей редактируются через QControl →
+«Брендинг и команда». Фото PNG/JPEG до 2 МБ сохраняются в общей базе;
+пока фото отсутствует, на главной показываются инициалы.
+Выбор Word в QTests использует видимый элемент загрузки. Имя файла,
+отправка и ошибки показаны рядом; фоновое обновление не стирает ошибку.
+Старый .doc нужно пересохранить в Word как .docx, а не переименовать.
 
 QTests сохраняет Word по урокам. Выбирайте урок и банк для новой тренировки;
 повторная загрузка не нужна. Замена Word сохраняет прежние вопросы до

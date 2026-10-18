@@ -10,7 +10,7 @@ from app.auth import require_admin
 from app.database import get_db
 from app.models import BrandingAsset, DeveloperDepartment
 from app.services.audit import record_audit
-from app.services.branding import asset_url, department_asset_key
+from app.services.branding import asset_url, department_asset_key, director_photo_asset_key
 from app.services.web_research import safe_source_url
 
 router = APIRouter(prefix="/developers", tags=["developers"])
@@ -60,11 +60,17 @@ def department_public(row: DeveloperDepartment, db: Session, *, assets=None) -> 
     key = department_asset_key(row.id)
     asset = assets.get(key) if assets is not None else db.get(
         BrandingAsset, key, options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
+    photo_key = director_photo_asset_key(row.id)
+    photo = assets.get(photo_key) if assets is not None else db.get(
+        BrandingAsset, photo_key, options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
     return {"id": row.id, "name": row.name, "director": row.director,
             "description": row.description, "email": row.email,
             "telegram": row.telegram, "website": row.website, "logo": row.logo,
             "logo_url": asset_url(asset) if asset else f"/brand/qforce_logo_{row.logo}.{logo_extension}",
-            "logo_custom": asset is not None, "display_order": row.display_order}
+            "logo_custom": asset is not None,
+            "director_photo_url": asset_url(photo) if photo else None,
+            "director_photo_custom": photo is not None,
+            "display_order": row.display_order}
 
 
 def _department(db, department_id):
@@ -114,9 +120,10 @@ def update_department(department_id: int, data: DepartmentUpdate,
 def delete_department(department_id: int, db: Session = Depends(get_db), admin=Depends(require_admin)):
     row = _department(db, department_id)
     record_audit(db, admin, "developer_department.delete", "developer_department", row.id)
-    asset = db.get(BrandingAsset, department_asset_key(row.id))
-    if asset is not None:
-        db.delete(asset)
+    for key in (department_asset_key(row.id), director_photo_asset_key(row.id)):
+        asset = db.get(BrandingAsset, key)
+        if asset is not None:
+            db.delete(asset)
     db.delete(row)
     db.commit()
     return {"ok": True}
