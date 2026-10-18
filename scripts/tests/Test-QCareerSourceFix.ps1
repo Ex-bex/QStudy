@@ -207,6 +207,9 @@ try {
         'scripts/tests/qforce_stack.py',
         'scripts/tests/qtests_upload_dom.mjs'
     )) { Assert-Fix ($paths -ccontains $required) ('QForce and Word upload dependency included: ' + $required) }
+    foreach ($required in @(
+        'scripts/tests/qforce_branding_dom.mjs'
+    )) { Assert-Fix ($paths -ccontains $required) ('QForce and Word upload dependency included: ' + $required) }
     $allowedBlock = [regex]::Match($helperText, '(?ms)^    \$allowed = @\(\r?\n(?<paths>.*?)^    \)')
     Assert-Fix $allowedBlock.Success 'preserving helper declares its exact reviewed path allowlist'
     $allowedPaths = @([regex]::Matches($allowedBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })

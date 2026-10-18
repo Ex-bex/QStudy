@@ -16,6 +16,7 @@ MAX_SIDE = 4096
 MAX_PIXELS = 4 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 DEFAULT_PROJECT_LOGO = "/brand/qforce_logo_main.png"
+DEFAULT_FORCE_LOGO = "/brand/qforce_logo_main.png"
 DEFAULT_CAREER_LOGO = "/brand/qforcelogo_qcareer.png"
 DEFAULT_IDENTITY_LOGO = "/brand/qforcelogo_q-id.png"
 DEFAULT_CONTROL_LOGO = "/brand/qforcelogo_qcontrol.png"
@@ -134,13 +135,16 @@ def tests_branding(db) -> dict:
 
 
 def ecosystem_branding(db) -> dict:
-    """Expose only the two public ecosystem logos, never their uploader metadata."""
+    """Expose public ecosystem logos, never their uploader metadata."""
     identity = db.get(BrandingAsset, "qid", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
     control = db.get(BrandingAsset, "qcontrol", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
+    force = db.get(BrandingAsset, "qforce", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
     return {"identity_logo_url": asset_url(identity) if identity else DEFAULT_IDENTITY_LOGO,
             "identity_logo_custom": identity is not None,
             "control_logo_url": asset_url(control) if control else DEFAULT_CONTROL_LOGO,
-            "control_logo_custom": control is not None}
+            "control_logo_custom": control is not None,
+            "force_logo_url": asset_url(force) if force else DEFAULT_FORCE_LOGO,
+            "force_logo_custom": force is not None}
 
 
 def department_asset_key(department_id: int) -> str:

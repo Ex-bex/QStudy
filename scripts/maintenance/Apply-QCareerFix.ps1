@@ -232,7 +232,8 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         'frontend/types/developers.ts',
         'scripts/tests/qforce_dom.mjs',
         'scripts/tests/qforce_stack.py',
-        'scripts/tests/qtests_upload_dom.mjs'
+        'scripts/tests/qtests_upload_dom.mjs',
+        'scripts/tests/qforce_branding_dom.mjs'
     )
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $files = @(); $size = 0

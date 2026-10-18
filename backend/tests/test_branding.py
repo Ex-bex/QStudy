@@ -25,7 +25,7 @@ from app.models import BrandingAsset, DeveloperDepartment, User
 from app.operational_models import AuditLog
 from app.routers import branding, developers
 from app.services.backups import BackupService, verify_backup
-from app.services.branding import (DEFAULT_PROJECT_LOGO, DEFAULT_CAREER_LOGO, DEFAULT_IDENTITY_LOGO,
+from app.services.branding import (DEFAULT_PROJECT_LOGO, DEFAULT_FORCE_LOGO, DEFAULT_CAREER_LOGO, DEFAULT_IDENTITY_LOGO,
                                   DEFAULT_CONTROL_LOGO, IMMUTABLE_CACHE, MAX_LOGO_BYTES,
                                   career_branding, ecosystem_branding, normalize_png)
 from app.security import BodySizeLimitMiddleware
@@ -84,7 +84,7 @@ class BrandingTests(unittest.TestCase):
 
     def test_every_upload_and_reset_requires_current_active_admin(self):
         paths = ["/api/branding/project-logo", "/api/branding/career-logo", "/api/branding/identity-logo",
-                 "/api/branding/control-logo", "/api/branding/tests-logo", f"/api/branding/departments/{self.department_id}/logo"]
+                 "/api/branding/control-logo", "/api/branding/force-logo", "/api/branding/tests-logo", f"/api/branding/departments/{self.department_id}/logo"]
         for user_id, expected in ((None, 401), (self.student_id, 403)):
             if user_id:
                 self.as_user(user_id)
@@ -281,7 +281,9 @@ class BrandingTests(unittest.TestCase):
         self.assertEqual(response.json(), {"identity_logo_url": DEFAULT_IDENTITY_LOGO,
                                           "identity_logo_custom": False,
                                           "control_logo_url": DEFAULT_CONTROL_LOGO,
-                                          "control_logo_custom": False})
+                                          "control_logo_custom": False,
+                                          "force_logo_url": DEFAULT_FORCE_LOGO,
+                                          "force_logo_custom": False})
         self.assertEqual(self.client.get("/api/branding").json(),
                          {"project_logo_url": DEFAULT_PROJECT_LOGO, "project_logo_custom": False})
         with self.sessions() as db:
@@ -336,11 +338,56 @@ class BrandingTests(unittest.TestCase):
                                                                  "branding.identity_logo.reset", "branding.control_logo.reset"])
             self.assertTrue(all(json.loads(event.fields_json) == ["logo"] for event in events))
 
-    def test_ecosystem_invalid_png_and_audit_failure_keep_both_logos_unchanged(self):
+    def test_force_logo_is_sanitized_cached_audited_and_independent_from_every_project(self):
+        self.as_user(self.admin_id)
+        project = self.upload().json()
+        career = self.upload("/api/branding/career-logo", content=png(size=(80, 64))).json()
+        self.upload("/api/branding/identity-logo", content=png(size=(96, 64)))
+        before = self.upload("/api/branding/control-logo", content=png(size=(128, 64))).json()
+        self.assertEqual(before["force_logo_url"], DEFAULT_FORCE_LOGO)
+        self.assertFalse(before["force_logo_custom"])
+        response = self.upload("/api/branding/force-logo", content=png(size=(64, 96), metadata=True, trailing=True))
+        self.assertEqual(response.status_code, 200, response.text)
+        current = response.json()
+        self.assertTrue(current["force_logo_custom"])
+        self.assertRegex(current["force_logo_url"], r"^/api/branding/assets/qforce/[a-f0-9]{64}\.png$")
+        for field in ("identity_logo_url", "identity_logo_custom", "control_logo_url", "control_logo_custom"):
+            self.assertEqual(current[field], before[field])
+        self.client.headers.clear()
+        self.assertEqual(self.client.get("/api/branding/ecosystem").json(), current)
+        image = self.client.get(current["force_logo_url"])
+        self.assertEqual(image.status_code, 200)
+        self.assertEqual(image.headers["cache-control"], IMMUTABLE_CACHE)
+        self.assertEqual(image.headers["x-content-type-options"], "nosniff")
+        self.assertNotIn(b"PRIVATE", image.content)
+        with Image.open(io.BytesIO(image.content)) as decoded:
+            self.assertEqual(decoded.mode, "RGBA")
+            self.assertEqual(decoded.size, (64, 96))
+            self.assertEqual(decoded.info, {})
+        self.assertEqual(self.client.get(current["force_logo_url"], headers={"If-None-Match": image.headers["etag"]}).status_code, 304)
+        self.assertEqual(self.client.get("/api/branding").json(), project)
+        self.assertEqual(self.client.get(f'/api/branding/assets/qforce/{"0" * 64}.png').status_code, 404)
+        self.assertEqual(self.client.get(f'/api/branding/assets/qforce-secret/{"0" * 64}.png').status_code, 422)
+        self.as_user(self.admin_id)
+        reset = self.client.delete("/api/branding/force-logo")
+        self.assertEqual(reset.status_code, 200)
+        self.assertEqual(reset.json(), before)
+        self.assertEqual(self.client.get(current["force_logo_url"]).status_code, 404)
+        self.assertEqual(self.client.get("/api/branding").json(), project)
+        with self.sessions() as db:
+            self.assertEqual(career_branding(db), career)
+            self.assertEqual([row.key for row in db.query(BrandingAsset).order_by(BrandingAsset.key)], ["project", "qcareer", "qcontrol", "qid"])
+            events = db.query(AuditLog).filter(AuditLog.object_id == "qforce").order_by(AuditLog.id).all()
+            self.assertEqual([event.action for event in events], ["branding.force_logo.upload", "branding.force_logo.reset"])
+            self.assertTrue(all(json.loads(event.fields_json) == ["logo"] for event in events))
+            self.assertTrue(all(event.object_type == "branding" for event in events))
+
+    def test_ecosystem_invalid_png_and_audit_failure_keep_all_logos_unchanged(self):
         self.as_user(self.admin_id)
         self.upload("/api/branding/identity-logo")
-        initial = self.upload("/api/branding/control-logo", content=png(size=(96, 64))).json()
-        for route in ("identity-logo", "control-logo"):
+        self.upload("/api/branding/control-logo", content=png(size=(96, 64)))
+        initial = self.upload("/api/branding/force-logo", content=png(size=(80, 64))).json()
+        for route in ("identity-logo", "control-logo", "force-logo"):
             with self.subTest(route=route):
                 path = f"/api/branding/{route}"
                 for content, expected in ((b"<svg/>", 422), (png(mode="RGB"), 422), (png() + b"x" * MAX_LOGO_BYTES, 413)):
@@ -351,8 +398,8 @@ class BrandingTests(unittest.TestCase):
                     self.assertEqual(self.client.delete(path).status_code, 500)
                 self.assertEqual(self.client.get("/api/branding/ecosystem").json(), initial)
         with self.sessions() as db:
-            self.assertEqual(db.query(BrandingAsset).count(), 2)
-            self.assertEqual(db.query(AuditLog).count(), 2)
+            self.assertEqual(db.query(BrandingAsset).count(), 3)
+            self.assertEqual(db.query(AuditLog).count(), 3)
             self.assertEqual(ecosystem_branding(db), initial)
 
     def test_new_table_additive_upgrade_preserves_users_and_existing_logo(self):
@@ -398,9 +445,13 @@ class BrandingTests(unittest.TestCase):
             engine = create_engine("sqlite:///" + database.as_posix())
             Base.metadata.create_all(engine)
             logo = normalize_png(png(metadata=True, trailing=True))
+            force = normalize_png(png(size=(96, 64), metadata=True, trailing=True))
             with sessionmaker(bind=engine)() as db:
                 db.add(BrandingAsset(key="project", digest=logo.digest, payload=logo.payload,
-                                    width=logo.width, height=logo.height)); db.commit()
+                                    width=logo.width, height=logo.height))
+                db.add(BrandingAsset(key="qforce", digest=force.digest, payload=force.payload,
+                                    width=force.width, height=force.height))
+                db.commit()
             engine.dispose()
             service = BackupService(database, uploads, root / "backups")
             result = service.create()
@@ -410,6 +461,9 @@ class BrandingTests(unittest.TestCase):
                 digest, payload = db.execute("SELECT digest, payload FROM branding_assets WHERE key='project'").fetchone()
                 self.assertEqual(digest, logo.digest)
                 self.assertEqual(payload, logo.payload)
+                digest, payload = db.execute("SELECT digest, payload FROM branding_assets WHERE key='qforce'").fetchone()
+                self.assertEqual(digest, force.digest)
+                self.assertEqual(payload, force.payload)
 
     def test_upload_request_limit_includes_streamed_multipart_before_persisting(self):
         from app import main

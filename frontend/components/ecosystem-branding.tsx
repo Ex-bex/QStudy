@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import { CONTROL_LOGO, QID_LOGO } from "@/lib/identity-brand";
 import {
   DEFAULT_ECOSYSTEM_BRANDING,
+  FORCE_LOGO,
   normalizeEcosystemBranding,
   type EcosystemBranding,
 } from "@/lib/ecosystem-branding";
@@ -104,13 +105,20 @@ export function useEcosystemBranding() {
 export function EcosystemLogo({
   kind,
   ...props
-}: Omit<ImageProps, "src"> & { kind: "identity" | "control" }) {
+}: Omit<ImageProps, "src"> & { kind: "force" | "identity" | "control" }) {
   const { branding } = useEcosystemBranding();
   const requested =
-    kind === "identity"
-      ? branding.identity_logo_url
-      : branding.control_logo_url;
-  const fallback = kind === "identity" ? QID_LOGO : CONTROL_LOGO;
+    kind === "force"
+      ? branding.force_logo_url
+      : kind === "identity"
+        ? branding.identity_logo_url
+        : branding.control_logo_url;
+  const fallback =
+    kind === "force"
+      ? FORCE_LOGO
+      : kind === "identity"
+        ? QID_LOGO
+        : CONTROL_LOGO;
   const [failed, setFailed] = useState("");
   return (
     <Image

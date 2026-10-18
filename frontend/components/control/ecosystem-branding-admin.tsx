@@ -17,9 +17,11 @@ export default function EcosystemBrandingAdmin() {
     <section className="academic-section">
       <div className="academic-section-heading">
         <div>
-          <h2>Q-ID и QControl</h2>
+          <h2>QForce, Q-ID и QControl</h2>
           <p className="muted">
-            Логотипы входа и центра управления. Прозрачный PNG до 2 МБ.
+            Логотипы экосистемы, входа и центра управления. Прозрачный PNG до 2
+            МБ. Логотип QForce на общей главной и странице команды изменяется
+            отдельно от QStudy.
           </p>
         </div>
       </div>
@@ -34,6 +36,13 @@ export default function EcosystemBrandingAdmin() {
         </button>
       )}
       <div className="panel branding-admin-panel">
+        <LogoUpload<EcosystemBranding>
+          title="Логотип QForce"
+          currentUrl={branding.force_logo_url}
+          custom={branding.force_logo_custom}
+          endpoint="/branding/force-logo"
+          onSaved={notifyEcosystemBrandingChanged}
+        />
         <LogoUpload<EcosystemBranding>
           title="Логотип Q-ID"
           currentUrl={branding.identity_logo_url}

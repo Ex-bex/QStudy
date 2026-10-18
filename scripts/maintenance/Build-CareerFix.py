@@ -217,6 +217,7 @@ PAYLOAD = (
     'scripts/tests/qforce_dom.mjs',
     'scripts/tests/qforce_stack.py',
     'scripts/tests/qtests_upload_dom.mjs',
+    'scripts/tests/qforce_branding_dom.mjs',
 )
 STOP_HELPERS = (
     'scripts/launcher/Stop-Previous.ps1', 'scripts/launcher/Native.ps1',
@@ -251,6 +252,8 @@ README = '''QStudy / QTests / QCareer / QBall / Q-ID: единое управл�
 
 Главная / представляет QForce: команду, подразделения и шесть проектов.
 Учебная главная QStudy сохранена на /qstudy, кабинет — /dashboard.
+Логотип QForce меняется независимо от QStudy в QControl → «Брендинг и команда»:
+прозрачный PNG до 2 МБ, сохранение в базе и сброс к стандартному изображению.
 Имена, контакты и фото руководителей редактируются через QControl →
 «Брендинг и команда». Фото PNG/JPEG до 2 МБ сохраняются в общей базе;
 пока фото отсутствует, на главной показываются инициалы.

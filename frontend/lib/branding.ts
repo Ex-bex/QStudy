@@ -24,7 +24,7 @@ export function safeBrandingAsset(
   key: string,
 ): value is string {
   if (
-    /^(project|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]*)$/.exec(
+    /^(project|qtests|qid|qcontrol|qforce|(?:department|director)-[1-9][0-9]*)$/.exec(
       key,
     )?.[0] !== key
   )

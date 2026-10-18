@@ -31,6 +31,15 @@ def photo():
     return output.getvalue()
 
 
+def logo():
+    from PIL import Image
+    output = io.BytesIO()
+    pixels = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+    pixels.putpixel((32, 32), (60, 120, 210, 255))
+    pixels.save(output, format='PNG')
+    return output.getvalue()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', action='store_true')
@@ -83,6 +92,23 @@ def main():
                 stage = 'roles and source upload'
                 require(public.put(endpoint, files={'file': ('photo.jpg', photo(), 'image/jpeg')}).status_code == 401, 'Anonymous photo upload allowed')
                 login(admin, 'qtests-admin@example.com'); login(student, 'qtests-student@example.com')
+                stage = 'independent QForce branding'
+                force_endpoint = '/api/branding/force-logo'
+                study_branding = checked(public.get('/api/branding'))
+                ecosystem = checked(public.get('/api/branding/ecosystem'))
+                require(ecosystem['force_logo_url'] == '/brand/qforce_logo_main.png' and not ecosystem['force_logo_custom'], 'QForce default is missing')
+                require(public.put(force_endpoint, files={'file': ('force.png', logo(), 'image/png')}).status_code == 401, 'Anonymous QForce branding allowed')
+                require(student.put(force_endpoint, files={'file': ('force.png', logo(), 'image/png')}).status_code == 403, 'Student QForce branding allowed')
+                require(admin.put(force_endpoint, headers={'Origin': 'https://outside.example'}, files={'file': ('force.png', logo(), 'image/png')}).status_code == 403, 'Foreign-origin QForce upload allowed')
+                force = checked(admin.put(force_endpoint, files={'file': ('force.png', logo(), 'image/png')}))
+                force_url = force['force_logo_url']
+                require(force['force_logo_custom'] and re.fullmatch(r'/api/branding/assets/qforce/[a-f0-9]{64}\.png', force_url) is not None, 'QForce source URL is unsafe')
+                for key in ('identity_logo_url', 'identity_logo_custom', 'control_logo_url', 'control_logo_custom'):
+                    require(force[key] == ecosystem[key], 'QForce upload changed another ecosystem logo')
+                require(checked(public.get('/api/branding')) == study_branding, 'QForce upload replaced QStudy branding')
+                force_image = public.get(force_url)
+                require(force_image.status_code == 200 and force_image.headers['content-type'] == 'image/png' and 'immutable' in force_image.headers.get('cache-control', ''), 'QForce public asset cannot pass BFF')
+                stage = 'director source upload'
                 require(student.put(endpoint, files={'file': ('photo.jpg', photo(), 'image/jpeg')}).status_code == 403, 'Student photo upload allowed')
                 uploaded = checked(admin.put(endpoint, files={'file': ('photo.jpg', photo(), 'image/jpeg')}))
                 require(uploaded['director_photo_custom'] and uploaded['logo_url'] == before_logo, 'Photo and logo were mixed')
@@ -92,13 +118,17 @@ def main():
                 require(public.get('/api/developers').json()['departments'][0]['director_photo_url'] == url, 'Directory did not publish the uploaded portrait')
                 stage = 'restart persistence'; stop_child(api); api = start_api()
                 require(public.get(url).content == picture.content, 'Portrait did not survive restart')
+                require(checked(public.get('/api/branding/ecosystem')) == force and public.get(force_url).content == force_image.content, 'QForce branding did not survive restart')
+                require(student.delete(force_endpoint).status_code == 403, 'Student QForce reset allowed')
+                require(checked(admin.delete(force_endpoint)) == ecosystem, 'QForce reset did not restore its independent default')
+                require(public.get(force_url).status_code == 404 and checked(public.get('/api/branding')) == study_branding, 'QForce reset changed QStudy or retained the deleted asset')
                 stage = 'reset and independent logo'
                 reset = checked(admin.delete(endpoint)); require(reset['director_photo_url'] is None and reset['logo_url'] == before_logo, 'Reset changed the department logo')
                 require(public.get(url).status_code == 404, 'Deleted portrait remained addressable')
                 require(student.delete(endpoint).status_code == 403, 'Student reset allowed')
             finally:
                 stop_child(site); stop_child(api)
-        print('PASS: QForce home, six ecosystem links, preserved QStudy landing, production assets, live directory, authenticated administrator JPEG-to-PNG upload through BFF, public immutable director asset, restart persistence, independent logo/reset and access boundaries. Disposable data only.')
+        print('PASS: QForce home, six ecosystem links, preserved QStudy landing, independent QForce PNG upload/reset through BFF, shared ecosystem defaults, immutable public assets, restart persistence, CSRF and administrator boundaries, live directory and independent director JPEG-to-PNG upload/reset. Disposable data only.')
         return 0
     except (StackFailure, AssertionError) as error:
         print('FAIL [' + stage + ']: ' + str(error)); return 1

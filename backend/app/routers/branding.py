@@ -16,7 +16,7 @@ from app.services.branding import (IMMUTABLE_CACHE, MAX_LOGO_BYTES, department_a
                                   project_branding, career_branding, tests_branding, ecosystem_branding, put_asset)
 
 router = APIRouter(prefix="/branding", tags=["branding"])
-AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]{0,18})$")]
+AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|qtests|qid|qcontrol|qforce|(?:department|director)-[1-9][0-9]{0,18})$")]
 Digest = Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")]
 
 
@@ -41,6 +41,7 @@ def _persist(db, admin, key, logo, *, department_id=None):
                   "branding.department_logo" if department_id is not None else
                   "branding.career_logo" if key == "qcareer" else
                   "branding.identity_logo" if key == "qid" else
+                  "branding.force_logo" if key == "qforce" else
                   "branding.control_logo" if key == "qcontrol" else "branding.project_logo")
         if key == "qtests":
             action = "branding.tests_logo"
@@ -68,6 +69,19 @@ def ecosystem(db: Session = Depends(get_db)):
 @router.get("/tests")
 def tests_logo(db: Session = Depends(get_db)):
     return tests_branding(db)
+
+
+@router.put("/force-logo")
+async def upload_force_logo(file: UploadFile = File(...), db: Session = Depends(get_db), admin=Depends(require_admin)):
+    logo = await _upload(file)
+    _persist(db, admin, "qforce", logo)
+    return ecosystem_branding(db)
+
+
+@router.delete("/force-logo")
+def reset_force_logo(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    _persist(db, admin, "qforce", None)
+    return ecosystem_branding(db)
 
 
 @router.put("/tests-logo")

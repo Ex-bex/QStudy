@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
 import {
   DEFAULT_BRANDING,
-  DEFAULT_PROJECT_LOGO,
   normalizeBranding,
   type ProjectBranding,
 } from "@/lib/branding";
@@ -55,7 +54,7 @@ function DynamicProjectIcons() {
       pathname === "/qcontrol" || pathname.startsWith("/qcontrol/");
     const logo =
       pathname === "/" || pathname === "/developers"
-        ? DEFAULT_PROJECT_LOGO
+        ? ecosystem.force_logo_url
         : pathname === "/qtests" || pathname.startsWith("/qtests/")
           ? tests.logo_url
           : identity
@@ -83,6 +82,7 @@ function DynamicProjectIcons() {
     }
   }, [
     branding.project_logo_url,
+    ecosystem.force_logo_url,
     ecosystem.identity_logo_url,
     ecosystem.control_logo_url,
     tests.logo_url,

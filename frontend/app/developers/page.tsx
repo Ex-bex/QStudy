@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
-import Image from "next/image";
+import { EcosystemLogo } from "@/components/ecosystem-branding";
 import { PublicDeveloperDirectory } from "@/components/developer-directory";
 import "./developers.css";
 
@@ -17,13 +17,7 @@ export default function DevelopersPage() {
       <header className="dev-header">
         <div className="dev-header-inner">
           <Link href="/" className="brand" aria-label="QForce — главная">
-            <Image
-              src="/brand/qforce_logo_main.png"
-              alt=""
-              width={38}
-              height={38}
-              unoptimized
-            />
+            <EcosystemLogo kind="force" alt="" width={38} height={38} />
             <span>QForce</span>
           </Link>
           <nav aria-label="Навигация страницы команды">
@@ -52,11 +46,10 @@ export default function DevelopersPage() {
             </p>
           </div>
           <div className="dev-main-logo">
-            <Image
-              src="/brand/qforce_logo_main.png"
+            <EcosystemLogo
+              kind="force"
               alt="QForce"
               fill
-              unoptimized
               sizes="(max-width: 700px) 260px, 320px"
               style={{ objectFit: "contain" }}
             />

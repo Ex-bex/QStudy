@@ -25,13 +25,11 @@ import { departmentLogoUrl, safeDirectorPhotoUrl } from "@/lib/branding";
 import type { DeveloperDepartment } from "@/types/developers";
 import styles from "./home.module.css";
 
-const FORCE_LOGO = "/brand/qforce_logo_main.png";
-
 function QForceBrand({ footer = false }: { footer?: boolean }) {
   return (
     <Link href="/" className={styles.brand} aria-label="QForce — главная">
       <span className={styles.brandMark}>
-        <Image src={FORCE_LOGO} alt="" width={40} height={40} unoptimized />
+        <EcosystemLogo kind="force" alt="" width={40} height={40} />
       </span>
       <span>
         QForce<span className={styles.brandDot}>.</span>
@@ -359,13 +357,7 @@ export default function QForceHome() {
             <div className={styles.orbitOuter} />
             <div className={styles.orbitInner} />
             <div className={styles.centralMark}>
-              <Image
-                src={FORCE_LOGO}
-                alt=""
-                width={148}
-                height={148}
-                unoptimized
-              />
+              <EcosystemLogo kind="force" alt="" width={148} height={148} />
             </div>
             <span className={`${styles.satellite} ${styles.satelliteStudy}`}>
               <BookOpen size={21} />

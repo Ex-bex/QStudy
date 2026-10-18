@@ -34,7 +34,7 @@ async function proxy(
     path.length === 4 &&
     path[0] === "branding" &&
     path[1] === "assets" &&
-    /^(project|qcareer|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]*)$/.exec(
+    /^(project|qforce|qcareer|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]*)$/.exec(
       path[2],
     )?.[0] === path[2] &&
     /^[a-f0-9]{64}\.png$/.exec(path[3])?.[0] === path[3];
@@ -48,6 +48,7 @@ async function proxy(
         ((path.length === 2 &&
           [
             "project-logo",
+            "force-logo",
             "career-logo",
             "identity-logo",
             "control-logo",
