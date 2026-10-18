@@ -12,8 +12,8 @@ param([string]$Root = '', [switch]$Library)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$script:QBallFieldHash = '3d108ccb27ab1d6e6af8cdb9cfbe97b5f500e68d3f9f889cbae1fc88816f1e2a'
-$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/12786abaf1d8b7f189a68fec6d828acc529b53a0/assets/distribution/QStudy-QCareer-Integration.zip'
+$script:QBallFieldHash = 'bc7c939723c64b2d30e5abb94b9f87593f988f38f4bd11be2dc2329c1aef7f06'
+$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/8c5c9aa0ffe0b33bed37ad15f10e6aad7a6e2127/assets/distribution/QStudy-QCareer-Integration.zip'
 
 function Resolve-QBallFieldPath([string]$Base, [string]$Relative = '') {
     $basePath = [IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
