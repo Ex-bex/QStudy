@@ -184,6 +184,10 @@ try {
         'frontend/public/brand/qtests-prototype.svg',
         'scripts/tests/qtests_stack.py'
     )) { Assert-Fix ($paths -ccontains $required) ('QTests runtime dependency included: ' + $required) }
+    foreach ($required in @(
+        'backend/tests/test_qtests_lessons.py',
+        'frontend/components/control/qtests-lessons.tsx'
+    )) { Assert-Fix ($paths -ccontains $required) ('Saved QTests lessons dependency included: ' + $required) }
     $allowedBlock = [regex]::Match($helperText, '(?ms)^    \$allowed = @\(\r?\n(?<paths>.*?)^    \)')
     Assert-Fix $allowedBlock.Success 'preserving helper declares its exact reviewed path allowlist'
     $allowedPaths = @([regex]::Matches($allowedBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })

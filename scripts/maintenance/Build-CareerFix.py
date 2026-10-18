@@ -198,6 +198,8 @@ PAYLOAD = (
     'frontend/lib/qtests.ts',
     'frontend/public/brand/qtests-prototype.svg',
     'scripts/tests/qtests_stack.py',
+    'backend/tests/test_qtests_lessons.py',
+    'frontend/components/control/qtests-lessons.tsx',
 )
 STOP_HELPERS = (
     'scripts/launcher/Stop-Previous.ps1', 'scripts/launcher/Native.ps1',
@@ -229,6 +231,10 @@ README = '''QStudy / QTests / QCareer / QBall / Q-ID: единое управл�
 штатно останавливаются на время обновления. Изменяемые исходники сохраняются
 в закрытой папке .local/source-updates. Автоматического отката данных нет.
 Чужие процессы и запуски другого пользователя Windows не завершаются.
+
+QTests сохраняет Word по урокам. Выбирайте урок и банк для новой тренировки;
+повторная загрузка не нужна. Замена Word сохраняет прежние вопросы до
+успешной обработки нового файла; история попыток не меняется.
 
 QTests доступен по /qtests; Word-банки, случайные 40 вопросов, перемешанные
 варианты и сохраняемый разбор ошибок. Управление — /qcontrol/qtests.

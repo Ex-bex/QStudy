@@ -6,8 +6,10 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import PurePath
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
@@ -17,7 +19,8 @@ from app.config import settings
 from app.database import get_db
 from app.models import User
 from app.qtests_models import (QTestsAttempt, QTestsAttemptQuestion, QTestsBank,
-                              QTestsBankQuestion, QTestsSetting)
+                              QTestsBankQuestion, QTestsSetting, QTestsLesson,
+                              QTestsBankLesson, QTestsImportRevision)
 from app.services import background
 from app.services.ai import AIError, generate_content
 from app.services.audit import record_audit
@@ -80,10 +83,18 @@ def _bank_question(row):
 
 
 def _bank_public(bank, *, questions=False, owner=None):
+    link = bank.lesson_link
+    revision = bank.import_revision
     result = {"id": bank.id, "title": bank.title, "filename": bank.filename,
               "answer_mode": bank.answer_mode, "status": bank.status, "error": bank.error,
               "warnings": _loads(bank.warnings_json, []), "question_count": len(bank.questions),
-              "job_id": bank.job_id, "created_at": _time(bank.created_at), "updated_at": _time(bank.updated_at)}
+              "job_id": bank.job_id, "created_at": _time(bank.created_at), "updated_at": _time(bank.updated_at),
+              "lesson_id": link.lesson_id if link else None,
+              "lesson_title": link.lesson.title if link and link.lesson else None,
+              "has_document": bool(bank.source_payload),
+              "replacement_status": revision.status if revision else None,
+              "replacement_filename": revision.filename if revision else "",
+              "replacement_error": revision.error if revision else ""}
     if questions:
         result["questions"] = [_bank_question(row) for row in bank.questions]
     if owner is not None:
@@ -125,6 +136,35 @@ class StrictInput(BaseModel):
 
 class TitleInput(StrictInput):
     title: str = Field(min_length=1, max_length=200)
+    lesson_id: int | None = Field(default=None, strict=True, gt=0)
+
+
+class BankUpdate(StrictInput):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    lesson_id: int | None = Field(default=None, strict=True, gt=0)
+
+    @model_validator(mode="after")
+    def valid_fields(self):
+        if not self.model_fields_set or ("title" in self.model_fields_set and self.title is None):
+            raise ValueError("Укажите название банка или урок")
+        return self
+
+
+class LessonInput(StrictInput):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=4000)
+    owner_id: int | None = Field(default=None, strict=True, gt=0)
+
+
+class LessonUpdate(StrictInput):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def valid_fields(self):
+        if not self.model_fields_set or any(getattr(self, key) is None for key in self.model_fields_set):
+            raise ValueError("Укажите название или описание урока")
+        return self
 
 
 class QuestionInput(StrictInput):
@@ -164,10 +204,51 @@ def _audit(db, user, action, kind, identifier, fields=()):
         record_audit(db, user, "qtests." + action, kind, identifier, fields=fields)
 
 
-def _queue_import(db, bank, user):
+def _lesson(db, identifier, user):
+    row = db.get(QTestsLesson, identifier)
+    if not row or (row.user_id != user.id and user.role != "admin"):
+        raise HTTPException(404, "Урок не найден")
+    return row
+
+
+def _lesson_public(db, lesson, *, owner=None):
+    bank_ids = [link.bank_id for link in lesson.bank_links]
+    result = {"id": lesson.id, "title": lesson.title, "description": lesson.description,
+              "bank_count": len(bank_ids),
+              "question_count": db.query(QTestsBankQuestion).filter(QTestsBankQuestion.bank_id.in_(bank_ids)).count() if bank_ids else 0,
+              "created_at": _time(lesson.created_at), "updated_at": _time(lesson.updated_at)}
+    if owner is not None:
+        result["owner"] = owner
+    return result
+
+
+def _associate_lesson(db, bank, lesson_id):
+    lesson = db.get(QTestsLesson, lesson_id) if lesson_id is not None else None
+    # Even an administrator may only combine one account's private resources.
+    if lesson_id is not None and (not lesson or lesson.user_id != bank.user_id):
+        raise HTTPException(404, "Урок владельца банка не найден")
+    if lesson is None:
+        bank.lesson_link = None
+    elif bank.lesson_link:
+        bank.lesson_link.lesson = lesson
+    else:
+        bank.lesson_link = QTestsBankLesson(lesson=lesson)
+
+
+def _queue_import(db, bank, user, revision=None):
+    payload = {"bank_id": bank.id}
+    if revision is not None:
+        payload["revision_id"] = revision.id
     job = background.enqueue_job(db, user.id, "qtests_import", "Импорт Word: " + bank.title,
-                                 {"bank_id": bank.id}, resource_key=f"qtests-bank:{bank.id}")
-    bank.status = "importing"; bank.error = ""; bank.job_id = job.id
+                                 payload, resource_key=f"qtests-bank:{bank.id}")
+    # Failure hooks receive payloads, so include the immutable job identity as
+    # a fence against a delayed failure from a previous replacement/retry.
+    job.payload_json = json.dumps({**payload, "import_job_id": job.id})
+    if revision is None:
+        bank.status = "importing"; bank.error = ""
+    else:
+        revision.status = "importing"; revision.error = ""; revision.job_id = job.id
+    bank.job_id = job.id
     return job
 
 
@@ -181,40 +262,72 @@ def overview(db: Session = Depends(get_db), user=Depends(get_current_user)):
     _enabled(db, user)
     banks = db.query(QTestsBank).filter(QTestsBank.user_id == user.id).order_by(QTestsBank.created_at.desc()).all()
     attempts = db.query(QTestsAttempt).filter(QTestsAttempt.user_id == user.id).order_by(QTestsAttempt.created_at.desc()).all()
+    lessons = db.query(QTestsLesson).filter(QTestsLesson.user_id == user.id).order_by(QTestsLesson.title, QTestsLesson.id).all()
     return {"banks": [_bank_public(row) for row in banks],
+            "lessons": [_lesson_public(db, row) for row in lessons],
             "attempts": [_attempt_public(row, questions=False) for row in attempts],
             "stats": {"banks": len(banks), "questions": sum(len(row.questions) for row in banks),
                       "attempts": len(attempts), "finished": sum(row.status == "finished" for row in attempts)},
             "ai_available": bool(settings.GEMINI_API_KEY)}
 
 
+@router.get("/qtests/lessons")
+def list_lessons(bank_id: int | None = None, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _enabled(db, user)
+    owner_id = _bank(db, bank_id, user).user_id if bank_id is not None else user.id
+    lessons = db.query(QTestsLesson).filter(QTestsLesson.user_id == owner_id).order_by(QTestsLesson.title, QTestsLesson.id).all()
+    return [_lesson_public(db, row) for row in lessons]
+
+
+@router.post("/qtests/lessons", status_code=201)
+def create_lesson(data: LessonInput, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _enabled(db, user)
+    owner_id = data.owner_id if data.owner_id is not None else user.id
+    if owner_id != user.id and user.role != "admin":
+        raise HTTPException(403, "Создать урок другому аккаунту может только администратор")
+    if not db.get(User, owner_id):
+        raise HTTPException(404, "Владелец урока не найден")
+    if db.query(QTestsLesson).filter(QTestsLesson.user_id == owner_id).count() >= 100:
+        raise HTTPException(409, "В одном аккаунте может быть не больше 100 уроков")
+    row = QTestsLesson(user_id=owner_id, title=data.title, description=data.description)
+    db.add(row); db.flush(); _audit(db, user, "lesson.create", "qtests_lesson", row.id)
+    db.commit(); return _lesson_public(db, row)
+
+
+@router.patch("/qtests/lessons/{lesson_id}")
+def update_lesson(lesson_id: int, data: LessonUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _enabled(db, user); row = _lesson(db, lesson_id, user)
+    for key in data.model_fields_set:
+        setattr(row, key, getattr(data, key))
+    row.updated_at = datetime.utcnow()
+    _audit(db, user, "lesson.update", "qtests_lesson", row.id, data.model_fields_set)
+    db.commit(); return _lesson_public(db, row)
+
+
+@router.delete("/qtests/lessons/{lesson_id}")
+def delete_lesson(lesson_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    row = _lesson(db, lesson_id, user)
+    _audit(db, user, "lesson.delete", "qtests_lesson", row.id)
+    # Deleting a folder unassigns its banks; their source and attempts survive.
+    db.delete(row); db.commit(); return {"ok": True}
+
+
 @router.post("/qtests/banks", status_code=202)
 async def import_bank(file: UploadFile = File(...), title: str = Form(""),
                       answer_mode: Literal["first", "marked"] = Form("marked"),
+                      lesson_id: int | None = Form(None),
                       db: Session = Depends(get_db), user=Depends(get_current_user)):
     _enabled(db, user)
     if db.query(QTestsBank).filter(QTestsBank.user_id == user.id).count() >= 50:
         raise HTTPException(409, "Достигнут лимит 50 банков. Удалите ненужные банки перед загрузкой")
-    if not file.filename or not file.filename.lower().endswith(".docx"):
-        raise HTTPException(422, "Загрузите .docx. Старый .doc сначала сохраните в Word как .docx")
-    data = await file.read(MAX_FILE_BYTES + 1)
-    if len(data) > MAX_FILE_BYTES:
-        raise HTTPException(413, "Word-файл должен быть не больше 10 МБ")
-    # Validate the Office container before storing it; parsing happens durably.
-    from app.services.qtests_import import extract_docx_text, QTestsImportError
-    try:
-        text = extract_docx_text(data)
-    except (QTestsImportError, ValueError) as error:
-        raise HTTPException(422, str(error)) from None
-    if not text.strip():
-        raise HTTPException(422, "В Word-файле нет текста. Изображения вопросов нужно сначала распознать")
-    filename = PurePath(file.filename.replace("\\", "/")).name[:200]
+    filename, data = await _read_document(file)
     clean_title = title.strip() or filename.rsplit(".", 1)[0]
     if not clean_title or len(clean_title) > 200:
         raise HTTPException(422, "Название банка: от 1 до 200 символов")
     bank = QTestsBank(user_id=user.id, title=clean_title, filename=filename,
                       answer_mode=answer_mode, source_payload=data)
     db.add(bank); db.flush()
+    _associate_lesson(db, bank, lesson_id)
     job = _queue_import(db, bank, user)
     _audit(db, user, "bank.import", "qtests_bank", bank.id, ("title", "answer_mode"))
     db.commit(); background.wake_worker()
@@ -227,7 +340,8 @@ def manual_bank(data: TitleInput, db: Session = Depends(get_db), user=Depends(ge
     if db.query(QTestsBank).filter(QTestsBank.user_id == user.id).count() >= 50:
         raise HTTPException(409, "Достигнут лимит 50 банков")
     bank = QTestsBank(user_id=user.id, title=data.title, filename="", answer_mode="marked", status="ready")
-    db.add(bank); db.flush(); _audit(db, user, "bank.create", "qtests_bank", bank.id)
+    db.add(bank); db.flush(); _associate_lesson(db, bank, data.lesson_id)
+    _audit(db, user, "bank.create", "qtests_bank", bank.id)
     db.commit()
     return _bank_public(bank, questions=True)
 
@@ -239,18 +353,79 @@ def get_bank(bank_id: int, db: Session = Depends(get_db), user=Depends(get_curre
 
 
 @router.patch("/qtests/banks/{bank_id}")
-def update_bank(bank_id: int, data: TitleInput, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def update_bank(bank_id: int, data: BankUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     _enabled(db, user); bank = _bank(db, bank_id, user)
-    bank.title = data.title; _audit(db, user, "bank.update", "qtests_bank", bank.id, ("title",))
+    if "title" in data.model_fields_set:
+        bank.title = data.title
+    if "lesson_id" in data.model_fields_set:
+        _associate_lesson(db, bank, data.lesson_id)
+    bank.updated_at = datetime.utcnow()
+    _audit(db, user, "bank.update", "qtests_bank", bank.id, data.model_fields_set)
     db.commit(); return _bank_public(bank, questions=True)
+
+
+async def _read_document(file):
+    if not file.filename or not file.filename.lower().endswith(".docx"):
+        raise HTTPException(422, "Загрузите .docx. Старый .doc сначала сохраните в Word как .docx")
+    data = await file.read(MAX_FILE_BYTES + 1)
+    if len(data) > MAX_FILE_BYTES:
+        raise HTTPException(413, "Word-файл должен быть не больше 10 МБ")
+    from app.services.qtests_import import extract_docx_text, QTestsImportError
+    try:
+        source_text = extract_docx_text(data)
+    except (QTestsImportError, ValueError) as error:
+        raise HTTPException(422, str(error)) from None
+    if not source_text.strip():
+        raise HTTPException(422, "В Word-файле нет текста. Изображения вопросов нужно сначала распознать")
+    filename = PurePath(file.filename.replace("\\", "/")).name[:200]
+    return filename, data
+
+
+@router.get("/qtests/banks/{bank_id}/document")
+def download_document(bank_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    bank = _bank(db, bank_id, user)
+    if not bank.source_payload:
+        raise HTTPException(404, "У этого банка нет сохранённого Word-файла")
+    return Response(content=bank.source_payload,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": "attachment; filename=\"QTests.docx\"; filename*=UTF-8''" + quote(bank.filename or "QTests.docx", safe=""),
+                 "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/qtests/banks/{bank_id}/document", status_code=202)
+async def replace_document(bank_id: int, file: UploadFile = File(...),
+                           answer_mode: Literal["first", "marked"] = Form("marked"),
+                           db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _enabled(db, user); bank = _bank(db, bank_id, user); _editable(bank)
+    filename, data = await _read_document(file)
+    # Upload reads yield control. Serialize after reading, then reload instead
+    # of trusting the state observed before another request/worker could run.
+    _lock_bank(db, bank_id); db.expire_all()
+    bank = _bank(db, bank_id, user); _editable(bank)
+    revision = bank.import_revision
+    if revision is None:
+        revision = QTestsImportRevision(bank_id=bank.id, filename=filename,
+            answer_mode=answer_mode, source_payload=data)
+        bank.import_revision = revision
+    else:
+        revision.filename = filename; revision.answer_mode = answer_mode; revision.source_payload = data
+    db.flush()
+    job = _queue_import(db, bank, user, revision)
+    _audit(db, user, "bank.document.replace", "qtests_bank", bank.id, ("filename", "answer_mode"))
+    db.commit(); background.wake_worker()
+    return {"bank": _bank_public(bank), "job_id": job.id}
 
 
 @router.post("/qtests/banks/{bank_id}/retry", status_code=202)
 def retry_bank(bank_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    _enabled(db, user); bank = _bank(db, bank_id, user)
-    if bank.status != "error" or not bank.source_payload:
+    _enabled(db, user); _lock_bank(db, bank_id); bank = _bank(db, bank_id, user)
+    revision = bank.import_revision
+    if revision and revision.status == "error":
+        job = _queue_import(db, bank, user, revision)
+    elif bank.status == "error" and bank.source_payload and not revision:
+        job = _queue_import(db, bank, user)
+    else:
         raise HTTPException(409, "Повторный импорт доступен для Word-файла с ошибкой")
-    job = _queue_import(db, bank, user)
     db.commit(); background.wake_worker()
     return {"bank": _bank_public(bank), "job_id": job.id}
 
@@ -273,13 +448,28 @@ def delete_bank(bank_id: int, db: Session = Depends(get_db), user=Depends(get_cu
 
 
 def _editable(bank):
-    if bank.status == "importing":
+    if bank.status == "importing" or (bank.import_revision and bank.import_revision.status == "importing"):
         raise HTTPException(409, "Дождитесь завершения импорта перед редактированием")
+
+
+def _lock_bank(db, bank_id):
+    if db.get_bind().dialect.name == "sqlite":
+        db.execute(text("BEGIN IMMEDIATE"))
+    else:
+        db.query(QTestsBank).filter(QTestsBank.id == bank_id).with_for_update().first()
+
+
+def _editable_bank(db, bank_id, user):
+    _lock_bank(db, bank_id)
+    bank = _bank(db, bank_id, user)
+    db.refresh(bank); db.expire(bank, ["import_revision", "questions"])
+    _editable(bank)
+    return bank
 
 
 @router.post("/qtests/banks/{bank_id}/questions", status_code=201)
 def create_question(bank_id: int, data: QuestionInput, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    _enabled(db, user); bank = _bank(db, bank_id, user); _editable(bank)
+    _enabled(db, user); bank = _editable_bank(db, bank_id, user)
     if len(bank.questions) >= MAX_QUESTIONS:
         raise HTTPException(409, "В одном банке может быть не больше 2000 вопросов")
     row = QTestsBankQuestion(bank_id=bank.id, position=max((q.position for q in bank.questions), default=-1) + 1,
@@ -292,7 +482,7 @@ def create_question(bank_id: int, data: QuestionInput, db: Session = Depends(get
 
 @router.patch("/qtests/banks/{bank_id}/questions/{question_id}")
 def update_question(bank_id: int, question_id: int, data: QuestionInput, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    _enabled(db, user); bank = _bank(db, bank_id, user); _editable(bank)
+    _enabled(db, user); bank = _editable_bank(db, bank_id, user)
     row = db.get(QTestsBankQuestion, question_id)
     if not row or row.bank_id != bank.id:
         raise HTTPException(404, "Вопрос не найден")
@@ -304,7 +494,7 @@ def update_question(bank_id: int, question_id: int, data: QuestionInput, db: Ses
 
 @router.delete("/qtests/banks/{bank_id}/questions/{question_id}")
 def delete_question(bank_id: int, question_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    bank = _bank(db, bank_id, user); _editable(bank)
+    bank = _editable_bank(db, bank_id, user)
     row = db.get(QTestsBankQuestion, question_id)
     if not row or row.bank_id != bank.id:
         raise HTTPException(404, "Вопрос не найден")
@@ -435,11 +625,14 @@ def delete_attempt(attempt_id: int, db: Session = Depends(get_db), user=Depends(
 def admin_overview(db: Session = Depends(get_db), admin=Depends(require_admin)):
     banks = db.query(QTestsBank).order_by(QTestsBank.created_at.desc()).all()
     attempts = db.query(QTestsAttempt).order_by(QTestsAttempt.created_at.desc()).all()
+    lessons = db.query(QTestsLesson).order_by(QTestsLesson.created_at.desc()).all()
     return {"settings": _config(db), "banks": [_bank_public(b, owner=_owner(db, b.user_id)) for b in banks],
+            "lessons": [_lesson_public(db, row, owner=_owner(db, row.user_id)) for row in lessons],
             "attempts": [_attempt_public(a, questions=False, owner=_owner(db, a.user_id)) for a in attempts],
-            "stats": {"banks": len(banks), "questions": db.query(QTestsBankQuestion).count(),
+            "stats": {"banks": len(banks), "lessons": len(lessons), "questions": db.query(QTestsBankQuestion).count(),
                       "attempts": len(attempts), "finished": sum(a.status == "finished" for a in attempts),
-                      "importing": sum(b.status == "importing" for b in banks), "errors": sum(b.status == "error" for b in banks)}}
+                      "importing": sum(b.status == "importing" or bool(b.import_revision and b.import_revision.status == "importing") for b in banks),
+                      "errors": sum(b.status == "error" or bool(b.import_revision and b.import_revision.status == "error") for b in banks)}}
 
 
 @router.patch("/admin/qtests/settings")
@@ -457,11 +650,20 @@ def update_settings(data: SettingsInput, db: Session = Depends(get_db), admin=De
 def _import_failed(db, user_id, payload):
     bank = db.get(QTestsBank, payload.get("bank_id"))
     if bank:
-        bank.status = "error"
         # The queue retains the precise, safe public error. No document text.
         from app.job_models import AIJob
-        job = db.get(AIJob, bank.job_id) if bank.job_id else None
-        bank.error = (job.error if job and job.error else "Импорт не завершён. Проверьте формат вопросов и повторите попытку")[:500]
+        revision = bank.import_revision if payload.get("revision_id") is not None else None
+        if payload.get("revision_id") is not None and (not revision or revision.id != payload["revision_id"]):
+            return
+        job_id = revision.job_id if revision else bank.job_id
+        if payload.get("import_job_id") and payload["import_job_id"] != job_id:
+            return
+        job = db.get(AIJob, job_id) if job_id else None
+        if job and job.status != "error":
+            return
+        target = revision if revision else bank
+        target.status = "error"
+        target.error = (job.error if job and job.error else "Импорт не завершён. Проверьте формат вопросов и повторите попытку")[:500]
 
 
 def _explanations_failed(db, user_id, payload):
@@ -579,10 +781,14 @@ async def process_import(context, payload):
         if not bank:
             raise background.JobCancelled("Банк вопросов удалён")
         actor = db.get(User, context.user_id)
-        if bank.user_id != context.user_id and actor.role != "admin":
+        if not actor or (bank.user_id != context.user_id and actor.role != "admin"):
             raise background.JobCancelled("Права управления банком отозваны")
-        data = bank.source_payload; mode = bank.answer_mode
-        bank.status = "importing"; bank.job_id = context.job_id; bank.error = ""; db.commit()
+        revision = bank.import_revision if payload.get("revision_id") is not None else None
+        if payload.get("revision_id") is not None and (not revision or revision.id != payload["revision_id"] or revision.job_id != context.job_id):
+            raise background.JobCancelled("Замена документа уже завершена или отменена")
+        source = revision if revision is not None else bank
+        data = source.source_payload; mode = source.answer_mode
+        source.status = "importing"; source.job_id = context.job_id; source.error = ""; db.commit()
     try:
         result = extract_docx_questions(data, answer_mode=mode)
     except (QTestsImportError, ValueError) as error:
@@ -621,13 +827,20 @@ async def process_import(context, payload):
         if not bank:
             raise background.JobCancelled("Банк вопросов удалён")
         actor = db.get(User, context.user_id)
-        if bank.user_id != context.user_id and actor.role != "admin":
+        if not actor or (bank.user_id != context.user_id and actor.role != "admin"):
             raise background.JobCancelled("Права управления банком отозваны")
+        revision = bank.import_revision if payload.get("revision_id") is not None else None
+        if payload.get("revision_id") is not None and (not revision or revision.id != payload["revision_id"] or revision.job_id != context.job_id):
+            raise background.JobCancelled("Замена документа уже завершена или отменена")
         bank.questions.clear()
         for index, item in enumerate(clean):
             bank.questions.append(QTestsBankQuestion(position=index, question=item.question,
                 options_json=json.dumps(item.options, ensure_ascii=False), correct_index=item.correct_index, explanation=item.explanation))
         bank.status = "ready"; bank.error = ""; bank.warnings_json = json.dumps(warnings, ensure_ascii=False)
+        if revision is not None:
+            bank.source_payload = revision.source_payload; bank.filename = revision.filename
+            bank.answer_mode = revision.answer_mode
+            bank.import_revision = None
         bank.updated_at = datetime.utcnow()
         context.complete(db, {"bank_id": bank.id, "question_count": len(clean), "warnings": warnings})
 

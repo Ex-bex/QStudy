@@ -213,7 +213,9 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         'frontend/components/qtests/workspace-frame.tsx',
         'frontend/lib/qtests.ts',
         'frontend/public/brand/qtests-prototype.svg',
-        'scripts/tests/qtests_stack.py'
+        'scripts/tests/qtests_stack.py',
+        'backend/tests/test_qtests_lessons.py',
+        'frontend/components/control/qtests-lessons.tsx'
     )
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $files = @(); $size = 0

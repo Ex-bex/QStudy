@@ -15,7 +15,9 @@ import {
   ArrowRight,
   Check,
   ChevronDown,
+  Download,
   FileText,
+  FileUp,
   Loader2,
   Pencil,
   Plus,
@@ -34,6 +36,7 @@ import {
   type QTestsBankQuestion,
   type QTestsConfig,
   type QTestsImport,
+  type QTestsLesson,
   type QTestsQuestionInput,
 } from "@/lib/qtests";
 import QuestionEditor from "./question-editor";
@@ -57,6 +60,15 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
   const [savingTitle, setSavingTitle] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
+  const [lessons, setLessons] = useState<QTestsLesson[]>([]);
+  const [savingLesson, setSavingLesson] = useState(false);
+  const [replacementFile, setReplacementFile] = useState<File | null>(null);
+  const [replacementMode, setReplacementMode] = useState<"first" | "marked">(
+    "first",
+  );
+  const [replacing, setReplacing] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const replacementInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const invalidate = useCallback(() => {
     generation.current++;
@@ -83,6 +95,13 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
           setCount(config.default_question_count);
       })
       .catch(() => {});
+    void api<QTestsLesson[]>(`/qtests/lessons?bank_id=${bankId}`)
+      .then((next) => {
+        if (active) setLessons(next);
+      })
+      .catch((cause) => {
+        if (active) setError(qtestsError(cause));
+      });
     const updated = () => {
       if (document.visibilityState !== "hidden") void refresh();
     };
@@ -94,14 +113,18 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
       window.removeEventListener("qstudy:job", updated);
       window.removeEventListener("focus", updated);
     };
-  }, [refresh, invalidate]);
+  }, [bankId, refresh, invalidate]);
   useEffect(() => {
-    if (bank?.status !== "importing") return;
+    if (
+      bank?.status !== "importing" &&
+      bank?.replacement_status !== "importing"
+    )
+      return;
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "hidden") void refresh();
     }, 4000);
     return () => window.clearInterval(interval);
-  }, [bank?.status, refresh]);
+  }, [bank?.status, bank?.replacement_status, refresh]);
 
   async function start(event: FormEvent) {
     event.preventDefault();
@@ -126,7 +149,12 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
       const result = await api<QTestsImport>(`/qtests/banks/${bankId}/retry`, {
         method: "POST",
       });
-      setBank(result.bank);
+      setBank((current) =>
+        current
+          ? { ...current, ...result.bank, questions: current.questions }
+          : result.bank,
+      );
+      await refresh();
     } catch (cause) {
       setError(qtestsError(cause));
     } finally {
@@ -149,6 +177,80 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
       setError(qtestsError(cause));
     } finally {
       setSavingTitle(false);
+    }
+  }
+  async function assignLesson(value: string) {
+    if (savingLesson) return;
+    setSavingLesson(true);
+    setError("");
+    try {
+      await api<QTestsBank>(`/qtests/banks/${bankId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ lesson_id: value ? Number(value) : null }),
+      });
+      await refresh();
+      setNotice(
+        value
+          ? "Банк сохранён в выбранном уроке."
+          : "Банк сохранён без привязки к уроку.",
+      );
+    } catch (cause) {
+      setError(qtestsError(cause));
+    } finally {
+      setSavingLesson(false);
+    }
+  }
+  function chooseReplacement(file: File | null) {
+    setConfirmReplace(false);
+    if (!file) {
+      setReplacementFile(null);
+      return;
+    }
+    if (
+      !/\.docx$/i.test(file.name) ||
+      !file.size ||
+      file.size > 10 * 1024 * 1024
+    ) {
+      setReplacementFile(null);
+      setError(
+        "Выберите непустой Word .docx размером не более 10 МБ. Старый .doc сначала сохраните как .docx.",
+      );
+      return;
+    }
+    setReplacementFile(file);
+    setError("");
+  }
+  async function replaceDocument() {
+    if (!replacementFile || replacing) return;
+    setReplacing(true);
+    setError("");
+    try {
+      const body = new FormData();
+      body.set("file", replacementFile);
+      body.set("answer_mode", replacementMode);
+      const result = await api<QTestsImport>(
+        `/qtests/banks/${bankId}/document`,
+        {
+          method: "POST",
+          body,
+        },
+      );
+      setBank((current) =>
+        current
+          ? { ...current, ...result.bank, questions: current.questions }
+          : result.bank,
+      );
+      setConfirmReplace(false);
+      setReplacementFile(null);
+      if (replacementInput.current) replacementInput.current.value = "";
+      setNotice(
+        "Новый Word принят. Прежние вопросы останутся доступны, пока новый документ не будет успешно прочитан. История тренировок сохранится.",
+      );
+      await refresh();
+    } catch (cause) {
+      setError(qtestsError(cause));
+    } finally {
+      setReplacing(false);
     }
   }
   async function saveQuestion(value: QTestsQuestionInput) {
@@ -222,7 +324,8 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
   const pages = Math.ceil(filtered.length / 20);
   const activePage = Math.min(page, Math.max(0, pages - 1));
   const visible = filtered.slice(activePage * 20, activePage * 20 + 20);
-  const editable = bank?.status !== "importing";
+  const editable =
+    bank?.status !== "importing" && bank?.replacement_status !== "importing";
   return (
     <main id="qtests-main" className={styles.workspace}>
       <Link href="/qtests/library" className={styles.backLink}>
@@ -343,6 +446,184 @@ export default function QTestsBankView({ bankId }: { bankId: number }) {
                 </button>
               </div>
             </div>
+          )}
+          <section
+            className={styles.documentPanel}
+            aria-labelledby="document-title"
+          >
+            <div className={styles.documentSummary}>
+              <div>
+                <p className={styles.eyebrow}>СОХРАНЁННЫЙ ИСТОЧНИК</p>
+                <h2 id="document-title">Документ и урок</h2>
+                <p className={styles.muted}>
+                  {bank.has_document
+                    ? "Word хранится на сервере вместе с банком. Для каждой новой тренировки загружать его заново не нужно."
+                    : "Банк вопросов сохраняется на сервере. Здесь можно добавить исходный Word."}
+                </p>
+              </div>
+              {bank.has_document && (
+                <a
+                  className={styles.secondary}
+                  href={`/api/qtests/banks/${bankId}/document`}
+                  download
+                >
+                  <Download size={16} /> Скачать Word
+                </a>
+              )}
+            </div>
+            <label className={styles.field}>
+              Урок для этого банка
+              <select
+                value={bank.lesson_id == null ? "" : String(bank.lesson_id)}
+                onChange={(event) => void assignLesson(event.target.value)}
+                disabled={savingLesson || replacing}
+              >
+                <option value="">Без урока</option>
+                {lessons.map((lesson) => (
+                  <option key={lesson.id} value={lesson.id}>
+                    {lesson.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className={styles.fieldHint}>
+              Создавать и изменять уроки можно в{" "}
+              <Link href="/qtests/library">библиотеке QTests</Link>. Один урок
+              может содержать несколько банков.
+            </p>
+            <details className={styles.replaceDocument}>
+              <summary>
+                <FileUp size={17} />{" "}
+                {bank.has_document
+                  ? "Заменить Word в этом банке"
+                  : "Добавить Word в этот банк"}
+                <ChevronDown size={16} />
+              </summary>
+              <p className={styles.muted}>
+                Новый документ заменит вопросы после успешного импорта. При
+                ошибке прежний банк останется. Уже начатые тренировки и
+                результаты сохранят свою версию вопросов.
+              </p>
+              <form
+                className={styles.form}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (replacementFile) setConfirmReplace(true);
+                }}
+              >
+                <label className={styles.field}>
+                  Новый документ .docx · до 10 МБ
+                  <input
+                    ref={replacementInput}
+                    type="file"
+                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(event) =>
+                      chooseReplacement(event.target.files?.[0] ?? null)
+                    }
+                    disabled={!editable || replacing}
+                    required
+                  />
+                </label>
+                <label className={styles.field}>
+                  Правильные ответы в новом документе
+                  <select
+                    value={replacementMode}
+                    onChange={(event) => {
+                      setReplacementMode(
+                        event.target.value as "first" | "marked",
+                      );
+                      setConfirmReplace(false);
+                    }}
+                    disabled={!editable || replacing}
+                  >
+                    <option value="first">
+                      Везде правильный первый вариант (A)
+                    </option>
+                    <option value="marked">
+                      Правильные ответы отмечены в документе
+                    </option>
+                  </select>
+                </label>
+                <button
+                  className={styles.secondary}
+                  disabled={!replacementFile || !editable || replacing}
+                >
+                  <FileUp size={16} /> Прочитать новый Word
+                </button>
+              </form>
+              {confirmReplace && replacementFile && (
+                <div className={styles.confirm} role="alert">
+                  <div>
+                    <strong>
+                      Обновить вопросы из «{replacementFile.name}»?
+                    </strong>
+                    <p>
+                      После успешного чтения вопросы нового Word заменят текущий
+                      банк целиком. Изменения, внесённые в вопросы вручную, не
+                      переносятся. История тренировок останется.
+                    </p>
+                  </div>
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.primary}
+                      onClick={() => void replaceDocument()}
+                      disabled={replacing}
+                    >
+                      {replacing ? "Загружаем…" : "Да, обновить банк"}
+                    </button>
+                    <button
+                      className={styles.secondary}
+                      onClick={() => setConfirmReplace(false)}
+                      disabled={replacing}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </details>
+          </section>
+          {bank.replacement_status === "importing" && (
+            <section className={styles.importStatus} role="status">
+              <Loader2 size={26} className={styles.spinning} />
+              <div>
+                <h2>Читаем новый Word</h2>
+                <p>
+                  {bank.replacement_filename || "Документ"}. Пока идёт импорт,
+                  можно тренироваться по прежним вопросам. Редактирование
+                  откроется после завершения; страницу можно закрыть.
+                </p>
+              </div>
+            </section>
+          )}
+          {bank.replacement_status === "error" && (
+            <section className={styles.importError} role="alert">
+              <AlertTriangle size={25} />
+              <div>
+                <h2>Новый Word не удалось прочитать</h2>
+                <p>
+                  {bank.replacement_error ||
+                    "Проверьте вопросы и варианты ответов в новом документе."}
+                </p>
+                <p>
+                  Прежний документ, вопросы и результаты сохранены. Можно
+                  продолжить практику, повторить импорт или выбрать исправленный
+                  Word.
+                </p>
+                <button
+                  className={styles.secondary}
+                  onClick={() => void retry()}
+                  disabled={retrying}
+                >
+                  {retrying ? (
+                    <Loader2 size={16} className={styles.spinning} />
+                  ) : (
+                    <RefreshCw size={16} />
+                  )}{" "}
+                  Повторить импорт нового Word
+                </button>
+              </div>
+            </section>
           )}
           {bank.status === "importing" && (
             <section className={styles.importStatus} role="status">

@@ -566,6 +566,183 @@
   font-size: 11px;
   margin-top: 4px;
 }
+.lessonPanel,
+.quickPractice,
+.documentPanel {
+  padding: 28px;
+  margin-bottom: 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  min-width: 0;
+}
+.lessonPanel .sectionTop {
+  align-items: flex-start;
+}
+.lessonPanel .sectionTop .secondary {
+  flex-shrink: 0;
+}
+.lessonPanel .muted,
+.quickPractice .muted,
+.documentPanel .muted {
+  margin-top: 9px;
+  font-size: 12px;
+}
+.lessonList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+}
+.lessonCard {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fafcfd;
+}
+.lessonChoose {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 120px;
+  padding: 3px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+}
+.lessonChoose[aria-pressed="true"] {
+  color: var(--teal);
+}
+.lessonChoose > svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--teal);
+}
+.lessonChoose strong,
+.lessonChoose small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.lessonChoose small {
+  color: var(--muted-ink);
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+.lessonChoose strong {
+  font-size: 14px;
+}
+.lessonConfirm {
+  width: 100%;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.lessonConfirm .actions {
+  margin-top: 8px;
+}
+.lessonEditor {
+  display: grid;
+  gap: 15px;
+  padding-top: 22px;
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  max-width: 650px;
+}
+.quickPractice {
+  background: #eaf4f6;
+}
+.quickPractice h2,
+.documentPanel h2 {
+  margin-top: 8px;
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+.practiceForm {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(160px, 1.5fr) 100px auto;
+  gap: 13px;
+  align-items: end;
+  margin-top: 22px;
+}
+.practiceForm > .primary {
+  min-height: 42px;
+}
+.practiceForm + .fieldHint {
+  margin-top: 12px;
+}
+.documentSummary {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.documentSummary > .secondary {
+  flex-shrink: 0;
+}
+.documentPanel > .field {
+  max-width: 440px;
+}
+.documentPanel > .fieldHint {
+  margin-top: 9px;
+}
+.documentPanel a:hover {
+  text-decoration: underline;
+}
+.replaceDocument {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.replaceDocument summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 600;
+}
+.replaceDocument > .form {
+  max-width: 650px;
+  margin-top: 17px;
+}
+.replaceDocument .form > .secondary {
+  align-self: flex-start;
+}
+.replaceDocument .confirm {
+  margin: 18px 0 0;
+}
+@media (max-width: 820px) {
+  .practiceForm {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .documentSummary,
+  .lessonPanel .sectionTop {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 540px) {
+  .lessonPanel,
+  .quickPractice,
+  .documentPanel {
+    padding: 20px;
+  }
+  .practiceForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lessonList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .libraryColumns {
   display: grid;
   grid-template-columns: minmax(310px, 0.8fr) minmax(0, 1.35fr);

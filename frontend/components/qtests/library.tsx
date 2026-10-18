@@ -15,12 +15,16 @@ import {
   Check,
   FileText,
   FileUp,
+  FolderOpen,
   History,
   Layers3,
   Loader2,
+  Pencil,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
+  Shuffle,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -30,6 +34,8 @@ import {
   qtestsDate,
   qtestsError,
   type QTestsImport,
+  type QTestsAttempt,
+  type QTestsLesson,
   type QTestsOverview,
 } from "@/lib/qtests";
 import styles from "./qtests.module.css";
@@ -48,6 +54,18 @@ export default function QTestsLibrary() {
   const [answerMode, setAnswerMode] = useState<"first" | "marked">("first");
   const [search, setSearch] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [lessonFilter, setLessonFilter] = useState("all");
+  const [uploadLesson, setUploadLesson] = useState("");
+  const [lessonEdit, setLessonEdit] = useState<number | "new" | null>(null);
+  const [lessonTitle, setLessonTitle] = useState("");
+  const [lessonDescription, setLessonDescription] = useState("");
+  const [savingLesson, setSavingLesson] = useState(false);
+  const [confirmLesson, setConfirmLesson] = useState<number | null>(null);
+  const [deletingLesson, setDeletingLesson] = useState(false);
+  const [practiceBank, setPracticeBank] = useState("");
+  const [practiceCount, setPracticeCount] = useState(40);
+  const [starting, setStarting] = useState(false);
+  const [notice, setNotice] = useState("");
   const [confirmAttempt, setConfirmAttempt] = useState<number | null>(null);
   const [deletingAttempt, setDeletingAttempt] = useState(false);
   const generation = useRef(0);
@@ -88,7 +106,10 @@ export default function QTestsLibrary() {
     };
   }, [refresh, invalidate]);
   const importing =
-    data?.banks.some((bank) => bank.status === "importing") ?? false;
+    data?.banks.some(
+      (bank) =>
+        bank.status === "importing" || bank.replacement_status === "importing",
+    ) ?? false;
   useEffect(() => {
     if (!importing) return;
     const interval = window.setInterval(() => {
@@ -126,6 +147,7 @@ export default function QTestsLibrary() {
     body.set("file", file);
     body.set("title", title.trim() || file.name.replace(/\.docx$/i, ""));
     body.set("answer_mode", answerMode);
+    if (uploadLesson) body.set("lesson_id", uploadLesson);
     try {
       const result = await api<QTestsImport>("/qtests/banks", {
         method: "POST",
@@ -145,7 +167,10 @@ export default function QTestsLibrary() {
     try {
       const bank = await api<{ id: number }>("/qtests/banks/manual", {
         method: "POST",
-        body: JSON.stringify({ title: title.trim() || "Мой банк вопросов" }),
+        body: JSON.stringify({
+          title: title.trim() || "Мой банк вопросов",
+          lesson_id: uploadLesson ? Number(uploadLesson) : null,
+        }),
       });
       router.push(`/qtests/banks/${bank.id}`);
     } catch (cause) {
@@ -168,9 +193,95 @@ export default function QTestsLibrary() {
     }
   }
 
-  const banks =
+  function editLesson(lesson?: QTestsLesson) {
+    setLessonEdit(lesson?.id ?? "new");
+    setLessonTitle(lesson?.title ?? "");
+    setLessonDescription(lesson?.description ?? "");
+    setConfirmLesson(null);
+  }
+  async function saveLesson(event: FormEvent) {
+    event.preventDefault();
+    if (!lessonTitle.trim() || savingLesson || lessonEdit === null) return;
+    setSavingLesson(true);
+    setError("");
+    try {
+      const next = await api<QTestsLesson>(
+        `/qtests/lessons${lessonEdit === "new" ? "" : `/${lessonEdit}`}`,
+        {
+          method: lessonEdit === "new" ? "POST" : "PATCH",
+          body: JSON.stringify({
+            title: lessonTitle.trim(),
+            description: lessonDescription.trim(),
+          }),
+        },
+      );
+      if (lessonEdit === "new") setUploadLesson(String(next.id));
+      setLessonEdit(null);
+      setNotice(
+        "Урок сохранён. Документы можно хранить в нём и использовать повторно.",
+      );
+      await refresh(true);
+    } catch (cause) {
+      setError(qtestsError(cause));
+    } finally {
+      setSavingLesson(false);
+    }
+  }
+  async function removeLesson(id: number) {
+    if (deletingLesson) return;
+    setDeletingLesson(true);
+    setError("");
+    try {
+      await api(`/qtests/lessons/${id}`, { method: "DELETE" });
+      if (lessonFilter === String(id)) setLessonFilter("all");
+      if (uploadLesson === String(id)) setUploadLesson("");
+      if (lessonEdit === id) setLessonEdit(null);
+      setConfirmLesson(null);
+      setNotice(
+        "Урок удалён. Его документы сохранены без урока, а результаты — в истории тренировок.",
+      );
+      await refresh(true);
+    } catch (cause) {
+      setError(qtestsError(cause));
+    } finally {
+      setDeletingLesson(false);
+    }
+  }
+  async function startPractice(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedPracticeBank || starting) return;
+    setStarting(true);
+    setError("");
+    try {
+      const attempt = await api<QTestsAttempt>(
+        `/qtests/banks/${selectedPracticeBank.id}/attempts`,
+        { method: "POST", body: JSON.stringify({ count: practiceCount }) },
+      );
+      router.push(`/qtests/attempts/${attempt.id}`);
+    } catch (cause) {
+      setError(qtestsError(cause));
+      setStarting(false);
+    }
+  }
+
+  const lessons = data?.lessons ?? [];
+  const lessonBanks =
     data?.banks.filter((bank) =>
-      `${bank.title} ${bank.filename}`
+      lessonFilter === "all"
+        ? true
+        : lessonFilter === "unassigned"
+          ? bank.lesson_id == null
+          : bank.lesson_id === Number(lessonFilter),
+    ) ?? [];
+  const readyBanks = lessonBanks.filter(
+    (bank) => bank.status === "ready" && bank.question_count > 0,
+  );
+  const selectedPracticeBank =
+    readyBanks.find((bank) => String(bank.id) === practiceBank) ??
+    readyBanks[0];
+  const banks =
+    lessonBanks.filter((bank) =>
+      `${bank.title} ${bank.filename} ${bank.lesson_title ?? ""}`
         .toLocaleLowerCase("ru")
         .includes(search.toLocaleLowerCase("ru")),
     ) ?? [];
@@ -203,6 +314,11 @@ export default function QTestsLibrary() {
           {error}
         </div>
       )}
+      {notice && (
+        <p className={styles.success} role="status">
+          {notice}
+        </p>
+      )}
       <div className={styles.statGrid} aria-label="Ваша статистика">
         <article>
           <Layers3 size={20} />
@@ -220,6 +336,236 @@ export default function QTestsLibrary() {
           <span>Завершённых тренировок</span>
         </article>
       </div>
+      <section className={styles.lessonPanel} aria-labelledby="lessons-title">
+        <div className={styles.sectionTop}>
+          <div>
+            <p className={styles.eyebrow}>СОХРАНЁННЫЕ УЧЕБНЫЕ МАТЕРИАЛЫ</p>
+            <h2 id="lessons-title">
+              Мои уроки <span>{lessons.length}</span>
+            </h2>
+            <p className={styles.muted}>
+              Загрузите Word один раз: документ и все вопросы останутся в уроке.
+              Возвращайтесь к ним для новых тренировок или заменяйте документ.
+            </p>
+          </div>
+          <button
+            className={styles.secondary}
+            onClick={() => editLesson()}
+            disabled={savingLesson}
+          >
+            <Plus size={17} /> Создать урок
+          </button>
+        </div>
+        <div className={styles.lessonList}>
+          {lessons.map((lesson) => (
+            <article key={lesson.id} className={styles.lessonCard}>
+              <button
+                className={styles.lessonChoose}
+                aria-pressed={lessonFilter === String(lesson.id)}
+                onClick={() => {
+                  setLessonFilter(String(lesson.id));
+                  setUploadLesson(String(lesson.id));
+                  setPracticeBank("");
+                }}
+              >
+                <FolderOpen size={21} />
+                <span>
+                  <strong>{lesson.title}</strong>
+                  {lesson.description && <small>{lesson.description}</small>}
+                  <small>
+                    {lesson.bank_count} банков · {lesson.question_count}{" "}
+                    вопросов
+                  </small>
+                </span>
+              </button>
+              <div className={styles.actions}>
+                <button
+                  className={styles.iconButton}
+                  onClick={() => editLesson(lesson)}
+                  aria-label={`Изменить урок «${lesson.title}»`}
+                  disabled={savingLesson}
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  className={styles.iconButton}
+                  onClick={() =>
+                    setConfirmLesson(
+                      confirmLesson === lesson.id ? null : lesson.id,
+                    )
+                  }
+                  aria-label={`Удалить урок «${lesson.title}»`}
+                  disabled={deletingLesson}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+              {confirmLesson === lesson.id && (
+                <div className={styles.lessonConfirm} role="alert">
+                  <p>
+                    Удалить урок? Документы, вопросы и история сохранятся без
+                    привязки к уроку.
+                  </p>
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.dangerLink}
+                      disabled={deletingLesson}
+                      onClick={() => void removeLesson(lesson.id)}
+                    >
+                      {deletingLesson ? "Удаляем…" : "Удалить урок"}
+                    </button>
+                    <button
+                      className={styles.textLink}
+                      disabled={deletingLesson}
+                      onClick={() => setConfirmLesson(null)}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </article>
+          ))}
+          {data && lessons.length === 0 && (
+            <p className={styles.muted}>
+              Создайте первый урок, например «История» или «Математика». Уже
+              загруженные банки доступны ниже и могут быть добавлены в урок.
+            </p>
+          )}
+        </div>
+        {lessonEdit !== null && (
+          <form className={styles.lessonEditor} onSubmit={saveLesson}>
+            <h3>{lessonEdit === "new" ? "Новый урок" : "Изменение урока"}</h3>
+            <label className={styles.field}>
+              Название урока
+              <input
+                autoFocus
+                required
+                maxLength={180}
+                value={lessonTitle}
+                onChange={(event) => setLessonTitle(event.target.value)}
+                disabled={savingLesson}
+                placeholder="Например, история Казахстана"
+              />
+            </label>
+            <label className={styles.field}>
+              Описание · необязательно
+              <textarea
+                maxLength={2000}
+                value={lessonDescription}
+                onChange={(event) => setLessonDescription(event.target.value)}
+                disabled={savingLesson}
+                placeholder="Что изучаем в этом уроке"
+              />
+            </label>
+            <div className={styles.actions}>
+              <button
+                className={styles.primary}
+                disabled={savingLesson || !lessonTitle.trim()}
+              >
+                {savingLesson ? "Сохраняем…" : "Сохранить урок"}
+              </button>
+              <button
+                className={styles.secondary}
+                type="button"
+                disabled={savingLesson}
+                onClick={() => setLessonEdit(null)}
+              >
+                Отмена
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
+      <section
+        className={styles.quickPractice}
+        aria-labelledby="quick-practice-title"
+      >
+        <div>
+          <p className={styles.eyebrow}>БЕЗ ПОВТОРНОЙ ЗАГРУЗКИ</p>
+          <h2 id="quick-practice-title">Выберите урок и начните тест.</h2>
+          <p className={styles.muted}>
+            Новая случайная подборка из сохранённого банка. Правильные ответы
+            учитываются после перемешивания вариантов.
+          </p>
+        </div>
+        <form className={styles.practiceForm} onSubmit={startPractice}>
+          <label className={styles.field}>
+            Урок
+            <select
+              value={lessonFilter}
+              onChange={(event) => {
+                setLessonFilter(event.target.value);
+                setPracticeBank("");
+              }}
+              disabled={starting}
+            >
+              <option value="all">Все уроки и банки</option>
+              <option value="unassigned">Без урока</option>
+              {lessons.map((lesson) => (
+                <option key={lesson.id} value={lesson.id}>
+                  {lesson.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            Банк вопросов
+            <select
+              value={
+                selectedPracticeBank ? String(selectedPracticeBank.id) : ""
+              }
+              onChange={(event) => setPracticeBank(event.target.value)}
+              disabled={starting || !readyBanks.length}
+              required
+            >
+              {readyBanks.length === 0 && (
+                <option value="">Нет готовых банков</option>
+              )}
+              {readyBanks.map((bank) => (
+                <option key={bank.id} value={bank.id}>
+                  {bank.title} · {bank.question_count} вопросов
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            Вопросов
+            <input
+              type="number"
+              min={1}
+              max={200}
+              required
+              value={practiceCount}
+              onChange={(event) => setPracticeCount(Number(event.target.value))}
+              disabled={starting}
+            />
+          </label>
+          <button
+            className={styles.primary}
+            disabled={
+              starting ||
+              !selectedPracticeBank ||
+              practiceCount < 1 ||
+              practiceCount > 200
+            }
+          >
+            {starting ? (
+              <Loader2 size={17} className={styles.spinning} />
+            ) : (
+              <Shuffle size={17} />
+            )}{" "}
+            Начать тест
+          </button>
+        </form>
+        {selectedPracticeBank &&
+          practiceCount > selectedPracticeBank.question_count && (
+            <p className={styles.fieldHint}>
+              В банке {selectedPracticeBank.question_count} вопросов — в тест
+              войдут все, без повторов.
+            </p>
+          )}
+      </section>
       <div className={styles.libraryColumns}>
         <section className={styles.uploadPanel} aria-labelledby="upload-title">
           <div className={styles.panelHeader}>
@@ -274,6 +620,21 @@ export default function QTestsLibrary() {
                 placeholder="Например, история · итоговый экзамен"
                 disabled={uploading}
               />
+            </label>
+            <label className={styles.field}>
+              Сохранить в урок
+              <select
+                value={uploadLesson}
+                onChange={(event) => setUploadLesson(event.target.value)}
+                disabled={uploading}
+              >
+                <option value="">Пока без урока</option>
+                {lessons.map((lesson) => (
+                  <option key={lesson.id} value={lesson.id}>
+                    {lesson.title}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className={styles.field}>
               Как указаны правильные ответы?
@@ -342,6 +703,15 @@ export default function QTestsLibrary() {
               <h2 id="banks-title">
                 Мои банки вопросов <span>{data?.banks.length ?? 0}</span>
               </h2>
+              <p className={styles.muted}>
+                {lessonFilter === "all"
+                  ? "Все сохранённые документы"
+                  : lessonFilter === "unassigned"
+                    ? "Банки без урока"
+                    : lessons.find(
+                        (lesson) => String(lesson.id) === lessonFilter,
+                      )?.title}
+              </p>
             </div>
           </div>
           <label className={styles.search}>
@@ -418,12 +788,24 @@ export default function QTestsLibrary() {
                   </div>
                   <h3>{bank.title}</h3>
                   <p>
+                    {bank.lesson_title || "Без урока"}
+                    {bank.has_document && " · Word сохранён"}
+                  </p>
+                  <p>
                     {bank.question_count} вопросов <span>·</span>{" "}
                     {qtestsDate(bank.updated_at || bank.created_at)}
                   </p>
                   {bank.warnings?.length > 0 && (
                     <small>
                       {bank.warnings.length} предупреждений — проверьте банк
+                    </small>
+                  )}
+                  {bank.replacement_status === "importing" && (
+                    <small>Читаем новый Word · прежний банк доступен</small>
+                  )}
+                  {bank.replacement_status === "error" && (
+                    <small>
+                      Новый Word не импортирован · прежний банк сохранён
                     </small>
                   )}
                 </div>

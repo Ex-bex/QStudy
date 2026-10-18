@@ -74,13 +74,13 @@ def login(client, email):
     require("httponly" in cookie and "samesite=strict" in cookie, "Q-ID cookie protections were lost")
 
 
-def document_bank():
+def document_bank(question_prefix="Fixture", answer_prefix="Correct answer"):
     from docx import Document
     document = Document()
     document.add_paragraph("A controlled 300-question import fixture")
     for number in range(1, 301):
-        document.add_paragraph(f"{number}. Fixture question {number}?")
-        document.add_paragraph(f"A) Correct answer {number}")
+        document.add_paragraph(f"{number}. {question_prefix} question {number}?")
+        document.add_paragraph(f"A) {answer_prefix} {number}")
         document.add_paragraph(f"B) Wrong answer B {number}")
         document.add_paragraph(f"C) Wrong answer C {number}")
         document.add_paragraph(f"D) Wrong answer D {number}")
@@ -88,6 +88,29 @@ def document_bank():
     target = io.BytesIO()
     document.save(target)
     return target.getvalue()
+
+
+def document_without_questions():
+    from docx import Document
+    document = Document()
+    document.add_paragraph("This is a real Word file containing prose rather than a question bank.")
+    document.add_paragraph("It deliberately contains no multiple-choice questions or answer key.")
+    target = io.BytesIO()
+    document.save(target)
+    return target.getvalue()
+
+
+def import_job_finished(database, job_id, expected_status):
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        with closing(sqlite3.connect(database)) as db:
+            row = db.execute("SELECT status FROM ai_jobs WHERE id=?", (job_id,)).fetchone()
+        if row and row[0] == expected_status:
+            return
+        require(not row or row[0] not in ("done", "error", "cancelled"),
+                f"Document import ended with {row[0] if row else 'no job'}, expected {expected_status}")
+        time.sleep(0.1)
+    raise StackFailure(f"Document import did not reach {expected_status} before its deadline")
 
 
 def ready_bank(client, bank_id):
@@ -184,18 +207,41 @@ def main():
                 cross_site = client("https://untrusted.example")
                 cross_site.cookies.update(student.cookies)
                 require(cross_site.post("/api/qtests/banks/manual", json={"title": "Forged"}).status_code == 403, "BFF accepted a cross-site mutation")
+                require(cross_site.post("/api/qtests/lessons", json={"title": "Forged lesson"}).status_code == 403,
+                        "BFF accepted a cross-site lesson mutation")
                 require(student.post("/api/qtests/banks", files={"file": ("old.doc", b"legacy", "application/msword")}, data={"answer_mode": "first"}).status_code == 422,
                         "Old Word binary was silently treated as DOCX")
                 require(student.post("/api/qtests/banks", files={"file": ("broken.docx", b"not-docx", "application/octet-stream")}, data={"answer_mode": "first"}).status_code == 422,
                         "Invalid DOCX content accepted")
 
-                stage = "300-question upload persists before a worker starts"
-                uploaded = checked(student.post("/api/qtests/banks", files={"file": ("fixture-300.docx", document_bank(),
+                stage = "private lesson creation and 300-question upload persist before a worker starts"
+                lesson = checked(student.post("/api/qtests/lessons", json={"title": "Computer science", "description": "Saved learning material"}), 201)
+                lesson_id = lesson["id"]
+                require(lesson["bank_count"] == 0 and lesson["question_count"] == 0, "New lesson statistics were not empty")
+                require(any(row["id"] == lesson_id for row in checked(student.get("/api/qtests/lessons"))),
+                        "Created lesson did not appear in the student's lesson list")
+                require(not checked(other.get("/api/qtests/lessons")), "Other student saw a private lesson")
+                source_bytes = document_bank()
+                uploaded = checked(student.post("/api/qtests/banks", files={"file": ("fixture-300.docx", source_bytes,
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
-                    data={"title": "Controlled 300-question bank", "answer_mode": "first"}), 202)
+                    data={"title": "Controlled 300-question bank", "answer_mode": "first", "lesson_id": str(lesson_id)}), 202)
                 bank_id, job_id = uploaded["bank"]["id"], uploaded["job_id"]
                 require(uploaded["bank"]["status"] == "importing" and job_id, "Upload was not queued durably")
+                require(uploaded["bank"]["lesson_id"] == lesson_id and uploaded["bank"]["has_document"],
+                        "Imported Word was not saved with its selected lesson")
                 require(other.get(f"/api/qtests/banks/{bank_id}").status_code == 404, "Other student read the private source bank")
+                source = student.get(f"/api/qtests/banks/{bank_id}/document")
+                require(source.status_code == 200 and source.content == source_bytes,
+                        "Saved Word source could not be downloaded byte for byte")
+                require("attachment" in source.headers.get("content-disposition", "").lower()
+                        and "wordprocessingml.document" in source.headers.get("content-type", ""),
+                        "Word source download did not have safe attachment headers")
+                require(other.get(f"/api/qtests/banks/{bank_id}/document").status_code == 404,
+                        "Other student downloaded the private Word source")
+                require(public.get(f"/api/qtests/banks/{bank_id}/document").status_code == 401,
+                        "Anonymous visitor downloaded the private Word source")
+                require(admin.get(f"/api/qtests/banks/{bank_id}/document").content == source_bytes,
+                        "Administrator could not review the saved Word source")
                 with closing(sqlite3.connect(database)) as db:
                     require(db.execute("SELECT status FROM ai_jobs WHERE id=?", (job_id,)).fetchone() == ("queued",), "Import was not persisted in the job queue")
                     require(db.execute("SELECT length(source_payload) FROM qtests_banks WHERE id=?", (bank_id,)).fetchone()[0] > 1000, "Word source was not preserved for restart")
@@ -206,6 +252,14 @@ def main():
                 require(bank["question_count"] == 300 and len(bank["questions"]) == 300, "Restart import truncated the source bank")
                 require(all(question["correct_index"] == 0 for question in bank["questions"]), "All-first import lost the source answer key")
                 require(bank["warnings"], "Explicit all-first rule was not recorded")
+                require(bank["lesson_id"] == lesson_id and bank["lesson_title"] == "Computer science",
+                        "Lesson association was lost during the worker restart")
+                require(student.get(f"/api/qtests/banks/{bank_id}/document").content == source_bytes,
+                        "Word source was lost or rewritten during the worker restart")
+                saved_lessons = checked(student.get("/api/qtests/lessons"))
+                saved_lesson = next(row for row in saved_lessons if row["id"] == lesson_id)
+                require(saved_lesson["bank_count"] == 1 and saved_lesson["question_count"] == 300,
+                        "Lesson statistics did not include the saved bank")
                 with closing(sqlite3.connect(database)) as db:
                     require(db.execute("SELECT status FROM ai_jobs WHERE id=?", (job_id,)).fetchone() == ("done",), "Recovered import job did not finish")
                 require(checked(other.get("/api/qtests/overview"))["banks"] == [], "Bank library exposed another student")
@@ -251,6 +305,109 @@ def main():
                 require(checked(student.get(f"/api/qtests/banks/{bank_id}"))["question_count"] == 300, "Question bank was lost after restart")
                 require(checked(admin.get("/api/admin/qtests/overview"))["stats"]["questions"] == 300, "QControl did not report actual imported data")
 
+                stage = "rename and reassign a saved bank to another private lesson"
+                updated_lesson = checked(student.patch(f"/api/qtests/lessons/{lesson_id}", json={"title": "Computing foundations"}))
+                require(updated_lesson["title"] == "Computing foundations", "Saved lesson could not be renamed")
+                other_lesson = checked(other.post("/api/qtests/lessons", json={"title": "Other student's private subject"}), 201)
+                require(student.patch(f"/api/qtests/lessons/{other_lesson['id']}", json={"title": "Forbidden"}).status_code == 404,
+                        "Student renamed someone else's private lesson")
+                require(student.patch(f"/api/qtests/banks/{bank_id}", json={"lesson_id": other_lesson["id"]}).status_code == 404,
+                        "Student attached a private bank to someone else's lesson")
+                replacement_lesson = checked(student.post("/api/qtests/lessons", json={"title": "Practice lesson"}), 201)
+                reassigned = checked(student.patch(f"/api/qtests/banks/{bank_id}", json={
+                    "title": "Renamed and reused source bank", "lesson_id": replacement_lesson["id"]}))
+                require(reassigned["title"] == "Renamed and reused source bank"
+                        and reassigned["lesson_id"] == replacement_lesson["id"],
+                        "Saved bank title or lesson could not be changed without another upload")
+
+                stage = "stage Word replacement without overwriting usable questions or the saved source"
+                replacement_bytes = document_bank(question_prefix="Replacement")
+                require(cross_site.post(f"/api/qtests/banks/{bank_id}/document", files={
+                    "file": ("replacement.docx", replacement_bytes,
+                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                    data={"answer_mode": "first"}).status_code == 403,
+                        "BFF accepted a cross-site Word replacement")
+                require(other.post(f"/api/qtests/banks/{bank_id}/document", files={
+                    "file": ("replacement.docx", replacement_bytes,
+                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                    data={"answer_mode": "first"}).status_code == 404,
+                        "Other student could replace a private Word source")
+                stop_child(api); api = None
+                environment["QTESTS_FIXTURE_WORKERS"] = "0"
+                api = start_api()
+                staged = checked(student.post(f"/api/qtests/banks/{bank_id}/document", files={
+                    "file": ("replacement.docx", replacement_bytes,
+                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                    data={"answer_mode": "first"}), 202)
+                require(staged["bank"]["status"] == "ready" and staged["bank"]["replacement_status"] == "importing"
+                        and staged["bank"]["question_count"] == 300, "Staged replacement made the existing bank unusable")
+                require(student.get(f"/api/qtests/banks/{bank_id}/document").content == source_bytes,
+                        "Word replacement overwrote the original source before its import succeeded")
+                require(checked(student.get(f"/api/qtests/attempts/{attempt_id}"))["questions"] == restored["questions"],
+                        "Staged replacement rewrote the in-progress attempt")
+                pending_attempt = checked(student.post(f"/api/qtests/banks/{bank_id}/attempts", json={"count": 40}), 201)
+                require(len(pending_attempt["questions"]) == 40
+                        and all(not question["question"].startswith("Replacement") for question in pending_attempt["questions"]),
+                        "New attempts could not reuse the verified bank during a pending replacement")
+                stop_child(api); api = None
+                environment["QTESTS_FIXTURE_WORKERS"] = "1"
+                api = start_api()
+                import_job_finished(database, staged["job_id"], "done")
+                replaced = checked(student.get(f"/api/qtests/banks/{bank_id}"))
+                require(replaced["status"] == "ready" and replaced["question_count"] == 300
+                        and not replaced["replacement_status"]
+                        and all(question["question"].startswith("Replacement") and question["correct_index"] == 0
+                                for question in replaced["questions"]),
+                        "Replacement did not atomically publish all 300 new questions and their answer key")
+                require(replaced["lesson_id"] == replacement_lesson["id"]
+                        and replaced["title"] == "Renamed and reused source bank",
+                        "Document replacement lost the saved lesson or bank title")
+                require(student.get(f"/api/qtests/banks/{bank_id}/document").content == replacement_bytes,
+                        "Successful replacement did not publish the corresponding Word source")
+                require(checked(student.get(f"/api/qtests/attempts/{attempt_id}"))["questions"] == restored["questions"],
+                        "Successful replacement rewrote the in-progress attempt snapshot")
+
+                stage = "failed replacement and retry preserve the last verified Word and question bank"
+                invalid_replacement = checked(student.post(f"/api/qtests/banks/{bank_id}/document", files={
+                    "file": ("not-a-question-bank.docx", document_without_questions(),
+                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                    data={"answer_mode": "first"}), 202)
+                import_job_finished(database, invalid_replacement["job_id"], "error")
+                failed = checked(student.get(f"/api/qtests/banks/{bank_id}"))
+                require(failed["status"] == "ready" and failed["replacement_status"] == "error"
+                        and failed["replacement_error"] and failed["questions"] == replaced["questions"],
+                        "Failed replacement removed usable questions or hid the import error")
+                require(student.get(f"/api/qtests/banks/{bank_id}/document").content == replacement_bytes,
+                        "Failed replacement overwrote the last verified Word source")
+                stop_child(api); api = None
+                api = start_api()
+                failed_after_restart = checked(student.get(f"/api/qtests/banks/{bank_id}"))
+                require(failed_after_restart["replacement_status"] == "error"
+                        and failed_after_restart["replacement_error"]
+                        and failed_after_restart["questions"] == replaced["questions"]
+                        and failed_after_restart["lesson_id"] == replacement_lesson["id"]
+                        and student.get(f"/api/qtests/banks/{bank_id}/document").content == replacement_bytes,
+                        "Restart lost the failed replacement state or its previous verified source")
+                retried = checked(student.post(f"/api/qtests/banks/{bank_id}/retry"), 202)
+                require(retried["job_id"] != invalid_replacement["job_id"], "Replacement retry did not enqueue a fresh durable job")
+                import_job_finished(database, retried["job_id"], "error")
+                require(checked(student.get(f"/api/qtests/banks/{bank_id}"))["questions"] == replaced["questions"]
+                        and student.get(f"/api/qtests/banks/{bank_id}/document").content == replacement_bytes,
+                        "Retrying a failed replacement altered the verified bank")
+                available = checked(student.post(f"/api/qtests/banks/{bank_id}/attempts", json={"count": 40}), 201)
+                require(len(available["questions"]) == 40
+                        and all(question["question"].startswith("Replacement") for question in available["questions"]),
+                        "Failed replacement prevented using the previous verified questions")
+
+                stage = "lesson removal unassigns the bank and preserves its Word, questions and attempts"
+                checked(student.delete(f"/api/qtests/lessons/{replacement_lesson['id']}"))
+                unassigned = checked(student.get(f"/api/qtests/banks/{bank_id}"))
+                require(unassigned["lesson_id"] is None and unassigned["questions"] == replaced["questions"]
+                        and student.get(f"/api/qtests/banks/{bank_id}/document").content == replacement_bytes,
+                        "Deleting a lesson removed its saved source bank or document")
+                require(checked(student.get(f"/api/qtests/attempts/{attempt_id}"))["questions"] == restored["questions"],
+                        "Deleting a lesson changed a previous attempt snapshot")
+
                 stage = "complete 40 questions and verify the final result"
                 for question in restored["questions"][1:]:
                     checked(student.post(f"/api/qtests/attempts/{attempt_id}/answer", json={"question_id": question["id"], "answer_index": answer_index(question, correct=True)}))
@@ -277,7 +434,7 @@ def main():
                     require(db.execute("SELECT content FROM notes WHERE id=1").fetchone() == ("Existing learning content",), "Existing QStudy note was changed")
                     require(db.execute("SELECT score FROM test_sessions WHERE id=1").fetchone() == (75,), "QTests overwrote academic test history")
                     require(db.execute("PRAGMA integrity_check").fetchone() == ("ok",) and not db.execute("PRAGMA foreign_key_check").fetchall(), "Shared database integrity failed")
-                print("PASS: production HTTP/BFF QTests landing and QControl role gate, shared HttpOnly Q-ID login, CSRF, safe DOCX validation, durable 300-question import across API restart, private banks, random 40 unique questions, independently shuffled correct-answer mapping, hidden keys, source explanations, immutable answers and attempt snapshots, resumed attempts, complete 39/40 grading, administrator settings, source deletion with result preservation, and unchanged earlier QStudy data. No paid AI used.")
+                print("PASS: production HTTP/BFF QTests landing and QControl role gate, shared HttpOnly Q-ID login, CSRF, private lessons and ownership, safe DOCX validation, durable 300-question import across API restart, byte-for-byte private Word downloads, saved lesson statistics and reassignment, atomic Word replacement across restart, failed replacement and retry preserving the usable bank, lesson deletion preserving sources and attempts, random 40 unique questions, independently shuffled correct-answer mapping, hidden keys, source explanations, immutable answers and attempt snapshots, resumed attempts, complete 39/40 grading, administrator settings, source deletion with result preservation, and unchanged earlier QStudy data. No paid AI used.")
                 return 0
             finally:
                 stop_child(frontend)

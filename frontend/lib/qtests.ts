@@ -22,6 +22,22 @@ export type QTestsBank = {
   created_at: string;
   updated_at: string;
   questions?: QTestsBankQuestion[];
+  lesson_id: number | null;
+  lesson_title: string | null;
+  has_document: boolean;
+  replacement_status?: "importing" | "error" | null;
+  replacement_filename?: string | null;
+  replacement_error?: string | null;
+};
+
+export type QTestsLesson = {
+  id: number;
+  title: string;
+  description: string;
+  bank_count: number;
+  question_count: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type QTestsBankQuestion = {
@@ -68,6 +84,7 @@ export type QTestsAttempt = {
 
 export type QTestsOverview = {
   banks: QTestsBank[];
+  lessons: QTestsLesson[];
   attempts: QTestsAttempt[];
   stats: {
     banks: number;

@@ -12,6 +12,9 @@ import {
   type QTestsBranding,
 } from "@/components/qtests-brand";
 import styles from "@/components/control/control.module.css";
+import QTestsLessonsControl, {
+  type ControlLesson,
+} from "@/components/control/qtests-lessons";
 
 type Settings = {
   enabled: boolean;
@@ -28,6 +31,9 @@ type Bank = {
   status: string;
   error: string;
   question_count: number;
+  lesson_title?: string | null;
+  replacement_status?: string | null;
+  replacement_error?: string;
   owner: Owner;
   created_at: string;
 };
@@ -41,6 +47,7 @@ type Attempt = {
   owner: Owner;
 };
 type Overview = {
+  lessons: ControlLesson[];
   banks: Bank[];
   attempts: Attempt[];
   settings: Settings;
@@ -218,7 +225,7 @@ export default function QTestsControl() {
       .includes(search.trim().toLocaleLowerCase("ru"));
   const banks = (data?.banks || []).filter((bank) =>
     matches(
-      `${bank.title} ${bank.filename} ${bank.owner?.name} ${bank.owner?.email}`,
+      `${bank.title} ${bank.filename} ${bank.lesson_title || ""} ${bank.owner?.name} ${bank.owner?.email}`,
     ),
   );
   return (
@@ -285,6 +292,12 @@ export default function QTestsControl() {
         />
         <ErrorNotice message={logo.error} />
       </div>
+      {data && (
+        <QTestsLessonsControl
+          lessons={data.lessons || []}
+          reload={resource.reload}
+        />
+      )}
       <div className={styles.sectionHeading} style={{ marginTop: 30 }}>
         <h2>Все банки вопросов</h2>
         <span>Содержимое доступно владельцу и администратору</span>
@@ -317,6 +330,8 @@ export default function QTestsControl() {
                   <strong>{bank.title}</strong>
                   <br />
                   <small>{bank.filename}</small>
+                  <br />
+                  <small>Урок: {bank.lesson_title || "Без урока"}</small>
                 </td>
                 <td>
                   {bank.owner?.name || "Участник"}
@@ -327,6 +342,14 @@ export default function QTestsControl() {
                 <td>
                   {statuses[bank.status] || bank.status}
                   {bank.error && <p role="alert">{bank.error}</p>}
+                  {bank.replacement_status === "importing" && (
+                    <p>Обрабатывается новый Word. Прежний банк доступен.</p>
+                  )}
+                  {bank.replacement_error && (
+                    <p role="alert">
+                      Новый Word не принят: {bank.replacement_error}
+                    </p>
+                  )}
                 </td>
                 <td>
                   <div className="academic-actions">
