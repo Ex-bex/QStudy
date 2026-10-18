@@ -173,6 +173,31 @@ PAYLOAD = (
     'frontend/components/syllabus-document.tsx',
     'frontend/components/work-card.tsx',
     'frontend/lib/branding.ts',
+    'backend/app/qtests_models.py',
+    'backend/app/routers/admin.py',
+    'backend/app/routers/qtests.py',
+    'backend/app/services/qtests_import.py',
+    'backend/tests/test_qtests.py',
+    'backend/tests/test_qtests_import.py',
+    'docs/qtests.md',
+    'frontend/app/dashboard/jobs/page.tsx',
+    'frontend/app/qcontrol/qtests/page.tsx',
+    'frontend/app/qtests/attempts/[id]/page.tsx',
+    'frontend/app/qtests/banks/[id]/page.tsx',
+    'frontend/app/qtests/layout.tsx',
+    'frontend/app/qtests/library/page.tsx',
+    'frontend/app/qtests/page.tsx',
+    'frontend/components/qtests-brand.tsx',
+    'frontend/components/qtests/attempt.tsx',
+    'frontend/components/qtests/bank.tsx',
+    'frontend/components/qtests/library.tsx',
+    'frontend/components/qtests/qtests.module.css',
+    'frontend/components/qtests/question-editor.tsx',
+    'frontend/components/qtests/shell.tsx',
+    'frontend/components/qtests/workspace-frame.tsx',
+    'frontend/lib/qtests.ts',
+    'frontend/public/brand/qtests-prototype.svg',
+    'scripts/tests/qtests_stack.py',
 )
 STOP_HELPERS = (
     'scripts/launcher/Stop-Previous.ps1', 'scripts/launcher/Native.ps1',
@@ -187,7 +212,7 @@ chcp 65001 >nul
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0.qstudy-fix\\Apply.ps1" -Root "%~dp0." %*
 exit /b %errorlevel%
 '''.replace('\n', '\r\n').encode('ascii')
-README = '''QStudy / QCareer / QBall / Q-ID: единое управление QControl
+README = '''QStudy / QTests / QCareer / QBall / Q-ID: единое управление QControl
 
 1. Распакуйте СОДЕРЖИМОЕ этого ZIP в существующую папку QStudy на Windows
    рядом с Start-QStudy-Internet.cmd. Появятся Apply-QBall-Fix.cmd и .qstudy-fix.
@@ -204,6 +229,10 @@ README = '''QStudy / QCareer / QBall / Q-ID: единое управление Q
 штатно останавливаются на время обновления. Изменяемые исходники сохраняются
 в закрытой папке .local/source-updates. Автоматического отката данных нет.
 Чужие процессы и запуски другого пользователя Windows не завершаются.
+
+QTests доступен по /qtests; Word-банки, случайные 40 вопросов, перемешанные
+варианты и сохраняемый разбор ошибок. Управление — /qcontrol/qtests.
+Импорт, банки и попытки входят в общую базу; docs/qtests.md.
 
 QCareer использует существующий вход и роли QStudy, общую базу и общий запуск.
 При старте добавляются только таблицы career_*. Учебный каталог создаётся
@@ -263,7 +292,7 @@ def build(output: Path, mode: str) -> dict:
         entries['.qstudy-fix/payload/' + path] = contents[path]
     for path in STOP_HELPERS:
         entries['.qstudy-fix/stop/' + path] = (ROOT / path).read_bytes()
-    assert 4 <= len(entries) <= 200
+    assert 4 <= len(entries) <= 320
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, 'x', compression=zipfile.ZIP_DEFLATED) as archive:
         for name, payload in entries.items():

@@ -2,6 +2,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { authReturnPath } from "./auth-return.ts";
 
+test("QTests resumes only a local bank, attempt or library after Q-ID login", () => {
+  for (const value of [
+    "/qtests",
+    "/qtests/library",
+    "/qtests/banks/19",
+    "/qtests/attempts/3",
+    "/qcontrol/qtests",
+  ])
+    assert.equal(authReturnPath(value), value);
+  for (const value of [
+    "/qtests//evil.example",
+    "/qtests/banks/0",
+    "/qtests/attempts/-1",
+    "/qtests/library?next=https://evil.example",
+    "/qtests/banks/2/../../admin",
+    "/qtests%2flibrary",
+  ])
+    assert.equal(authReturnPath(value), "/dashboard");
+});
+
 test("authentication returns players to a shared-site QBall page", () => {
   for (const path of [
     "/qball",

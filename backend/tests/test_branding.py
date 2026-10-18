@@ -84,7 +84,7 @@ class BrandingTests(unittest.TestCase):
 
     def test_every_upload_and_reset_requires_current_active_admin(self):
         paths = ["/api/branding/project-logo", "/api/branding/career-logo", "/api/branding/identity-logo",
-                 "/api/branding/control-logo", f"/api/branding/departments/{self.department_id}/logo"]
+                 "/api/branding/control-logo", "/api/branding/tests-logo", f"/api/branding/departments/{self.department_id}/logo"]
         for user_id, expected in ((None, 401), (self.student_id, 403)):
             if user_id:
                 self.as_user(user_id)
@@ -102,6 +102,28 @@ class BrandingTests(unittest.TestCase):
         with self.sessions() as db:
             self.assertEqual(db.query(BrandingAsset).count(), 0)
             self.assertEqual(db.query(AuditLog).count(), 0)
+
+    def test_qtests_logo_is_independent_and_audited(self):
+        initial = self.client.get("/api/branding/tests").json()
+        self.assertEqual(initial, {"logo_url": "/brand/qtests-prototype.svg", "logo_custom": False})
+        self.as_user(self.admin_id)
+        result = self.upload("/api/branding/tests-logo", content=png(metadata=True, trailing=True))
+        self.assertEqual(result.status_code, 200, result.text)
+        value = result.json()
+        self.assertTrue(value["logo_custom"])
+        self.assertRegex(value["logo_url"], r"^/api/branding/assets/qtests/[a-f0-9]{64}\.png$")
+        self.client.headers.pop("Authorization", None)
+        image = self.client.get(value["logo_url"])
+        self.assertEqual(image.status_code, 200)
+        self.assertEqual(image.headers["Cache-Control"], IMMUTABLE_CACHE)
+        self.assertNotIn(b"PRIVATE", image.content)
+        self.assertEqual(self.client.get("/api/branding").json()["project_logo_url"], DEFAULT_PROJECT_LOGO)
+        self.as_user(self.admin_id)
+        self.assertEqual(self.client.delete("/api/branding/tests-logo").json(), initial)
+        self.assertEqual(self.client.get(value["logo_url"]).status_code, 404)
+        with self.sessions() as db:
+            actions = [row.action for row in db.query(AuditLog).filter(AuditLog.object_id == "qtests").order_by(AuditLog.id)]
+            self.assertEqual(actions, ["branding.tests_logo.upload", "branding.tests_logo.reset"])
 
     def test_upload_reencodes_alpha_without_metadata_names_or_appended_bytes(self):
         self.as_user(self.admin_id)

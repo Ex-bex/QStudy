@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, ArrowUpRight, Fingerprint, KeyRound } from "lucide-react";
 import { EcosystemLogo } from "@/components/ecosystem-branding";
+import { QTestsLogo } from "@/components/qtests-brand";
 import styles from "./identity.module.css";
 
 type IdentityMode = "login" | "register" | "forgot" | "reset";
@@ -19,7 +20,8 @@ const copy: Record<
   register: {
     label: "ЗНАКОМСТВО НАЧИНАЕТСЯ ЗДЕСЬ",
     title: "Создать Q-ID",
-    intro: "Один аккаунт откроет QStudy, QCareer и QBall. Начнём с вас.",
+    intro:
+      "Один аккаунт откроет QStudy, QTests, QCareer и QBall. Начнём с вас.",
   },
   forgot: {
     label: "ВОССТАНОВЛЕНИЕ ДОСТУПА",
@@ -34,6 +36,12 @@ const copy: Record<
 };
 
 const products = [
+  {
+    name: "QTests",
+    description: "Проверить знания",
+    href: "/qtests",
+    logo: "/brand/qtests-prototype.svg",
+  },
   {
     name: "QStudy",
     description: "Учиться",
@@ -128,6 +136,7 @@ export default function IdentityShell({
               </div>
               <div className={styles.cardServices}>
                 <span>QStudy</span>
+                <span>QTests</span>
                 <span>QCareer</span>
                 <span>QBall</span>
               </div>
@@ -144,14 +153,23 @@ export default function IdentityShell({
                 href={product.href}
                 key={product.name}
               >
-                <Image
-                  className={styles.productLogo}
-                  src={product.logo}
-                  alt=""
-                  width={26}
-                  height={26}
-                  unoptimized
-                />
+                {product.name === "QTests" ? (
+                  <QTestsLogo
+                    className={styles.productLogo}
+                    width={26}
+                    height={26}
+                    alt=""
+                  />
+                ) : (
+                  <Image
+                    className={styles.productLogo}
+                    src={product.logo}
+                    alt=""
+                    width={26}
+                    height={26}
+                    unoptimized
+                  />
+                )}
                 <span>
                   <strong>{product.name}</strong>
                   <small>{product.description}</small>

@@ -11,6 +11,7 @@ import {
   Gamepad2,
   GraduationCap,
   Layers3,
+  ListChecks,
   RefreshCw,
   Server,
   ShieldCheck,
@@ -142,6 +143,9 @@ export default function ControlOverview() {
   const stats = useResource<Stats>("/admin/stats");
   const career = useResource<CareerStats>("/admin/career/overview");
   const ball = useResource<BallStats>("/admin/lumaball/stats");
+  const tests = useResource<{
+    stats: { banks: number; questions: number; attempts: number };
+  }>("/admin/qtests/overview");
   const host = useResource<HostStatus>("/admin/system/status");
   const backups = useResource<BackupState>("/admin/backups");
   async function refresh() {
@@ -151,6 +155,7 @@ export default function ControlOverview() {
         stats.reload(),
         career.reload(),
         ball.reload(),
+        tests.reload(),
         host.reload(),
         backups.reload(),
       ]);
@@ -260,6 +265,30 @@ export default function ControlOverview() {
         <span>Содержимое, настройки и участники</span>
       </div>
       <section className={styles.projects} aria-label="Управление проектами">
+        <ProjectCard
+          name="QTests"
+          subtitle="ВОПРОСЫ ИЗ WORD"
+          description="Импорт банков вопросов, случайные тесты, разбор ошибок и история попыток."
+          icon={ListChecks}
+          color={styles.testsIcon}
+          href="/qcontrol/qtests"
+          publicHref="/qtests"
+          error={tests.error}
+          metrics={[
+            {
+              label: "Банков",
+              value: value(tests.data?.stats.banks, tests.loading),
+            },
+            {
+              label: "Вопросов",
+              value: value(tests.data?.stats.questions, tests.loading),
+            },
+            {
+              label: "Попыток",
+              value: value(tests.data?.stats.attempts, tests.loading),
+            },
+          ]}
+        />
         <ProjectCard
           name="QStudy"
           subtitle="ОБУЧЕНИЕ"

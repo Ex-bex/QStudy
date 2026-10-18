@@ -188,7 +188,32 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         'frontend/app/dashboard/subjects/page.tsx',
         'frontend/components/syllabus-document.tsx',
         'frontend/components/work-card.tsx',
-        'frontend/lib/branding.ts'
+        'frontend/lib/branding.ts',
+        'backend/app/qtests_models.py',
+        'backend/app/routers/admin.py',
+        'backend/app/routers/qtests.py',
+        'backend/app/services/qtests_import.py',
+        'backend/tests/test_qtests.py',
+        'backend/tests/test_qtests_import.py',
+        'docs/qtests.md',
+        'frontend/app/dashboard/jobs/page.tsx',
+        'frontend/app/qcontrol/qtests/page.tsx',
+        'frontend/app/qtests/attempts/[id]/page.tsx',
+        'frontend/app/qtests/banks/[id]/page.tsx',
+        'frontend/app/qtests/layout.tsx',
+        'frontend/app/qtests/library/page.tsx',
+        'frontend/app/qtests/page.tsx',
+        'frontend/components/qtests-brand.tsx',
+        'frontend/components/qtests/attempt.tsx',
+        'frontend/components/qtests/bank.tsx',
+        'frontend/components/qtests/library.tsx',
+        'frontend/components/qtests/qtests.module.css',
+        'frontend/components/qtests/question-editor.tsx',
+        'frontend/components/qtests/shell.tsx',
+        'frontend/components/qtests/workspace-frame.tsx',
+        'frontend/lib/qtests.ts',
+        'frontend/public/brand/qtests-prototype.svg',
+        'scripts/tests/qtests_stack.py'
     )
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $files = @(); $size = 0

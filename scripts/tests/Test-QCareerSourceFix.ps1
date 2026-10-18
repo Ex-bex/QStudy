@@ -157,6 +157,33 @@ try {
         'frontend/components/work-card.tsx',
         'frontend/lib/branding.ts'
     )) { Assert-Fix ($paths -ccontains $required) ('QControl ecosystem runtime dependency included: ' + $required) }
+    foreach ($required in @(
+        'backend/app/qtests_models.py',
+        'backend/app/routers/admin.py',
+        'backend/app/routers/qtests.py',
+        'backend/app/services/qtests_import.py',
+        'backend/tests/test_qtests.py',
+        'backend/tests/test_qtests_import.py',
+        'docs/qtests.md',
+        'frontend/app/dashboard/jobs/page.tsx',
+        'frontend/app/qcontrol/qtests/page.tsx',
+        'frontend/app/qtests/attempts/[id]/page.tsx',
+        'frontend/app/qtests/banks/[id]/page.tsx',
+        'frontend/app/qtests/layout.tsx',
+        'frontend/app/qtests/library/page.tsx',
+        'frontend/app/qtests/page.tsx',
+        'frontend/components/qtests-brand.tsx',
+        'frontend/components/qtests/attempt.tsx',
+        'frontend/components/qtests/bank.tsx',
+        'frontend/components/qtests/library.tsx',
+        'frontend/components/qtests/qtests.module.css',
+        'frontend/components/qtests/question-editor.tsx',
+        'frontend/components/qtests/shell.tsx',
+        'frontend/components/qtests/workspace-frame.tsx',
+        'frontend/lib/qtests.ts',
+        'frontend/public/brand/qtests-prototype.svg',
+        'scripts/tests/qtests_stack.py'
+    )) { Assert-Fix ($paths -ccontains $required) ('QTests runtime dependency included: ' + $required) }
     $allowedBlock = [regex]::Match($helperText, '(?ms)^    \$allowed = @\(\r?\n(?<paths>.*?)^    \)')
     Assert-Fix $allowedBlock.Success 'preserving helper declares its exact reviewed path allowlist'
     $allowedPaths = @([regex]::Matches($allowedBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })

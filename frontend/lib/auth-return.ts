@@ -2,12 +2,15 @@
 export function authReturnPath(value: string | null | undefined): string {
   if (typeof value !== "string") return "/dashboard";
   if (value === "/qcareer" || value === "/qcareer/workspace") return value;
+  if (/^\/qtests(?:\/library|\/(?:banks|attempts)\/[1-9]\d*)?$/.test(value))
+    return value;
   if (
     [
       "/qcontrol",
       "/qcontrol/accounts",
       "/qcontrol/qcareer",
       "/qcontrol/qball",
+      "/qcontrol/qtests",
       "/qcontrol/branding",
       "/qcontrol/system",
       "/qcontrol/operations",

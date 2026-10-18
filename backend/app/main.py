@@ -8,12 +8,12 @@ from app.database import Base, engine, SessionLocal
 from app.config import settings
 from app.security import rate_limit, client_key, BodySizeLimitMiddleware
 from app.job_models import AIJob
-from app import operational_models, lumaball_models, lumaball_room_models, career_models
+from app import operational_models, lumaball_models, lumaball_room_models, career_models, qtests_models
 from app.services import background, backups
 from app.services.audit import initialize_operations
 from app.routers import (auth_routes, admin, academic, subjects, notes, files, tasks, chat,
                          exam, cards, search, tests, notifications, lectures, learning, developers, branding, system,
-                         lumaball_identity, lumaball_rooms, career)
+                         lumaball_identity, lumaball_rooms, career, qtests)
 from app.services import lumaball_realtime
 
 
@@ -149,7 +149,7 @@ async def request_security(request: Request, call_next):
 
 
 for router in (lectures, auth_routes, admin, academic, subjects, notes, files, tasks, chat,
-               exam, cards, search, tests, notifications, learning, developers, branding, system, lumaball_identity, lumaball_rooms, career):
+               exam, cards, search, tests, notifications, learning, developers, branding, system, lumaball_identity, lumaball_rooms, career, qtests):
     app.include_router(router.router, prefix="/api")
 app.include_router(lumaball_realtime.router, prefix="/api")
 

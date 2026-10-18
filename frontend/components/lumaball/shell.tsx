@@ -39,6 +39,9 @@ export default function LumaShell({ children }: { children: ReactNode }) {
             <Link href="/qcareer" {...navigation}>
               QCareer
             </Link>
+            <Link href="/qtests" {...navigation}>
+              QTests
+            </Link>
           </nav>
           <div className="lb-header-actions">
             <Link

@@ -41,6 +41,8 @@ const kinds: Record<string, string> = {
   task: "Создание заданий",
   cards: "Подготовка карточек",
   file: "Обработка материала",
+  qtests_import: "QTests: импорт вопросов из Word",
+  qtests_explanations: "QTests: разбор ответа",
 };
 const statuses: Record<string, string> = {
   queued: "В очереди",
@@ -50,6 +52,19 @@ const statuses: Record<string, string> = {
 };
 
 function source(job: AIJob) {
+  if (job.kind === "qtests_import" || job.kind === "qtests_explanations") {
+    const id =
+      job.kind === "qtests_import"
+        ? job.result?.bank_id
+        : job.result?.attempt_id;
+    return {
+      href:
+        typeof id === "number" && Number.isSafeInteger(id) && id > 0
+          ? `/qtests/${job.kind === "qtests_import" ? "banks" : "attempts"}/${id}`
+          : "/qtests/library",
+      label: "Открыть QTests",
+    };
+  }
   if (
     job.kind === "lecture" &&
     typeof job.result?.lecture_id === "number" &&

@@ -10,6 +10,7 @@ import {
 } from "@/lib/branding";
 import { createBrandingStore } from "@/lib/branding-store";
 import { isIdentityPath } from "@/lib/identity-brand";
+import { useQTestsBranding } from "@/components/qtests-brand";
 import {
   EcosystemBrandingProvider,
   useEcosystemBranding,
@@ -44,17 +45,21 @@ export function useBranding() {
 function DynamicProjectIcons() {
   const { branding } = useBranding();
   const { branding: ecosystem } = useEcosystemBranding();
+  const { branding: tests } = useQTestsBranding();
   const pathname = usePathname();
   useEffect(() => {
     if (pathname === "/qcareer" || pathname.startsWith("/qcareer/")) return;
     const identity = isIdentityPath(pathname);
     const control =
       pathname === "/qcontrol" || pathname.startsWith("/qcontrol/");
-    const logo = identity
-      ? ecosystem.identity_logo_url
-      : control
-        ? ecosystem.control_logo_url
-        : branding.project_logo_url;
+    const logo =
+      pathname === "/qtests" || pathname.startsWith("/qtests/")
+        ? tests.logo_url
+        : identity
+          ? ecosystem.identity_logo_url
+          : control
+            ? ecosystem.control_logo_url
+            : branding.project_logo_url;
     for (const rel of ["icon", "apple-touch-icon"]) {
       let links = [
         ...document.head.querySelectorAll<HTMLLinkElement>(
@@ -77,6 +82,7 @@ function DynamicProjectIcons() {
     branding.project_logo_url,
     ecosystem.identity_logo_url,
     ecosystem.control_logo_url,
+    tests.logo_url,
     pathname,
   ]);
   return null;

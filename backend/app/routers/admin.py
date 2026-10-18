@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.database import get_db, Base
 from app.models import User, Subject, StudentGroup, Material, Note, Task, Flashcard, Lecture, ChatSession, ExamSession, TestSession
+from app.qtests_models import QTestsAttempt, QTestsBank
 from app.auth import require_admin, hash_password, validate_password, user_public
 from app.security import safe_upload_path
 from app.operational_models import AuditLog
@@ -165,6 +166,11 @@ def delete_user(user_id: int, db: Session = Depends(get_db), admin=Depends(requi
         raise HTTPException(409, "Нельзя удалить собственный аккаунт")
     _protect_admin(db, user)
     paths = [m.filepath for m in db.query(Material).filter(Material.user_id == user_id)]
+    # QTests records are private, while shared academic content stays intact.
+    for model in (QTestsAttempt, QTestsBank):
+        for row in db.query(model).filter(model.user_id == user_id):
+            db.delete(row)
+    db.flush()
     # ORM cascades remove messages and exam/test questions as well.
     for model in (ChatSession, ExamSession, TestSession, Material, Note, Task, Flashcard, Lecture):
         for row in db.query(model).filter(model.user_id == user_id):

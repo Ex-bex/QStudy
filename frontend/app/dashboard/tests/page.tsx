@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { setActivity } from "@/lib/context";
@@ -21,6 +22,7 @@ import type {
 } from "@/types";
 import {
   ListChecks,
+  ArrowUpRight,
   Loader2,
   MessageSquare,
   ChevronRight,
@@ -546,6 +548,12 @@ export default function TestsPage() {
   return (
     <div className="mx-auto max-w-3xl academic-assessment">
       <h1 className="mb-1 text-2xl font-bold">Тестирование</h1>
+      <p className="mb-5">
+        <Link href="/qtests/library" className="btn btn-secondary">
+          Есть Word с готовыми вопросами? Открыть QTests{" "}
+          <ArrowUpRight size={15} />
+        </Link>
+      </p>
       <p className="mb-8 text-gray-400">
         Выберите программу из силабуса или свои предметы и пройдите тест с
         вариантами ответов.

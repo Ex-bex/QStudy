@@ -61,6 +61,7 @@ export default function CareerShell({ children }: { children: ReactNode }) {
         <div>
           <Link href="/">QStudy</Link>
           <Link href="/qball">QBall</Link>
+          <Link href="/qtests">QTests</Link>
           <Link href="/developers">Разработчики</Link>
         </div>
       </footer>

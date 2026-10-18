@@ -23,7 +23,11 @@ export function safeBrandingAsset(
   value: unknown,
   key: string,
 ): value is string {
-  if (/^(project|qid|qcontrol|department-[1-9][0-9]*)$/.exec(key)?.[0] !== key) return false;
+  if (
+    /^(project|qtests|qid|qcontrol|department-[1-9][0-9]*)$/.exec(key)?.[0] !==
+    key
+  )
+    return false;
   return (
     typeof value === "string" &&
     new RegExp(`^/api/branding/assets/${key}/[a-f0-9]{64}\\.png$`).exec(
