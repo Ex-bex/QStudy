@@ -12,8 +12,8 @@ param([string]$Root = '', [switch]$Library)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$script:QBallFieldHash = '1fce9804485d7f6609d98ec176231d301f25af03af325b227963efedd256a627'
-$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/b8408a71a7a63fc9d86b33f9e64e73f7f815349e/assets/distribution/QStudy-QCareer-Integration.zip'
+$script:QBallFieldHash = '43c5950ae0819e861318038e19ef17e3193c3e6fb8c8ec30261bfa39522740d0'
+$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/750834bacb3fcb3609c524e5666255058f860479/assets/distribution/QStudy-QCareer-Integration.zip'
 
 function Resolve-QBallFieldPath([string]$Base, [string]$Relative = '') {
     $basePath = [IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
@@ -127,7 +127,7 @@ function Invoke-QBallFieldApply([string]$Project) {
 
 if ($Library) { return }
 try {
-    Write-Host 'QTests: исправляем чтение Word со встроенными объектами. Текущие данные, аккаунты и настройки сохраняются.' -ForegroundColor Cyan
+    Write-Host 'QMessage: добавляем личные чаты, стикеры и управление в QControl. Текущие данные, аккаунты и настройки сохраняются.' -ForegroundColor Cyan
     if (-not $Root -and (Test-QBallFieldRoot $env:QBALL_FIELD_FIX_HOME)) { $Root = $env:QBALL_FIELD_FIX_HOME }
     if (-not $Root) {
         Add-Type -AssemblyName System.Windows.Forms
