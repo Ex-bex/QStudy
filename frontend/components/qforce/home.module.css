@@ -461,6 +461,10 @@
   --accent: #55515f;
   background: #f3f3f5;
 }
+.message {
+  --accent: #087e83;
+  background: #ecf8f6;
+}
 .control {
   --accent: #bc434d;
   background: #fcf2f0;

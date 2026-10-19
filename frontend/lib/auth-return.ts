@@ -1,6 +1,8 @@
 // Keep authentication return paths within the shared ecosystem.
 export function authReturnPath(value: string | null | undefined): string {
   if (typeof value !== "string") return "/dashboard";
+  if (/^\/qmessage(?:\/chats(?:\?chat=[1-9]\d{0,14})?)?$/.test(value))
+    return value;
   if (value === "/qcareer" || value === "/qcareer/workspace") return value;
   if (/^\/qtests(?:\/library|\/(?:banks|attempts)\/[1-9]\d*)?$/.test(value))
     return value;
@@ -11,6 +13,7 @@ export function authReturnPath(value: string | null | undefined): string {
       "/qcontrol/qcareer",
       "/qcontrol/qball",
       "/qcontrol/qtests",
+      "/qcontrol/qmessage",
       "/qcontrol/branding",
       "/qcontrol/system",
       "/qcontrol/operations",

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowUpRight, Fingerprint, KeyRound } from "lucide-react";
 import { EcosystemLogo } from "@/components/ecosystem-branding";
 import { QTestsLogo } from "@/components/qtests-brand";
+import { QMessageLogo } from "@/components/qmessage-brand";
 import styles from "./identity.module.css";
 
 type IdentityMode = "login" | "register" | "forgot" | "reset";
@@ -15,13 +16,13 @@ const copy: Record<
   login: {
     label: "РАДЫ ВАС ВИДЕТЬ",
     title: "Войти в Q-ID",
-    intro: "Ваш единый аккаунт для учёбы, новых возможностей и игры.",
+    intro: "Ваш единый аккаунт для учёбы, общения, новых возможностей и игры.",
   },
   register: {
     label: "ЗНАКОМСТВО НАЧИНАЕТСЯ ЗДЕСЬ",
     title: "Создать Q-ID",
     intro:
-      "Один аккаунт откроет QStudy, QTests, QCareer и QBall. Начнём с вас.",
+      "Один аккаунт откроет QStudy, QTests, QCareer, QBall и QMessage. Начнём с вас.",
   },
   forgot: {
     label: "ВОССТАНОВЛЕНИЕ ДОСТУПА",
@@ -36,6 +37,12 @@ const copy: Record<
 };
 
 const products = [
+  {
+    name: "QMessage",
+    description: "Быть на связи",
+    href: "/qmessage",
+    logo: "/brand/qmessage-prototype.svg",
+  },
   {
     name: "QTests",
     description: "Проверить знания",
@@ -139,6 +146,7 @@ export default function IdentityShell({
                 <span>QTests</span>
                 <span>QCareer</span>
                 <span>QBall</span>
+                <span>QMessage</span>
               </div>
             </div>
             <span className={styles.visualCaption}>
@@ -153,7 +161,14 @@ export default function IdentityShell({
                 href={product.href}
                 key={product.name}
               >
-                {product.name === "QTests" ? (
+                {product.name === "QMessage" ? (
+                  <QMessageLogo
+                    className={styles.productLogo}
+                    width={26}
+                    height={26}
+                    alt=""
+                  />
+                ) : product.name === "QTests" ? (
                   <QTestsLogo
                     className={styles.productLogo}
                     width={26}

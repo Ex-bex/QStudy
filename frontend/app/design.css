@@ -13,7 +13,10 @@
 }
 .landing-nav nav {
   display: flex;
-  gap: 30px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px 18px;
+  padding-inline: 18px;
   font-size: 12px;
   color: #66716b;
 }

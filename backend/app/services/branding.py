@@ -134,6 +134,12 @@ def tests_branding(db) -> dict:
             "logo_custom": asset is not None}
 
 
+def message_branding(db) -> dict:
+    asset = db.get(BrandingAsset, "qmessage", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))
+    return {"logo_url": asset_url(asset) if asset else "/brand/qmessage-prototype.svg",
+            "logo_custom": asset is not None}
+
+
 def ecosystem_branding(db) -> dict:
     """Expose public ecosystem logos, never their uploader metadata."""
     identity = db.get(BrandingAsset, "qid", options=(load_only(BrandingAsset.key, BrandingAsset.digest),))

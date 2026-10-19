@@ -7,7 +7,8 @@ export const metadata: Metadata = {
   title: {
     absolute: "QControl — управление экосистемой",
   },
-  description: "Единое управление QStudy, QCareer, QBall и аккаунтами Q-ID.",
+  description:
+    "Единое управление QStudy, QTests, QCareer, QBall, QMessage и аккаунтами Q-ID.",
   robots: { index: false, follow: false },
   icons: { icon: CONTROL_LOGO, apple: CONTROL_LOGO },
 };

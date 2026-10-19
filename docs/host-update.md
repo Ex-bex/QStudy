@@ -2,7 +2,7 @@
 
 Обновляйте ту папку QStudy, из которой друг уже запускает сайт. Текущие аккаунты, база, загруженные документы, SMTP, ключ ИИ, логотипы и настройки адреса остаются на его компьютере.
 
-1. Скачайте свежий [Update-QCareer.cmd](https://github.com/Ex-bex/QStudy/raw/refs/heads/main/assets/distribution/Update-QCareer.cmd). Эта кнопка обновляет общую экосистему QStudy, QTests, QCareer, QBall, Q-ID и QControl.
+1. Скачайте свежий [Update-QCareer.cmd](https://github.com/Ex-bex/QStudy/raw/refs/heads/main/assets/distribution/Update-QCareer.cmd). Эта кнопка обновляет общую экосистему QStudy, QTests, QCareer, QBall, QMessage, Q-ID и QControl.
 2. Сохраните файл в папку действующего проекта, рядом с `Start-QStudy-Internet.cmd`. Если файл открылся текстом, сохраните его с именем **Update-QCareer.cmd**, выбрав тип **Все файлы**. Включите отображение расширений в Проводнике и проверьте, что имя заканчивается на `.cmd`.
 3. Завершите текущие матчи QBall: на время сборки сайт будет остановлен.
 4. Дважды щёлкните `Update-QCareer.cmd` от того же пользователя Windows, который запускал сайт. Если появится выбор папки, укажите папку с рабочим стартером.

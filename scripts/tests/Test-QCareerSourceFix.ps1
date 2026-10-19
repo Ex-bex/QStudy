@@ -210,6 +210,43 @@ try {
     foreach ($required in @(
         'scripts/tests/qforce_branding_dom.mjs'
     )) { Assert-Fix ($paths -ccontains $required) ('QForce and Word upload dependency included: ' + $required) }
+    foreach ($required in @(
+        'backend/app/qmessage_models.py',
+        'backend/app/routers/qmessage.py',
+        'backend/app/services/qmessage.py',
+        'backend/tests/test_qmessage.py',
+        'backend/tests/test_qmessage_branding.py',
+        'docs/qmessage.md',
+        'frontend/app/qcontrol/qmessage/page.tsx',
+        'frontend/app/qmessage/chats/page.tsx',
+        'frontend/app/qmessage/layout.tsx',
+        'frontend/app/qmessage/page.tsx',
+        'frontend/components/control/qmessage-admin.module.css',
+        'frontend/components/control/qmessage-admin.tsx',
+        'frontend/components/qmessage-brand.tsx',
+        'frontend/components/qmessage/context.tsx',
+        'frontend/components/qmessage/landing.tsx',
+        'frontend/components/qmessage/qmessage.module.css',
+        'frontend/components/qmessage/thread.tsx',
+        'frontend/components/qmessage/workspace.tsx',
+        'frontend/lib/api.ts',
+        'frontend/lib/qmessage-branding.test.mjs',
+        'frontend/lib/qmessage-branding.ts',
+        'frontend/lib/qmessage.test.mjs',
+        'frontend/lib/qmessage.ts',
+        'frontend/public/brand/qmessage-prototype.svg',
+        'frontend/public/qmessage-stickers/goal.svg',
+        'frontend/public/qmessage-stickers/heart.svg',
+        'frontend/public/qmessage-stickers/laugh.svg',
+        'frontend/public/qmessage-stickers/party.svg',
+        'frontend/public/qmessage-stickers/spark.svg',
+        'frontend/public/qmessage-stickers/study.svg',
+        'frontend/public/qmessage-stickers/thanks.svg',
+        'frontend/public/qmessage-stickers/wave.svg',
+        'scripts/tests/qmessage_admin_dom.mjs',
+        'scripts/tests/qmessage_dom.mjs',
+        'scripts/tests/qmessage_stack.py'
+    )) { Assert-Fix ($paths -ccontains $required) ('QMessage shared runtime dependency included: ' + $required) }
     $allowedBlock = [regex]::Match($helperText, '(?ms)^    \$allowed = @\(\r?\n(?<paths>.*?)^    \)')
     Assert-Fix $allowedBlock.Success 'preserving helper declares its exact reviewed path allowlist'
     $allowedPaths = @([regex]::Matches($allowedBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })

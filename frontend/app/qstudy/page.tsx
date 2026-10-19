@@ -33,6 +33,7 @@ export default function QStudyHome() {
           <Link href="/qball">QBall</Link>
           <Link href="/qcareer">QCareer</Link>
           <Link href="/qtests">QTests</Link>
+          <Link href="/qmessage">QMessage</Link>
           <Link href="/developers">Разработчики</Link>
         </nav>
         <div className="landing-actions">

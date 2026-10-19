@@ -12,6 +12,10 @@ import { createBrandingStore } from "@/lib/branding-store";
 import { isIdentityPath } from "@/lib/identity-brand";
 import { useQTestsBranding } from "@/components/qtests-brand";
 import {
+  QMessageBrandingProvider,
+  useQMessageBranding,
+} from "@/components/qmessage-brand";
+import {
   EcosystemBrandingProvider,
   useEcosystemBranding,
 } from "@/components/ecosystem-branding";
@@ -46,6 +50,7 @@ function DynamicProjectIcons() {
   const { branding } = useBranding();
   const { branding: ecosystem } = useEcosystemBranding();
   const { branding: tests } = useQTestsBranding();
+  const { branding: message } = useQMessageBranding();
   const pathname = usePathname();
   useEffect(() => {
     if (pathname === "/qcareer" || pathname.startsWith("/qcareer/")) return;
@@ -55,13 +60,15 @@ function DynamicProjectIcons() {
     const logo =
       pathname === "/" || pathname === "/developers"
         ? ecosystem.force_logo_url
-        : pathname === "/qtests" || pathname.startsWith("/qtests/")
-          ? tests.logo_url
-          : identity
-            ? ecosystem.identity_logo_url
-            : control
-              ? ecosystem.control_logo_url
-              : branding.project_logo_url;
+        : pathname === "/qmessage" || pathname.startsWith("/qmessage/")
+          ? message.logo_url
+          : pathname === "/qtests" || pathname.startsWith("/qtests/")
+            ? tests.logo_url
+            : identity
+              ? ecosystem.identity_logo_url
+              : control
+                ? ecosystem.control_logo_url
+                : branding.project_logo_url;
     for (const rel of ["icon", "apple-touch-icon"]) {
       let links = [
         ...document.head.querySelectorAll<HTMLLinkElement>(
@@ -86,6 +93,7 @@ function DynamicProjectIcons() {
     ecosystem.identity_logo_url,
     ecosystem.control_logo_url,
     tests.logo_url,
+    message.logo_url,
     pathname,
   ]);
   return null;
@@ -109,8 +117,10 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   }, []);
   return (
     <EcosystemBrandingProvider>
-      <DynamicProjectIcons />
-      {children}
+      <QMessageBrandingProvider>
+        <DynamicProjectIcons />
+        {children}
+      </QMessageBrandingProvider>
     </EcosystemBrandingProvider>
   );
 }

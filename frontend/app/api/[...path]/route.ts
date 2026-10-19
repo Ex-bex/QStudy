@@ -34,7 +34,7 @@ async function proxy(
     path.length === 4 &&
     path[0] === "branding" &&
     path[1] === "assets" &&
-    /^(project|qforce|qcareer|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]*)$/.exec(
+    /^(project|qforce|qmessage|qcareer|qtests|qid|qcontrol|(?:department|director)-[1-9][0-9]*)$/.exec(
       path[2],
     )?.[0] === path[2] &&
     /^[a-f0-9]{64}\.png$/.exec(path[3])?.[0] === path[3];
@@ -49,6 +49,7 @@ async function proxy(
           [
             "project-logo",
             "force-logo",
+            "message-logo",
             "career-logo",
             "identity-logo",
             "control-logo",
@@ -257,6 +258,8 @@ async function proxy(
       (upstream.status === 401 &&
         !isAuth &&
         !brandingAsset &&
+        // A late long-poll 401 must not erase a newer Q-ID login cookie.
+        endpoint !== "qmessage/events" &&
         (path[0] !== "lumaball" || !!token))
     )
       clearSession(response);

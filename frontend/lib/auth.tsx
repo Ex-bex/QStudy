@@ -73,6 +73,7 @@ export function AuthProvider({
     };
     const expired = () => {
       invalidate();
+      setToken(null);
       setUser(null);
       router.replace(loginPath);
     };

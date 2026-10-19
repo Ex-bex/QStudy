@@ -12,6 +12,7 @@ import {
   GraduationCap,
   Layers3,
   ListChecks,
+  MessagesSquare,
   RefreshCw,
   Server,
   ShieldCheck,
@@ -146,6 +147,9 @@ export default function ControlOverview() {
   const tests = useResource<{
     stats: { banks: number; questions: number; attempts: number };
   }>("/admin/qtests/overview");
+  const message = useResource<{
+    stats: { users: number; messages: number; open_reports: number };
+  }>("/admin/qmessage/overview");
   const host = useResource<HostStatus>("/admin/system/status");
   const backups = useResource<BackupState>("/admin/backups");
   async function refresh() {
@@ -156,6 +160,7 @@ export default function ControlOverview() {
         career.reload(),
         ball.reload(),
         tests.reload(),
+        message.reload(),
         host.reload(),
         backups.reload(),
       ]);
@@ -265,6 +270,30 @@ export default function ControlOverview() {
         <span>Содержимое, настройки и участники</span>
       </div>
       <section className={styles.projects} aria-label="Управление проектами">
+        <ProjectCard
+          name="QMessage"
+          subtitle="ОБЩЕНИЕ"
+          description="Личные сообщения между участниками Q-ID, стикеры, доступ и рассмотрение жалоб."
+          icon={MessagesSquare}
+          color={styles.idIcon}
+          href="/qcontrol/qmessage"
+          publicHref="/qmessage"
+          error={message.error}
+          metrics={[
+            {
+              label: "Участников",
+              value: value(message.data?.stats.users, message.loading),
+            },
+            {
+              label: "Сообщений",
+              value: value(message.data?.stats.messages, message.loading),
+            },
+            {
+              label: "Открытых жалоб",
+              value: value(message.data?.stats.open_reports, message.loading),
+            },
+          ]}
+        />
         <ProjectCard
           name="QTests"
           subtitle="ВОПРОСЫ ИЗ WORD"

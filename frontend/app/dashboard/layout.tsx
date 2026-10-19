@@ -50,6 +50,11 @@ const sections = [
       },
       { href: "/qball", label: "QBall", icon: Gamepad2 },
       {
+        href: "/qmessage/chats",
+        label: "QMessage · переписки",
+        icon: MessageSquare,
+      },
+      {
         href: "/qtests/library",
         label: "QTests · тесты из Word",
         icon: ListChecks,

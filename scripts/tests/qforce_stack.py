@@ -79,7 +79,7 @@ def main():
                 student = stack.enter_context(httpx.Client(base_url=site_url, headers={'Origin': site_url}, trust_env=False, timeout=25))
                 stage = 'public routing'
                 home = public.get('/'); require(home.status_code == 200 and '<title>QForce' in home.text, 'Root did not render QForce metadata')
-                for target in ('/qstudy', '/qtests', '/qcareer', '/qball', '/login', '/qcontrol'):
+                for target in ('/qstudy', '/qtests', '/qcareer', '/qball', '/qmessage', '/login', '/qcontrol'):
                     require(f'href="{target}"' in home.text, 'Missing ecosystem destination: ' + target)
                 study = public.get('/qstudy'); require(study.status_code == 200 and '<title>QStudy' in study.text and 'Меньше хаоса' in study.text, 'QStudy landing was not preserved')
                 require(public.get('/developers').status_code == 200, 'Developer contacts route failed')
@@ -128,7 +128,7 @@ def main():
                 require(student.delete(endpoint).status_code == 403, 'Student reset allowed')
             finally:
                 stop_child(site); stop_child(api)
-        print('PASS: QForce home, six ecosystem links, preserved QStudy landing, independent QForce PNG upload/reset through BFF, shared ecosystem defaults, immutable public assets, restart persistence, CSRF and administrator boundaries, live directory and independent director JPEG-to-PNG upload/reset. Disposable data only.')
+        print('PASS: QForce home, seven ecosystem links, preserved QStudy landing, independent QForce PNG upload/reset through BFF, shared ecosystem defaults, immutable public assets, restart persistence, CSRF and administrator boundaries, live directory and independent director JPEG-to-PNG upload/reset. Disposable data only.')
         return 0
     except (StackFailure, AssertionError) as error:
         print('FAIL [' + stage + ']: ' + str(error)); return 1

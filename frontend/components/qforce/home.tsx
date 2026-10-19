@@ -21,6 +21,7 @@ import {
 import { EcosystemLogo } from "@/components/ecosystem-branding";
 import { ProjectLogo } from "@/components/project-logo";
 import { QTestsLogo } from "@/components/qtests-brand";
+import { QMessageLogo } from "@/components/qmessage-brand";
 import { departmentLogoUrl, safeDirectorPhotoUrl } from "@/lib/branding";
 import type { DeveloperDepartment } from "@/types/developers";
 import styles from "./home.module.css";
@@ -81,6 +82,16 @@ const projects = [
     action: "Перейти к игре",
   },
   {
+    name: "QMessage",
+    href: "/qmessage",
+    category: "ОБЩЕНИЕ",
+    color: "message",
+    title: "Ближе к своим людям.",
+    description:
+      "Найди человека по имени и начни разговор. Личные чаты, реакции, фотографии и стикеры с общим Q-ID.",
+    action: "Открыть QMessage",
+  },
+  {
     name: "Q-ID",
     href: "/login",
     category: "ОБЩИЙ АККАУНТ",
@@ -106,6 +117,7 @@ function ProjectMark({ name }: { name: (typeof projects)[number]["name"] }) {
   const props = { alt: "", width: 48, height: 48 };
   if (name === "QStudy") return <ProjectLogo {...props} />;
   if (name === "QTests") return <QTestsLogo {...props} />;
+  if (name === "QMessage") return <QMessageLogo {...props} />;
   if (name === "Q-ID") return <EcosystemLogo kind="identity" {...props} />;
   if (name === "QControl") return <EcosystemLogo kind="control" {...props} />;
   return (
@@ -463,8 +475,8 @@ export default function QForceHome() {
             </p>
             <p>
               QStudy отвечает за обучение. QTests — за практику. QCareer
-              помогает увидеть, куда ведут знания. А QBall даёт повод собраться
-              вместе.
+              помогает увидеть, куда ведут знания. QBall даёт повод собраться
+              вместе, а QMessage — оставаться на связи.
             </p>
             <a href="#team" className={styles.textButton}>
               Знакомься с подразделениями <ArrowDown size={17} />

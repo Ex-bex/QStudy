@@ -2,6 +2,27 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { authReturnPath } from "./auth-return.ts";
 
+test("QMessage returns to a selected local conversation without accepting other query parameters", () => {
+  for (const value of [
+    "/qmessage",
+    "/qmessage/chats",
+    "/qmessage/chats?chat=12",
+    "/qcontrol/qmessage",
+  ])
+    assert.equal(authReturnPath(value), value);
+  for (const value of [
+    "/qmessage/chats?chat=0",
+    "/qmessage/chats?chat=-1",
+    "/qmessage/chats?chat=1&next=https://evil.example",
+    "/qmessage/chats?chat=1&chat=2",
+    "/qmessage//evil.example",
+    "/qmessage/chats?chat=999999999999999999999",
+    "/qmessage/chats?chat=%31",
+    "/qmessage/../admin",
+  ])
+    assert.equal(authReturnPath(value), "/dashboard");
+});
+
 test("QTests resumes only a local bank, attempt or library after Q-ID login", () => {
   for (const value of [
     "/qtests",

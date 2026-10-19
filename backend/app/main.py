@@ -8,12 +8,12 @@ from app.database import Base, engine, SessionLocal
 from app.config import settings
 from app.security import rate_limit, client_key, BodySizeLimitMiddleware
 from app.job_models import AIJob
-from app import operational_models, lumaball_models, lumaball_room_models, career_models, qtests_models
+from app import operational_models, lumaball_models, lumaball_room_models, career_models, qtests_models, qmessage_models
 from app.services import background, backups
 from app.services.audit import initialize_operations
 from app.routers import (auth_routes, admin, academic, subjects, notes, files, tasks, chat,
                          exam, cards, search, tests, notifications, lectures, learning, developers, branding, system,
-                         lumaball_identity, lumaball_rooms, career, qtests)
+                         lumaball_identity, lumaball_rooms, career, qtests, qmessage)
 from app.services import lumaball_realtime
 
 
@@ -63,6 +63,7 @@ def initialize_database():
     from app.services.reference_timetable import seed_sourced_timetable
     from app.services.developers import seed_developer_departments
     from app.services.career import initialize_career
+    from app.services.qmessage import initialize_qmessage
     with SessionLocal() as db:
         from app.models import Lecture
         # Preserve work managed by the durable queue. Only legacy orphan jobs
@@ -77,6 +78,7 @@ def initialize_database():
         seed_sourced_timetable(db)
         seed_developer_departments(db)
         initialize_career(db)
+        initialize_qmessage(db)
 
 
 @asynccontextmanager
@@ -149,7 +151,7 @@ async def request_security(request: Request, call_next):
 
 
 for router in (lectures, auth_routes, admin, academic, subjects, notes, files, tasks, chat,
-               exam, cards, search, tests, notifications, learning, developers, branding, system, lumaball_identity, lumaball_rooms, career, qtests):
+               exam, cards, search, tests, notifications, learning, developers, branding, system, lumaball_identity, lumaball_rooms, career, qtests, qmessage):
     app.include_router(router.router, prefix="/api")
 app.include_router(lumaball_realtime.router, prefix="/api")
 

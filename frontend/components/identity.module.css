@@ -303,6 +303,9 @@
   gap: 8px;
   padding-top: 8px;
 }
+.products > .product:first-child {
+  grid-column: 1 / -1;
+}
 
 .product {
   display: flex;

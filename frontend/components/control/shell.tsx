@@ -20,6 +20,7 @@ import {
   ListChecks,
   LogOut,
   Menu,
+  MessagesSquare,
   Palette,
   Server,
   ShieldCheck,
@@ -37,6 +38,7 @@ const navigation = [
   { href: "/qcontrol/qcareer", label: "QCareer", icon: Compass },
   { href: "/qcontrol/qball", label: "QBall", icon: Gamepad2 },
   { href: "/qcontrol/qtests", label: "QTests", icon: ListChecks },
+  { href: "/qcontrol/qmessage", label: "QMessage", icon: MessagesSquare },
   { href: "/qcontrol/accounts", label: "Аккаунты Q-ID", icon: Users },
   { href: "/qcontrol/branding", label: "Брендинг и команда", icon: Palette },
   { href: "/qcontrol/system", label: "Сервер и перенос", icon: Server },
@@ -319,7 +321,8 @@ function ControlWorkspace({ children }: { children: ReactNode }) {
         <footer className={styles.footer}>
           <span>QControl · Единый центр управления</span>
           <span>
-            Экосистема QForce · QStudy / QTests / QCareer / QBall / Q-ID
+            Экосистема QForce · QStudy / QTests / QCareer / QBall / QMessage /
+            Q-ID
           </span>
         </footer>
       </div>

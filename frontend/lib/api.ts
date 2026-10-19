@@ -8,6 +8,9 @@ export function setToken(token: string | null) {
     if (!token) {
       sessionStorage.removeItem("qstudy_activity");
       sessionStorage.removeItem("studyhub_activity");
+      for (const key of Object.keys(sessionStorage)) {
+        if (key.startsWith("qmessage_draft_")) sessionStorage.removeItem(key);
+      }
       for (const key of Object.keys(localStorage)) {
         if (key.startsWith("chat_draft_")) localStorage.removeItem(key);
       }

@@ -13,10 +13,10 @@ from app.routers.developers import _department, department_public
 from app.services.audit import record_audit
 from app.services.branding import (IMMUTABLE_CACHE, MAX_LOGO_BYTES, department_asset_key,
                                   director_photo_asset_key, normalize_director_photo, normalize_png,
-                                  project_branding, career_branding, tests_branding, ecosystem_branding, put_asset)
+                                  project_branding, career_branding, tests_branding, message_branding, ecosystem_branding, put_asset)
 
 router = APIRouter(prefix="/branding", tags=["branding"])
-AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|qtests|qid|qcontrol|qforce|(?:department|director)-[1-9][0-9]{0,18})$")]
+AssetKey = Annotated[str, Path(pattern=r"^(?:project|qcareer|qtests|qmessage|qid|qcontrol|qforce|(?:department|director)-[1-9][0-9]{0,18})$")]
 Digest = Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")]
 
 
@@ -45,6 +45,8 @@ def _persist(db, admin, key, logo, *, department_id=None):
                   "branding.control_logo" if key == "qcontrol" else "branding.project_logo")
         if key == "qtests":
             action = "branding.tests_logo"
+        elif key == "qmessage":
+            action = "branding.message_logo"
         record_audit(db, admin, action + (".reset" if logo is None else ".upload"),
                      "developer_department" if department_id is not None else "branding",
                      department_id if department_id is not None else key,
@@ -69,6 +71,24 @@ def ecosystem(db: Session = Depends(get_db)):
 @router.get("/tests")
 def tests_logo(db: Session = Depends(get_db)):
     return tests_branding(db)
+
+
+@router.get("/message")
+def message_logo(db: Session = Depends(get_db)):
+    return message_branding(db)
+
+
+@router.put("/message-logo")
+async def upload_message_logo(file: UploadFile = File(...), db: Session = Depends(get_db), admin=Depends(require_admin)):
+    logo = await _upload(file)
+    _persist(db, admin, "qmessage", logo)
+    return message_branding(db)
+
+
+@router.delete("/message-logo")
+def reset_message_logo(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    _persist(db, admin, "qmessage", None)
+    return message_branding(db)
 
 
 @router.put("/force-logo")
