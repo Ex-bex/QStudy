@@ -6,6 +6,7 @@ import { EcosystemLogo } from "@/components/ecosystem-branding";
 import { QTestsLogo } from "@/components/qtests-brand";
 import { QMessageLogo } from "@/components/qmessage-brand";
 import styles from "./identity.module.css";
+import { AppInstallButton } from "@/components/app-install";
 
 type IdentityMode = "login" | "register" | "forgot" | "reset";
 
@@ -211,6 +212,7 @@ export default function IdentityShell({
       </main>
 
       <footer className={styles.footer}>
+        <AppInstallButton />
         <span>Q-ID · Один аккаунт для всей экосистемы</span>
         <Link href="/developers">
           Связаться с разработчиками

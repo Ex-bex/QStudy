@@ -1,3 +1,4 @@
+import { pwaMetadata } from "@/lib/pwa-metadata";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import QTestsShell from "@/components/qtests/shell";
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
   icons: {
     icon: { url: "/brand/qtests-prototype.svg", type: "image/svg+xml" },
   },
+  ...pwaMetadata("qtests"),
 };
 
 export default function QTestsLayout({ children }: { children: ReactNode }) {

@@ -253,6 +253,28 @@ PAYLOAD = (
     'scripts/tests/qmessage_admin_dom.mjs',
     'scripts/tests/qmessage_dom.mjs',
     'scripts/tests/qmessage_stack.py',
+    'docs/install-apps.md',
+    'frontend/app/apps/[app]/icon/[size]/route.ts',
+    'frontend/app/apps/[app]/manifest.webmanifest/route.ts',
+    'frontend/app/apps/apps.module.css',
+    'frontend/app/apps/page.tsx',
+    'frontend/app/dashboard/overview.module.css',
+    'frontend/app/dashboard/page.tsx',
+    'frontend/app/layout.tsx',
+    'frontend/app/qball/layout.tsx',
+    'frontend/components/app-install.module.css',
+    'frontend/components/app-install.tsx',
+    'frontend/components/dashboard-shell.tsx',
+    'frontend/lib/pwa-icon.tsx',
+    'frontend/lib/pwa-metadata.ts',
+    'frontend/lib/pwa.test.mjs',
+    'frontend/lib/pwa.ts',
+    'frontend/public/offline.html',
+    'frontend/public/sw.js',
+    'scripts/tests/pwa_install_dom.mjs',
+    'scripts/tests/pwa_stack.py',
+    'scripts/tests/pwa_worker.mjs',
+    'scripts/tests/qstudy_overview_dom.mjs',
 )
 STOP_HELPERS = (
     'scripts/launcher/Stop-Previous.ps1', 'scripts/launcher/Native.ps1',
@@ -298,6 +320,14 @@ README = '''QStudy / QTests / QCareer / QBall / QMessage / Q-ID: единое у
 Обычные встроенные объекты Word больше не вызывают ошибку про макросы:
 импорт читает текст и таблицы, пропускает объекты с предупреждением.
 Документы с VBA или явными исполняемыми вложениями по-прежнему запрещены.
+
+Установка приложений: /apps. У каждого проекта отдельный PWA-манифест,
+PNG-значки и начальная страница; кнопка «Установить» есть внутри проектов.
+На телефоне нужен HTTPS с доверенным сертификатом. HTTP по публичному IP
+продолжает работать как сайт, но сам по себе не разрешает установку PWA.
+Обзор QStudy упрощён: расписание, основные действия и последние заметки.
+Next.js обновлён до исправленной версии 16.4.3. Данные хоста сохраняются.
+Подробности: docs/install-apps.md.
 
 QMessage добавлен по /qmessage; личные переписки — /qmessage/chats.
 Общий вход Q-ID, база и прежние режимы запуска. Поиск людей по имени,
@@ -354,7 +384,7 @@ QBall, сервером, резервными копиями и журналом
 
 
 def build(output: Path, mode: str) -> dict:
-    assert 1 <= len(PAYLOAD) <= 256 and len(PAYLOAD) == len(set(PAYLOAD))
+    assert 1 <= len(PAYLOAD) <= 300 and len(PAYLOAD) == len(set(PAYLOAD))
     contents = {path: (ROOT / path).read_bytes() for path in PAYLOAD}
     assert all(len(value) <= 4 * 1024 * 1024 for value in contents.values())
     assert sum(map(len, contents.values())) <= 32 * 1024 * 1024

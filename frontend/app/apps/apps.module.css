@@ -1,0 +1,166 @@
+.page {
+  min-height: 100dvh;
+  background: #f6f5f1;
+  color: #202a36;
+}
+.header {
+  max-width: 1100px;
+  margin: auto;
+  padding: 27px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.header a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+.header span {
+  color: #6c7581;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+.main {
+  max-width: 1100px;
+  margin: auto;
+  padding: 30px 28px 70px;
+}
+.intro {
+  max-width: 670px;
+  margin-bottom: 35px;
+}
+.intro > svg {
+  color: #627f67;
+}
+.intro h1 {
+  margin: 18px 0;
+  font-size: clamp(30px, 5vw, 48px);
+  line-height: 1.12;
+  letter-spacing: -0.045em;
+  font-weight: 650;
+}
+.intro > p {
+  max-width: 500px;
+  color: #64707a;
+  line-height: 1.75;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+}
+.card {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid #e2e4df;
+  border-radius: 20px;
+  background: #fff;
+  transition: border-color 0.15s;
+}
+.card:hover {
+  border-color: #94a795;
+}
+.card:focus-visible {
+  outline: 3px solid #627f67;
+  outline-offset: 3px;
+}
+.card > div {
+  flex: 1;
+}
+.card > svg {
+  flex-shrink: 0;
+  margin-top: 8px;
+  color: #7c8690;
+}
+.card h2 {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 2px 0 6px;
+}
+.card p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #6a7580;
+}
+.card small {
+  display: block;
+  margin-top: 8px;
+  color: #a33844;
+  font-size: 11px;
+}
+.mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 15px;
+}
+.instructions {
+  margin-top: 42px;
+  padding-top: 30px;
+  border-top: 1px solid #dedfd9;
+}
+.instructions > h2 {
+  font-size: 24px;
+  font-weight: 650;
+  margin-bottom: 20px;
+}
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 25px;
+  margin-bottom: 27px;
+}
+.steps h3 {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.steps p,
+.detail,
+.note p {
+  color: #646e78;
+  font-size: 13px;
+  line-height: 1.85;
+}
+.note {
+  padding: 20px;
+  background: #eaf0e7;
+  border-radius: 16px;
+}
+.note strong {
+  display: block;
+  margin-bottom: 5px;
+}
+.detail {
+  margin: 16px 0;
+  max-width: 850px;
+}
+@media (max-width: 640px) {
+  .header,
+  .main {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .header span {
+    max-width: 120px;
+    text-align: right;
+    line-height: 1.7;
+  }
+  .grid,
+  .steps {
+    grid-template-columns: 1fr;
+  }
+  .card {
+    padding: 18px;
+  }
+  .intro {
+    margin-bottom: 25px;
+  }
+}

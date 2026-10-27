@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import CareerBrand from "./brand";
 import { useCareer } from "./context";
 import styles from "./career.module.css";
+import { AppInstallButton } from "@/components/app-install";
 
 export default function CareerShell({ children }: { children: ReactNode }) {
   const { config, user, error, refresh } = useCareer();
@@ -19,6 +20,7 @@ export default function CareerShell({ children }: { children: ReactNode }) {
       <header className={styles.header}>
         <CareerBrand />
         <nav aria-label="Навигация QCareer" className={styles.headerNav}>
+          <AppInstallButton compact />
           <Link href="/dashboard" className={styles.backLink}>
             <ArrowLeft size={15} /> QStudy
           </Link>

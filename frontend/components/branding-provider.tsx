@@ -69,7 +69,8 @@ function DynamicProjectIcons() {
               : control
                 ? ecosystem.control_logo_url
                 : branding.project_logo_url;
-    for (const rel of ["icon", "apple-touch-icon"]) {
+    // Installed-app icons are padded PNGs managed by AppInstallProvider.
+    for (const rel of ["icon"]) {
       let links = [
         ...document.head.querySelectorAll<HTMLLinkElement>(
           `link[rel="${rel}"]`,

@@ -18,6 +18,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { QMessageLogo } from "@/components/qmessage-brand";
+import { AppInstallButton } from "@/components/app-install";
 import {
   conversationId,
   messageInitials,
@@ -260,6 +261,7 @@ function Messenger() {
     >
       <aside className={styles.sidebar} aria-label="Диалоги и поиск людей">
         <div className={styles.sidebarTop}>
+          <AppInstallButton compact />
           <Link href="/qmessage" className={styles.brand}>
             <QMessageLogo alt="" width={37} height={37} />
             <span>

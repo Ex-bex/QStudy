@@ -35,7 +35,7 @@ try {
     $payloadBlock = [regex]::Match($builder, '(?ms)^PAYLOAD = \(\r?\n(?<paths>.*?)^\)')
     Assert-Fix $payloadBlock.Success 'source updater builder declares an explicit payload'
     $paths = @([regex]::Matches($payloadBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
-    Assert-Fix ($paths.Count -le 256 -and @($paths | Select-Object -Unique).Count -eq $paths.Count) 'reviewed source count fits the preserving helper and has no duplicate paths'
+    Assert-Fix ($paths.Count -le 300 -and @($paths | Select-Object -Unique).Count -eq $paths.Count) 'reviewed source count fits the preserving helper and has no duplicate paths'
     $helperBytes = [IO.File]::ReadAllBytes((Join-Path $workspace 'scripts/maintenance/Apply-QCareerFix.ps1'))
     Assert-Fix ($helperBytes.Length -gt 3 -and $helperBytes[0] -eq 239 -and $helperBytes[1] -eq 187 -and $helperBytes[2] -eq 191) 'Windows PowerShell helper keeps a UTF-8 BOM for Russian messages'
     $helperText = [Text.Encoding]::UTF8.GetString($helperBytes)
@@ -247,6 +247,30 @@ try {
         'scripts/tests/qmessage_dom.mjs',
         'scripts/tests/qmessage_stack.py'
     )) { Assert-Fix ($paths -ccontains $required) ('QMessage shared runtime dependency included: ' + $required) }
+    foreach ($required in @(
+        'docs/install-apps.md',
+        'frontend/app/apps/[app]/icon/[size]/route.ts',
+        'frontend/app/apps/[app]/manifest.webmanifest/route.ts',
+        'frontend/app/apps/apps.module.css',
+        'frontend/app/apps/page.tsx',
+        'frontend/app/dashboard/overview.module.css',
+        'frontend/app/dashboard/page.tsx',
+        'frontend/app/layout.tsx',
+        'frontend/app/qball/layout.tsx',
+        'frontend/components/app-install.module.css',
+        'frontend/components/app-install.tsx',
+        'frontend/components/dashboard-shell.tsx',
+        'frontend/lib/pwa-icon.tsx',
+        'frontend/lib/pwa-metadata.ts',
+        'frontend/lib/pwa.test.mjs',
+        'frontend/lib/pwa.ts',
+        'frontend/public/offline.html',
+        'frontend/public/sw.js',
+        'scripts/tests/pwa_install_dom.mjs',
+        'scripts/tests/pwa_stack.py',
+        'scripts/tests/pwa_worker.mjs',
+        'scripts/tests/qstudy_overview_dom.mjs'
+    )) { Assert-Fix ($paths -ccontains $required) ('Installable app runtime dependency included: ' + $required) }
     $allowedBlock = [regex]::Match($helperText, '(?ms)^    \$allowed = @\(\r?\n(?<paths>.*?)^    \)')
     Assert-Fix $allowedBlock.Success 'preserving helper declares its exact reviewed path allowlist'
     $allowedPaths = @([regex]::Matches($allowedBlock.Groups['paths'].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })

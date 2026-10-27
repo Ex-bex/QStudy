@@ -30,6 +30,7 @@ import {
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { api, setToken } from "@/lib/api";
 import { EcosystemLogo } from "@/components/ecosystem-branding";
+import { AppInstallButton } from "@/components/app-install";
 import styles from "./control.module.css";
 
 const navigation = [
@@ -291,6 +292,7 @@ function ControlWorkspace({ children }: { children: ReactNode }) {
             <strong>{current.label}</strong>
           </div>
           <div className={styles.userArea}>
+            <AppInstallButton compact />
             <span className={styles.adminBadge}>
               <ShieldCheck size={13} /> Администратор
             </span>

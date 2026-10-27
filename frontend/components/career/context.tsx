@@ -81,7 +81,7 @@ export function CareerProvider({ children }: { children: ReactNode }) {
     const url = config.logo_url || "/brand/qforcelogo_qcareer.png";
     const icons = Array.from(
       document.querySelectorAll<HTMLLinkElement>(
-        'link[rel="icon"], link[rel="apple-touch-icon"]',
+        'link[rel="icon"]',
       ),
     );
     const previous = icons.map((icon) => ({

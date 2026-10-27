@@ -1,3 +1,4 @@
+import { pwaMetadata } from "@/lib/pwa-metadata";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { CareerProvider } from "@/components/career/context";
@@ -11,6 +12,7 @@ export const metadata: Metadata = {
     icon: { url: "/brand/qforcelogo_qcareer.png", type: "image/png" },
     apple: { url: "/brand/qforcelogo_qcareer.png", type: "image/png" },
   },
+  ...pwaMetadata("qcareer"),
 };
 
 export default function CareerLayout({ children }: { children: ReactNode }) {

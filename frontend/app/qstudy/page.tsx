@@ -13,8 +13,11 @@ import {
 } from "lucide-react";
 import Brand, { BrandMark } from "@/components/brand";
 import LearningScene from "@/components/learning-scene";
+import { AppInstallButton } from "@/components/app-install";
+import { pwaMetadata } from "@/lib/pwa-metadata";
 
 export const metadata: Metadata = {
+  ...pwaMetadata("qstudy"),
   title: { absolute: "QStudy — пространство для обучения" },
   description:
     "Группы, расписание, силабусы, модули и личные инструменты обучения QStudy в экосистеме QForce.",
@@ -37,6 +40,7 @@ export default function QStudyHome() {
           <Link href="/developers">Разработчики</Link>
         </nav>
         <div className="landing-actions">
+          <AppInstallButton compact />
           <Link href="/login" className="login-link">
             Войти
           </Link>

@@ -22,6 +22,7 @@ import { EcosystemLogo } from "@/components/ecosystem-branding";
 import { ProjectLogo } from "@/components/project-logo";
 import { QTestsLogo } from "@/components/qtests-brand";
 import { QMessageLogo } from "@/components/qmessage-brand";
+import { AppInstallButton } from "@/components/app-install";
 import { departmentLogoUrl, safeDirectorPhotoUrl } from "@/lib/branding";
 import type { DeveloperDepartment } from "@/types/developers";
 import styles from "./home.module.css";
@@ -332,6 +333,7 @@ export default function QForceHome() {
           <a href="#projects">Проекты</a>
           <a href="#team">Команда</a>
           <a href="#about">О QForce</a>
+          <AppInstallButton compact />
         </nav>
         <Link href="/login" className={styles.signIn}>
           <Fingerprint size={17} /> Войти с Q-ID <ArrowUpRight size={16} />

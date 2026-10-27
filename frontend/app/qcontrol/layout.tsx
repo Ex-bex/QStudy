@@ -1,3 +1,4 @@
+import { pwaMetadata } from "@/lib/pwa-metadata";
 import type { Metadata } from "next";
 import ControlShell from "@/components/control/shell";
 import { requireControlAdmin } from "@/lib/control-session";
@@ -11,6 +12,7 @@ export const metadata: Metadata = {
     "Единое управление QStudy, QTests, QCareer, QBall, QMessage и аккаунтами Q-ID.",
   robots: { index: false, follow: false },
   icons: { icon: CONTROL_LOGO, apple: CONTROL_LOGO },
+  ...pwaMetadata("qcontrol"),
 };
 
 export default async function ControlLayout({

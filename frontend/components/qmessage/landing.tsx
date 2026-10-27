@@ -17,6 +17,7 @@ import {
 import { QMessageLogo } from "@/components/qmessage-brand";
 import { useQMessage } from "./context";
 import styles from "./qmessage.module.css";
+import { AppInstallButton } from "@/components/app-install";
 
 export default function QMessageLanding() {
   const { config } = useQMessage();
@@ -34,6 +35,7 @@ export default function QMessageLanding() {
           </span>
         </Link>
         <nav aria-label="Навигация QMessage">
+          <AppInstallButton compact />
           <Link href="/">
             <ArrowLeft size={15} /> QForce
           </Link>

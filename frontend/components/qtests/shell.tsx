@@ -15,6 +15,7 @@ import type { User } from "@/lib/auth";
 import type { QTestsConfig } from "@/lib/qtests";
 import { QTestsLogo } from "@/components/qtests-brand";
 import styles from "./qtests.module.css";
+import { AppInstallButton } from "@/components/app-install";
 
 const ConfigContext = createContext<QTestsConfig | null>(null);
 export function useQTestsConfig() {
@@ -64,6 +65,7 @@ export default function QTestsShell({ children }: { children: ReactNode }) {
             <strong>{config?.title || "QTests"}</strong>
           </Link>
           <nav aria-label="Навигация QTests" className={styles.headerNav}>
+            <AppInstallButton compact />
             <Link href="/dashboard" className={styles.ecosystem}>
               <ArrowLeft size={15} /> QStudy
             </Link>

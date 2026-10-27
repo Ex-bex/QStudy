@@ -1,3 +1,4 @@
+import { pwaMetadata } from "@/lib/pwa-metadata";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { QBallProvider } from "@/components/lumaball/context";
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
     icon: "/branding/qball-logo.png",
     apple: "/branding/qball-logo.png",
   },
+  ...pwaMetadata("qball"),
 };
 
 export default function QBallLayout({ children }: { children: ReactNode }) {

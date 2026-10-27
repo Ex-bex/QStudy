@@ -268,7 +268,29 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         'frontend/public/qmessage-stickers/wave.svg',
         'scripts/tests/qmessage_admin_dom.mjs',
         'scripts/tests/qmessage_dom.mjs',
-        'scripts/tests/qmessage_stack.py'
+        'scripts/tests/qmessage_stack.py',
+        'docs/install-apps.md',
+        'frontend/app/apps/[app]/icon/[size]/route.ts',
+        'frontend/app/apps/[app]/manifest.webmanifest/route.ts',
+        'frontend/app/apps/apps.module.css',
+        'frontend/app/apps/page.tsx',
+        'frontend/app/dashboard/overview.module.css',
+        'frontend/app/dashboard/page.tsx',
+        'frontend/app/layout.tsx',
+        'frontend/app/qball/layout.tsx',
+        'frontend/components/app-install.module.css',
+        'frontend/components/app-install.tsx',
+        'frontend/components/dashboard-shell.tsx',
+        'frontend/lib/pwa-icon.tsx',
+        'frontend/lib/pwa-metadata.ts',
+        'frontend/lib/pwa.test.mjs',
+        'frontend/lib/pwa.ts',
+        'frontend/public/offline.html',
+        'frontend/public/sw.js',
+        'scripts/tests/pwa_install_dom.mjs',
+        'scripts/tests/pwa_stack.py',
+        'scripts/tests/pwa_worker.mjs',
+        'scripts/tests/qstudy_overview_dom.mjs'
     )
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $files = @(); $size = 0
@@ -285,7 +307,7 @@ function Get-QCareerFixFiles([string]$Root, [string]$Package) {
         if ((Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath $target -PathType Leaf)) { throw 'На месте исходника находится каталог.' }
         $files += [pscustomobject]@{ path = $relative; source = $source; target = $target; sha256 = $entry.sha256 }
     }
-    if ($files.Count -lt 1 -or $files.Count -gt 256) { throw 'Пакет должен содержать от 1 до 256 исходников.' }
+    if ($files.Count -lt 1 -or $files.Count -gt 300) { throw 'Пакет должен содержать от 1 до 300 исходников.' }
     return [pscustomobject]@{ manifest = $manifest; files = $files }
 }
 

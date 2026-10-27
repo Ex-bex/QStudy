@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowUpRight, ShieldCheck, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { LumaBrand } from "./brand";
 import { useQBall } from "./context";
+import { AppInstallButton } from "@/components/app-install";
 
 export default function LumaShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -44,6 +45,7 @@ export default function LumaShell({ children }: { children: ReactNode }) {
             </Link>
           </nav>
           <div className="lb-header-actions">
+            {!room && <AppInstallButton compact />}
             <Link
               href={identity?.kind === "user" ? "/dashboard" : "/qstudy"}
               {...navigation}
