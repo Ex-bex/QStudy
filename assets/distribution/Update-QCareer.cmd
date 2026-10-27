@@ -12,8 +12,8 @@ param([string]$Root = '', [switch]$Library)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$script:QBallFieldHash = '43c5950ae0819e861318038e19ef17e3193c3e6fb8c8ec30261bfa39522740d0'
-$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/750834bacb3fcb3609c524e5666255058f860479/assets/distribution/QStudy-QCareer-Integration.zip'
+$script:QBallFieldHash = '0167c906852bafb06fc5e071b8c73949b28a05571208318901f38dc960778806'
+$script:QBallFieldUrl = 'https://github.com/Ex-bex/QStudy/raw/4c312f52841809dcf06d9057f2658b7c0038dca1/assets/distribution/QStudy-QCareer-Integration.zip'
 
 function Resolve-QBallFieldPath([string]$Base, [string]$Relative = '') {
     $basePath = [IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
@@ -127,7 +127,7 @@ function Invoke-QBallFieldApply([string]$Project) {
 
 if ($Library) { return }
 try {
-    Write-Host 'QMessage: добавляем личные чаты, стикеры и управление в QControl. Текущие данные, аккаунты и настройки сохраняются.' -ForegroundColor Cyan
+    Write-Host 'QForce: добавляем установку приложений и упрощаем Обзор QStudy. Текущие данные, аккаунты и настройки сохраняются.' -ForegroundColor Cyan
     if (-not $Root -and (Test-QBallFieldRoot $env:QBALL_FIELD_FIX_HOME)) { $Root = $env:QBALL_FIELD_FIX_HOME }
     if (-not $Root) {
         Add-Type -AssemblyName System.Windows.Forms
